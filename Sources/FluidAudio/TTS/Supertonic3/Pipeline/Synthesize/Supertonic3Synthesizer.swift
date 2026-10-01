@@ -73,61 +73,88 @@ struct Supertonic3Synthesizer {
 
     // MARK: - Single-chunk inference (batch size 1)
 
+    /// Pool A results. A struct rather than a tuple: Swift 6.0's region-based
+    /// isolation checker rejects destructuring a tuple of `MLMultiArray`s
+    /// returned from an `autoreleasepool` closure.
+    private struct EncodedText {
+        let durations: [Float]
+        let textMask: MLMultiArray
+        let styleTTL: MLMultiArray
+        let textEmb: MLMultiArray
+    }
+
     private func infer(
         text: String, language: String,
         style: Supertonic3VoiceStyle,
         totalSteps: Int, speed: Float
     ) async throws -> (samples: [Float], duration: Float) {
-        let (idsBatch, maskBatch) = try processor.encode(
-            texts: [text], languages: [language])
-        guard let ids = idsBatch.first, let mask = maskBatch.first else {
-            throw Supertonic3Error.emptyText
+        // Core ML hands back autoreleased, IOSurface-backed outputs. When chunks are synthesized
+        // back to back, the calling thread may not go idle and drain them, so memory grows by
+        // roughly one chunk of audio per call. Each synchronous Core ML section below therefore
+        // runs inside its own autoreleasepool; the awaits stay outside, hoisted where possible.
+        let durationModel = try await store.durationPredictor()
+        let textEncoderModel = try await store.textEncoder()
+        let vocoderModel = try await store.vocoder()
+        let cfg = await store.config
+
+        // Pool A: text encoding, duration predictor, text encoder.
+        let encoded = try autoreleasepool { () throws -> EncodedText in
+            let (idsBatch, maskBatch) = try processor.encode(
+                texts: [text], languages: [language])
+            guard let ids = idsBatch.first, let mask = maskBatch.first else {
+                throw Supertonic3Error.emptyText
+            }
+            let textLen = ids.count
+
+            let ids32 = ids.map { Int32(clamping: $0) }
+            let textIds = try makeInt32(values: ids32, shape: [1, textLen])
+
+            let maskFlat = mask[0]
+            let textMask = try makeFloat(values: maskFlat, shape: [1, 1, textLen])
+
+            let styleTTL = try makeFloat(values: style.ttlValues, shape: [1] + Array(style.ttlDims.dropFirst()))
+            let styleDP = try makeFloat(values: style.dpValues, shape: [1] + Array(style.dpDims.dropFirst()))
+
+            // --- Stage 1: duration_predictor --- //
+            let dpOut = try predict(
+                stage: "duration_predictor",
+                model: durationModel,
+                inputs: [
+                    "text_ids": MLFeatureValue(multiArray: textIds),
+                    "text_mask": MLFeatureValue(multiArray: textMask),
+                    "style_dp": MLFeatureValue(multiArray: styleDP),
+                ])
+            guard let durationArray = dpOut.featureValue(for: "duration")?.multiArrayValue else {
+                throw Supertonic3Error.inferenceFailed(
+                    stage: "duration_predictor", underlying: "missing 'duration' output")
+            }
+            var durations = Supertonic3MultiArray.extractFloats(durationArray)
+            for i in durations.indices {
+                durations[i] = max(0.05, durations[i] / max(speed, 0.05))
+            }
+
+            // --- Stage 2: text_encoder --- //
+            let textEncOut = try predict(
+                stage: "text_encoder",
+                model: textEncoderModel,
+                inputs: [
+                    "text_ids": MLFeatureValue(multiArray: textIds),
+                    "text_mask": MLFeatureValue(multiArray: textMask),
+                    "style_ttl": MLFeatureValue(multiArray: styleTTL),
+                ])
+            guard let textEmbValue = textEncOut.featureValue(for: "text_emb")?.multiArrayValue else {
+                throw Supertonic3Error.inferenceFailed(
+                    stage: "text_encoder", underlying: "missing 'text_emb' output")
+            }
+            return EncodedText(
+                durations: durations, textMask: textMask, styleTTL: styleTTL, textEmb: textEmbValue)
         }
-        let textLen = ids.count
-
-        let ids32 = ids.map { Int32(clamping: $0) }
-        let textIds = try makeInt32(values: ids32, shape: [1, textLen])
-
-        let maskFlat = mask[0]
-        let textMask = try makeFloat(values: maskFlat, shape: [1, 1, textLen])
-
-        let styleTTL = try makeFloat(values: style.ttlValues, shape: [1] + Array(style.ttlDims.dropFirst()))
-        let styleDP = try makeFloat(values: style.dpValues, shape: [1] + Array(style.dpDims.dropFirst()))
-
-        // --- Stage 1: duration_predictor --- //
-        let dpOut = try predict(
-            stage: "duration_predictor",
-            model: await store.durationPredictor(),
-            inputs: [
-                "text_ids": MLFeatureValue(multiArray: textIds),
-                "text_mask": MLFeatureValue(multiArray: textMask),
-                "style_dp": MLFeatureValue(multiArray: styleDP),
-            ])
-        guard let durationArray = dpOut.featureValue(for: "duration")?.multiArrayValue else {
-            throw Supertonic3Error.inferenceFailed(
-                stage: "duration_predictor", underlying: "missing 'duration' output")
-        }
-        var durations = Supertonic3MultiArray.extractFloats(durationArray)
-        for i in durations.indices {
-            durations[i] = max(0.05, durations[i] / max(speed, 0.05))
-        }
-
-        // --- Stage 2: text_encoder --- //
-        let textEncOut = try predict(
-            stage: "text_encoder",
-            model: await store.textEncoder(),
-            inputs: [
-                "text_ids": MLFeatureValue(multiArray: textIds),
-                "text_mask": MLFeatureValue(multiArray: textMask),
-                "style_ttl": MLFeatureValue(multiArray: styleTTL),
-            ])
-        guard let textEmbValue = textEncOut.featureValue(for: "text_emb")?.multiArrayValue else {
-            throw Supertonic3Error.inferenceFailed(
-                stage: "text_encoder", underlying: "missing 'text_emb' output")
-        }
+        let durations = encoded.durations
+        let textMask = encoded.textMask
+        let styleTTL = encoded.styleTTL
+        let textEmbValue = encoded.textEmb
 
         // --- Stage 3: noisy latent + denoising loop --- //
-        let cfg = await store.config
         let (initialLatent, latentMaskFlat, latentDims) =
             Supertonic3LatentSampler.sampleNoisyLatent(
                 durations: durations,
@@ -148,67 +175,72 @@ struct Supertonic3Synthesizer {
         let veLatentShape = [latentDims.bsz, channels, padLen]
         let veMaskShape = [latentDims.bsz, 1, padLen]
 
-        let noisyFlat =
-            padLen == trueLen
-            ? initialLatent
-            : Self.padRows(initialLatent, channels: channels, fromLen: trueLen, toLen: padLen)
-        let veMaskFlat =
-            padLen == trueLen
-            ? latentMaskFlat
-            : Self.padTail(latentMaskFlat, toLen: padLen)
+        // Pool B: denoising loop, padding/trimming, vocoder, sample extraction.
+        let wavSamples: [Float] = try autoreleasepool {
+            let noisyFlat =
+                padLen == trueLen
+                ? initialLatent
+                : Self.padRows(initialLatent, channels: channels, fromLen: trueLen, toLen: padLen)
+            let veMaskFlat =
+                padLen == trueLen
+                ? latentMaskFlat
+                : Self.padTail(latentMaskFlat, toLen: padLen)
 
-        var noisyLatent = try makeFloat(values: noisyFlat, shape: veLatentShape)
-        let latentMask = try makeFloat(values: veMaskFlat, shape: veMaskShape)
-
-        for step in 0..<totalSteps {
-            let currentStep = try makeFloat(values: [Float(step)], shape: [1])
+            var noisyLatent = try makeFloat(values: noisyFlat, shape: veLatentShape)
+            let latentMask = try makeFloat(values: veMaskFlat, shape: veMaskShape)
             let totalStep = try makeFloat(values: [Float(totalSteps)], shape: [1])
 
-            let denoisedOut = try predict(
-                stage: "vector_estimator",
-                model: vectorEstimator,
-                inputs: [
-                    "noisy_latent": MLFeatureValue(multiArray: noisyLatent),
-                    "text_emb": MLFeatureValue(multiArray: textEmbValue),
-                    "style_ttl": MLFeatureValue(multiArray: styleTTL),
-                    "latent_mask": MLFeatureValue(multiArray: latentMask),
-                    "text_mask": MLFeatureValue(multiArray: textMask),
-                    "current_step": MLFeatureValue(multiArray: currentStep),
-                    "total_step": MLFeatureValue(multiArray: totalStep),
-                ])
-            guard
-                let denoised = denoisedOut.featureValue(for: "denoised_latent")?.multiArrayValue
-            else {
-                throw Supertonic3Error.inferenceFailed(
-                    stage: "vector_estimator", underlying: "missing 'denoised_latent' output")
+            for step in 0..<totalSteps {
+                // Inner per-step pool bounds peak memory within a chunk.
+                noisyLatent = try autoreleasepool {
+                    let currentStep = try makeFloat(values: [Float(step)], shape: [1])
+                    let denoisedOut = try predict(
+                        stage: "vector_estimator",
+                        model: vectorEstimator,
+                        inputs: [
+                            "noisy_latent": MLFeatureValue(multiArray: noisyLatent),
+                            "text_emb": MLFeatureValue(multiArray: textEmbValue),
+                            "style_ttl": MLFeatureValue(multiArray: styleTTL),
+                            "latent_mask": MLFeatureValue(multiArray: latentMask),
+                            "text_mask": MLFeatureValue(multiArray: textMask),
+                            "current_step": MLFeatureValue(multiArray: currentStep),
+                            "total_step": MLFeatureValue(multiArray: totalStep),
+                        ])
+                    guard
+                        let denoised = denoisedOut.featureValue(for: "denoised_latent")?.multiArrayValue
+                    else {
+                        throw Supertonic3Error.inferenceFailed(
+                            stage: "vector_estimator", underlying: "missing 'denoised_latent' output")
+                    }
+                    // Rebind without recopying when the shape and dtype already match.
+                    return try reshape(denoised, to: veLatentShape)
+                }
             }
-            // Rebind without recopying when the shape and dtype already match.
-            noisyLatent = try reshape(denoised, to: veLatentShape)
+
+            // Trim the padded bucket output back to the true latent length before the
+            // vocoder (which accepts a RangeDim latent length).
+            let vocoderLatent: MLMultiArray
+            if padLen == trueLen {
+                vocoderLatent = noisyLatent
+            } else {
+                let denoisedFlat = Supertonic3MultiArray.extractFloats(noisyLatent)
+                let trimmed = Self.trimRows(
+                    denoisedFlat, channels: channels, fromLen: padLen, toLen: trueLen)
+                vocoderLatent = try makeFloat(values: trimmed, shape: latentShape)
+            }
+
+            // --- Stage 4: vocoder --- //
+            let vocoderOut = try predict(
+                stage: "vocoder",
+                model: vocoderModel,
+                inputs: ["latent": MLFeatureValue(multiArray: vocoderLatent)])
+            guard let wavArray = vocoderOut.featureValue(for: "wav")?.multiArrayValue else {
+                throw Supertonic3Error.inferenceFailed(
+                    stage: "vocoder", underlying: "missing 'wav' output")
+            }
+            return Supertonic3MultiArray.extractFloats(wavArray)
         }
 
-        // Trim the padded bucket output back to the true latent length before the
-        // vocoder (which accepts a RangeDim latent length).
-        let vocoderLatent: MLMultiArray
-        if padLen == trueLen {
-            vocoderLatent = noisyLatent
-        } else {
-            let denoisedFlat = Supertonic3MultiArray.extractFloats(noisyLatent)
-            let trimmed = Self.trimRows(
-                denoisedFlat, channels: channels, fromLen: padLen, toLen: trueLen)
-            vocoderLatent = try makeFloat(values: trimmed, shape: latentShape)
-        }
-
-        // --- Stage 4: vocoder --- //
-        let vocoderOut = try predict(
-            stage: "vocoder",
-            model: await store.vocoder(),
-            inputs: ["latent": MLFeatureValue(multiArray: vocoderLatent)])
-        guard let wavArray = vocoderOut.featureValue(for: "wav")?.multiArrayValue else {
-            throw Supertonic3Error.inferenceFailed(
-                stage: "vocoder", underlying: "missing 'wav' output")
-        }
-
-        let wavSamples = Supertonic3MultiArray.extractFloats(wavArray)
         let firstDuration = durations.first ?? 0
         let trimLen = min(wavSamples.count, Int(Float(cfg.ae.sampleRate) * firstDuration))
         let trimmed = trimLen > 0 ? Array(wavSamples.prefix(trimLen)) : wavSamples
