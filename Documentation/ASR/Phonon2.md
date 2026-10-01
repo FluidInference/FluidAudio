@@ -96,3 +96,17 @@ On conversational long-form audio Phonon-2 is the fastest model we ship (1.45× 
 the least accurate of the four: Ultra and Redux both beat v3 here while Phonon-2 trails it by 0.8 points, consistent
 with the upstream card's Earnings-22 row (6.96 % vs its teacher's 5.85 %). All five Phonon-2 encoders produce the same
 transcript.
+
+Encoder compute units on the same 60-minute file (`transcribe --encoder-compute-units`, best of 2, processing time
+excludes model load):
+
+| Model | ANE | GPU | `.all` |
+|---|---:|---:|---:|
+| v3 | 10.7 s / 335× | 9.2 s / 391× | 9.3 s / 387× |
+| Ultra | 7.9 s / 457× | 11.1 s / 326× | 11.2 s / 322× |
+| Phonon-2 default (sparse, 321 MB) | 7.5 s / 480× | 8.2 s / 437× | 7.9 s / 454× |
+| Phonon-2 `Encoder_lut6` (470 MB) | 7.4 s / 484× | 10.4 s / 347× | 10.9 s / 332× |
+
+The sparse default is the fastest on every unit. On the GPU it runs as plain fp16 after its ~150 s load-time
+expansion, which is why it beats the dense palette there; `.all` lands on the GPU path for the encoder.
+
