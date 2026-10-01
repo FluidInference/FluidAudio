@@ -76,3 +76,23 @@ the conversion's.
 **Choose phonon2 for English on iOS 18+ when you want the fastest Neural Engine encoder in the v3 family, or the
 176–253 MB encoder options; choose v3 / Ultra for multilingual audio or the last half point on English.**
 
+### 60-minute long-form file (Earnings-22, four concatenated calls)
+
+`transcribe` on the 3600 s `earnings22_top4_1h.wav` (M5 Pro, default ANE encoder, best of 2–3 runs, processing time
+excludes model load). Reference = the concatenated Earnings-22 chunk transcripts, same normalizer as above.
+
+| Model | Processing time | RTFx | WER |
+|---|---:|---:|---:|
+| v3 | 10.9 s | 331× | 16.5 % |
+| Ultra | 7.7 s | 469× | **13.5 %** |
+| Redux | 14.2 s | 254× | 14.8 % |
+| Phonon-2 default (sparse, 321 MB) | 7.5 s | **478×** | 17.2 % |
+| Phonon-2 `Encoder_lut6` (470 MB) | 7.4 s | 486× | 17.2 % |
+| Phonon-2 `Encoder_sparse-g4` (246 MB) | 9.0 s | 399× | 17.2 % |
+| Phonon-2 `Encoder_sparse-g1` (176 MB) | 23.4 s | 154× | 17.2 % |
+| Phonon-2 `Encoder_lut3` (253 MB) | 23.6 s | 152× | 17.2 % |
+
+On conversational long-form audio Phonon-2 is the fastest model we ship (1.45× v3's throughput, on par with Ultra) but
+the least accurate of the four: Ultra and Redux both beat v3 here while Phonon-2 trails it by 0.8 points, consistent
+with the upstream card's Earnings-22 row (6.96 % vs its teacher's 5.85 %). All five Phonon-2 encoders produce the same
+transcript.
