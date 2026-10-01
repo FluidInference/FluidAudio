@@ -502,6 +502,10 @@ public enum ModelHub {
             }
         }
 
+        filesToDownload = try await filesForLegacyAdoption(
+            filesToDownload, at: repoPath, repo: repo, revision: revision, subPath: subPath, fetch: treeFetch)
+        try ModelCache.adoptLegacyCache(
+            at: repoPath, revision: revision, files: filesToDownload, subPath: subPath)
         try ModelCache.prepareForDownload(at: repoPath, revision: revision)
         logger.info("Found \(filesToDownload.count) files to download")
 
@@ -613,7 +617,7 @@ public enum ModelHub {
         let reporter = ProgressReporter(handler: progressHandler, downloadPhaseWeight: 1.0)
         reporter.listing()
         let revision = ModelRegistry.mapRevision(repo.remotePath, default: repo.revision)
-        let filesToDownload: [RemoteFile] = try await HFTreeLister.listTree(
+        var filesToDownload: [RemoteFile] = try await HFTreeLister.listTree(
             repoRemotePath: repo.remotePath,
             revision: revision,
             startingAt: subdirectory,
@@ -621,7 +625,20 @@ public enum ModelHub {
             fetch: HFTreeLister.fetch(using: listingSession)
         )
         let revisionCache = repoDirectory.appendingPathComponent(subdirectory)
+        let requestedPaths = Set(filesToDownload.map(\.path))
+        filesToDownload = try await filesForLegacyAdoption(
+            filesToDownload, at: revisionCache, repo: repo, revision: revision, subPath: subdirectory,
+            fetch: HFTreeLister.fetch(using: listingSession))
+        try ModelCache.adoptLegacyCache(
+            at: revisionCache, revision: revision, files: filesToDownload, subPath: subdirectory)
         try ModelCache.prepareForDownload(at: revisionCache, revision: revision)
+        if let shouldSkip {
+            filesToDownload.removeAll { file in
+                guard !requestedPaths.contains(file.path) else { return false }
+                let components = file.path.split(separator: "/")
+                return components.indices.contains { shouldSkip(components[...$0].joined(separator: "/")) }
+            }
+        }
         let totalFiles = filesToDownload.count
         logger.info("Found \(totalFiles) files in \(subdirectory)")
 
@@ -667,6 +684,36 @@ public enum ModelHub {
         }
 
         logger.info("Downloaded \(subdirectory) from \(repo.folderName)")
+    }
+
+    /// A legacy marker covers every cached variant, so extend the calling
+    /// variant's listing to all local compiled bundles and root files first.
+    private static func filesForLegacyAdoption(
+        _ files: [RemoteFile], at repoPath: URL, repo: Repo, revision: String, subPath: String?,
+        fetch: HFTreeLister.Fetch
+    ) async throws -> [RemoteFile] {
+        guard let contents = try ModelCache.legacyCacheContents(at: repoPath, revision: revision) else { return files }
+        var additional = try await HFTreeLister.listTree(
+            repoRemotePath: repo.remotePath, revision: revision, startingAt: subPath ?? "",
+            include: { path, isDirectory in
+                let local = ModelCache.localPath(for: path, subPath: subPath)
+                let inBundle = contents.bundles.contains {
+                    $0.isEmpty || local == $0 || local.hasPrefix($0 + "/")
+                        || (isDirectory && $0.hasPrefix(local + "/"))
+                }
+                return inBundle || (!isDirectory && contents.rootFiles.contains(local))
+            }, fetch: fetch)
+        let covered = Set((files + additional).map { ModelCache.localPath(for: $0.path, subPath: subPath) })
+        let missingRoots = contents.rootFiles.subtracting(covered)
+        if subPath != nil, !missingRoots.isEmpty {
+            additional += try await HFTreeLister.listTree(
+                repoRemotePath: repo.remotePath, revision: revision,
+                include: { path, isDirectory in !isDirectory && missingRoots.contains(path) }, fetch: fetch)
+        }
+        var merged = files
+        var paths = Set(files.map(\.path))
+        for file in additional where paths.insert(file.path).inserted { merged.append(file) }
+        return merged
     }
 
     /// One file of a subdirectory download, run inside the bounded task group.

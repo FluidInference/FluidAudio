@@ -2,8 +2,8 @@ import Foundation
 
 // MARK: - Tree-serving URLProtocol stub
 
-/// Serves canned HF `tree/main` JSON per path and a fixed body for every
-/// `resolve/main` file request. Thread-safe via a lock; keyed on URL shape.
+/// Serves canned HF tree JSON per path and a fixed body for every
+/// resolve file request, including pinned revisions. Thread-safe via a lock; keyed on URL shape.
 ///
 /// Shared HTTP test double for the `Shared/Download` suite (used by
 /// `ProgressSequenceTests` and others that drive `ModelHub`'s listing/download
@@ -13,6 +13,13 @@ final class TreeStubURLProtocol: URLProtocol {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var _trees: [String: [[String: Any]]] = [:]
     nonisolated(unsafe) private static var _fileBody = Data()
+    nonisolated(unsafe) private static var _fileRequestCount = 0
+
+    static var fileRequestCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _fileRequestCount
+    }
 
     static var trees: [String: [[String: Any]]] {
         get {
@@ -43,6 +50,9 @@ final class TreeStubURLProtocol: URLProtocol {
     static func reset() {
         trees = [:]
         fileBody = Data()
+        lock.lock()
+        _fileRequestCount = 0
+        lock.unlock()
     }
 
     override static func canInit(with request: URLRequest) -> Bool { true }
@@ -56,10 +66,10 @@ final class TreeStubURLProtocol: URLProtocol {
         let path = url.path
 
         let payload: Data
-        if let treeRange = path.range(of: "/tree/main") {
-            // Listing request: key is everything after "tree/main/" ("" for root).
-            var key = String(path[treeRange.upperBound...])
-            if key.hasPrefix("/") { key.removeFirst() }
+        if let treeRange = path.range(of: "/tree/") {
+            // Listing request: drop the revision component ("" for root).
+            let components = path[treeRange.upperBound...].split(separator: "/")
+            let key = components.dropFirst().joined(separator: "/")
             guard let items = Self.trees[key],
                 let json = try? JSONSerialization.data(withJSONObject: items)
             else {
@@ -67,7 +77,10 @@ final class TreeStubURLProtocol: URLProtocol {
                 return
             }
             payload = json
-        } else if path.contains("/resolve/main/") {
+        } else if path.contains("/resolve/") {
+            Self.lock.lock()
+            Self._fileRequestCount += 1
+            Self.lock.unlock()
             payload = Self.fileBody
         } else {
             respond(status: 404, data: Data())
