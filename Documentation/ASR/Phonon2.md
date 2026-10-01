@@ -57,11 +57,12 @@ Full LibriSpeech, `asr-benchmark`, M5 Pro (macOS 27), Phonon-2 and v3 run back t
 compute units (ANE) unless noted. WER is corpus-level (total edit distance over total reference words); RTFx is total
 audio divided by total processing time.
 
-| Set | v3 WER | phonon2 WER | v3 RTFx | phonon2 RTFx (default / lut6) | phonon2 RTFx (`Encoder_lut3`) |
-|---|------:|------------:|--------:|--------------------------------:|------------------------------:|
-| test-clean (2620 files), ANE | **2.27 %** | 2.47 % | 148.7–151.5× | **159.0×** | 70.0× |
-| test-other (2939 files), ANE | **4.12 %** | 4.62 % | 138.1× | **143.0×** (lut6) | 64.6× |
-| test-clean, GPU (`.cpuAndGPU`) | **2.30 %** | 2.46 % | **171.9×** | 150.6× (lut6) | 154.1× |
+| Set (ANE) | v3 | Ultra | Phonon-2 default |
+|---|---|---|---|
+| test-clean (2620 files) WER | 2.27 % | **2.13 %** | 2.47 % |
+| test-other (2939 files) WER | 4.12 % | **3.81 %** | 4.62 % |
+| test-clean RTFx | 149–152× | 151× | **159×** |
+| test-other RTFx | 138× | 142× | **146×** |
 
 On LibriSpeech **v3 is the more accurate model** by 0.20 (clean) and 0.50 (other) points, which reproduces the upstream
 card's own deltas against its teacher (+0.20 / +0.79 under the Open ASR Leaderboard protocol; the card wins against v3
