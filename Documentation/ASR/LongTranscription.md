@@ -149,6 +149,32 @@ Use the same audio bytes and model bundle for comparisons. The reporter's
 The test checks phrases, not the reported doubled-word count, since real
 stutters and encoding-dependent differences should not be silently removed.
 
+### Local reproduction of #954
+
+A targeted comparison reproduced the dropped `c3` on the public video's native
+AAC track (YouTube format `140`), decoded in full to 16 kHz mono PCM with PyAV
+19.0.1. Duration: 597.6584375 s. WAV SHA-256:
+`e8b4b7f6ea4156e83941e6fb2dd71a3759a98f0d3f4525512224ea6a7bf78ea4`.
+All runs used the same cached compiled Parakeet v3 models.
+
+| Build and setting | `501c3` | Adjacent repeated-word pairs |
+|---|---|---|
+| v0.17.4 (`21493f8d`), default | Truncated to `501` | 6 |
+| v0.17.4, `--mel-context` | Preserved | 5 |
+| Default restored (`92a43c9d`), default | Preserved | 5 |
+| Default restored, `--no-mel-context` | Truncated to `501` | 6 |
+
+The restored default matched v0.17.4 with `--mel-context` exactly in text and
+word timings. Re-enabling no-mel on the same build matched the failing v0.17.4
+default exactly. Repetition counts ignore case and punctuation; they do not
+establish whether individual repetitions are genuine speech.
+
+This was a **partial reproduction**. The `thousands of s students` artifact did
+not appear. The native Opus track (format `251`, 597.6106875 s) passed all five
+phrase checks in both modes, so the encoding matters. Neither download is known
+to be byte-identical to the reporter's remux; the confidential interview was not
+tested. These targeted local checks are not a broader quality benchmark.
+
 ## Boundary Search
 
 `ChunkProcessor` picks the start sample of each non-first chunk by one of two
