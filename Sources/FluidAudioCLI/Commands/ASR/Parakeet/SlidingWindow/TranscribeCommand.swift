@@ -205,6 +205,9 @@ enum TranscribeCommand {
         var wordTimestamps = false
         var outputJsonPath: String?
         var modelVersion: AsrModelVersion = .v3
+        /// `--model-version unified`: Parakeet Unified 0.6B (English, punctuation and capitalization) through
+        /// `UnifiedAsrManager`, which is not an `AsrModelVersion`.
+        var unified = false
         var modelDir: String?
         var localModelDir: String?
         var customVocabPath: String?
@@ -299,9 +302,11 @@ enum TranscribeCommand {
                         parsed.modelVersion = .tdtCtc110m
                     case "tdt-ja", "ja":
                         parsed.modelVersion = .tdtJa
+                    case "unified":
+                        parsed.unified = true
                     default:
                         fputs(
-                            "ERROR: Invalid model version: \(args[i + 1]). Use 'v2', 'v3', 'redux', 'ultra', 'phonon2', 'tdt-ctc-110m', or 'tdt-ja'\n",
+                            "ERROR: Invalid model version: \(args[i + 1]). Use 'v2', 'v3', 'redux', 'ultra', 'phonon2', 'tdt-ctc-110m', 'tdt-ja', or 'unified'\n",
                             stderr)
                         fflush(stderr)
                         return nil
@@ -474,7 +479,10 @@ enum TranscribeCommand {
             exit(1)
         }
 
-        if let variant = parsed.parakeetVariant {
+        if parsed.unified {
+            logger.info("Using Parakeet Unified (batch) with token timings\n")
+            await runUnified(audioFile: audioFile, args: parsed)
+        } else if let variant = parsed.parakeetVariant {
             logger.info("Using \(variant.displayName) via StreamingAsrManager protocol.\n")
             await runWithVariant(audioFile: audioFile, args: parsed)
         } else if parsed.streamingMode {
@@ -483,6 +491,86 @@ enum TranscribeCommand {
         } else {
             logger.info("Using batch mode with direct processing\n")
             await runBatch(audioFile: audioFile, args: parsed)
+        }
+    }
+
+    // MARK: - Unified Mode
+
+    /// Batch transcription with Parakeet Unified, written through the same text, `--output-json`,
+    /// `--word-timestamps` and `--metadata` paths as the TDT models, so word timings are available to callers
+    /// that need them (aligning with diarization, seeking).
+    private static func runUnified(audioFile: String, args: ParsedArgs) async {
+        // UnifiedAsrManager loads and places its own models, so these options do not apply to it.
+        var ignored: [String] = []
+        if args.modelDir != nil { ignored.append("--model-dir") }
+        if args.localModelDir != nil { ignored.append("--local-model-dir") }
+        if args.customVocabPath != nil { ignored.append("--custom-vocab") }
+        if args.parakeetVariant != nil { ignored.append("--parakeet-variant") }
+        if args.language != nil { ignored.append("--language") }
+        if args.encoderPrecision != .int8 { ignored.append("--encoder-precision") }
+        if args.encoderComputeUnits != nil { ignored.append("--encoder-compute-units") }
+        if args.streamingMode { ignored.append("--streaming") }
+        if !ignored.isEmpty {
+            logger.warning("\(ignored.joined(separator: ", ")) not supported with --model-version unified; ignoring")
+        }
+
+        do {
+            let samples = try AudioConverter().resampleAudioFile(path: audioFile)
+            let duration = Double(samples.count) / 16000.0
+            let manager = UnifiedAsrManager()
+            try await manager.loadModels()
+            let start = Date()
+            let result = try await manager.transcribeWithTimings(samples)
+            let processingTime = Date().timeIntervalSince(start)
+            let rtfx = processingTime > 0 ? Float(duration / processingTime) : 0
+            let confidence =
+                result.tokenTimings.isEmpty
+                ? Float(0) : result.tokenTimings.map(\.confidence).reduce(0, +) / Float(result.tokenTimings.count)
+            let wordTimings = WordTimingMerger.mergeTokensIntoWords(result.tokenTimings)
+
+            logger.info(String(repeating: "=", count: 50))
+            logger.info("UNIFIED TRANSCRIPTION RESULTS")
+            logger.info(String(repeating: "=", count: 50))
+            logger.info("Final transcription:")
+            print(result.text)
+
+            if let outputJsonPath = args.outputJsonPath {
+                let output = TranscriptionJSONOutput(
+                    audioFile: audioFile,
+                    mode: "batch",
+                    modelVersion: "unified",
+                    text: result.text,
+                    durationSeconds: duration,
+                    processingTimeSeconds: processingTime,
+                    rtfx: rtfx,
+                    confidence: confidence,
+                    wordTimings: wordTimings,
+                    timingsConfirmed: nil
+                )
+                try writeJsonOutput(output, to: outputJsonPath)
+                logger.info("💾 JSON results saved to: \(outputJsonPath)")
+            }
+
+            if args.wordTimestamps {
+                logger.info("\nWord-level timestamps:")
+                for (index, word) in wordTimings.enumerated() {
+                    logger.info(
+                        "  [\(index)] \(String(format: "%.3f", word.startTime))s - \(String(format: "%.3f", word.endTime))s: \"\(word.word)\" (conf: \(String(format: "%.3f", word.confidence)))"
+                    )
+                }
+            }
+
+            if args.showMetadata {
+                logger.info("Metadata:")
+                logger.info("  Confidence: \(String(format: "%.3f", confidence))")
+                logger.info("  Duration: \(String(format: "%.3f", duration))s")
+                logger.info(
+                    "  Processing time: \(String(format: "%.3f", processingTime))s (\(String(format: "%.1f", rtfx))x)")
+            }
+        } catch {
+            logger.error("Unified transcription failed: \(error)")
+            fputs("ERROR: Unified transcription failed: \(error)\n", stderr)
+            exit(1)
         }
     }
 
@@ -1082,7 +1170,7 @@ enum TranscribeCommand {
                 --word-timestamps              Show word-level timestamps in results
                 --encoder-compute-units <u>    Encoder placement: ane (default), gpu, cpu, all
                 --output-json <file>           Save full transcription to JSON
-                --model-version <name>         v2, v3, redux, ultra, phonon2, tdt-ctc-110m, tdt-ja (default: v3)
+                --model-version <name>         v2, v3, redux, ultra, phonon2, tdt-ctc-110m, tdt-ja, unified (default: v3)
                 --model-dir <path>             Repository model cache directory
                 --local-model-dir <path>       Exact compiled model directory; never downloads
                 --encoder-precision <int8|int8-v2|int4> Encoder quantization (default: int8;
