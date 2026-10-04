@@ -33,6 +33,9 @@ swift run fluidaudiocli transcribe audio.wav
 # English-only run with higher accuracy
 swift run fluidaudiocli transcribe audio.wav --model-version v2
 
+# Parakeet Unified (English, punctuation and capitalization), with word timings in the JSON
+swift run fluidaudiocli transcribe audio.wav --model-version unified --output-json out.json
+
 # Streaming ASR with Parakeet EOU
 swift run fluidaudiocli parakeet-eou --input audio.wav
 
