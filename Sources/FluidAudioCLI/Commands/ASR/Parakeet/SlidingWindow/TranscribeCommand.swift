@@ -1090,9 +1090,9 @@ enum TranscribeCommand {
                 --language <code>              Language hint (e.g., en, de, fr, es)
                 --custom-vocab <file>          Apply vocabulary boosting in batch mode
                 --no-mel-context               Disable 80ms mel-context prepend for long-form batch ASR
-                                               (default: disabled on v3, enabled otherwise)
-                --mel-context                  Force-enable the mel-context prepend (v3 opt-in)
-                --dual-decode-arbitration      Enable v3/no-mel long-form boundary arbitration
+                                               (opt-in silence-aligned starts on v3; may affect conversational speech)
+                --mel-context                  Enable the mel-context prepend (default for all models)
+                --dual-decode-arbitration      Enable v3 boundary arbitration (requires --no-mel-context)
 
             STREAMING MODE OPTIONS (--streaming, SlidingWindowAsrManager):
                 --chunk-seconds <sec>                Audio chunk size (default: 11.0)

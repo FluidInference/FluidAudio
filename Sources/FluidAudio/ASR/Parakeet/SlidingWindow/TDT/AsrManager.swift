@@ -36,7 +36,7 @@ public actor AsrManager {
     /// Resolved mel-context flag exposed to `ChunkProcessor`. When `false`,
     /// disables PR #264's 80ms mel-context prepend so v3 long-form audio
     /// uses the no-mel boundary warmup path with silence-aligned chunk
-    /// starts (issues #594, #803). Unset config resolves to `false` on v3.
+    /// starts (issues #594, #803). Unset config keeps mel context enabled (#954).
     internal var melChunkContext: Bool {
         config.resolvedMelChunkContext(for: modelVersion)
     }

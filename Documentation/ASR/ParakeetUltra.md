@@ -47,7 +47,8 @@ high-resource languages (French −0.8, Russian −1.3, English −0.2).
 
 The int8 encoder is WER-identical to an fp16 export (test-clean 2.12 vs 2.13 %, test-other 3.79 vs 3.79 %), and
 compute placement is WER-neutral (ANE 2.12 %, GPU 2.13 %). All numbers in this page use the v3-family long-form path
-(no mel context, silence-aligned window starts), the library default for v3, redux and ultra.
+(no mel context, silence-aligned window starts), the library default at measurement time.
+To reproduce this chunking after #954, explicitly set `melChunkContext: false`; the current default enables mel context.
 
 ## Speed
 

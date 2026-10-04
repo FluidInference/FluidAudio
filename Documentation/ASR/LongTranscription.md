@@ -71,9 +71,9 @@ phrase at the wrong point.
 
 | Path | Enabled by | Scope | Purpose |
 |---|---|---|---|
-| Mel-context | `ASRConfig.melChunkContext = true`, CLI `--mel-context` (default for non-v3 models) | Batch TDT long audio | Preserves the existing 80 ms left-context behavior for non-first chunks. |
-| v3 no-mel | Default for v3 (`melChunkContext = nil`); explicit via `ASRConfig.melChunkContext = false`, CLI `--no-mel-context` | Parakeet TDT v3 batch long audio | Avoids the v3 multilingual drift introduced by prepending mel context at chunk boundaries (#594), and — via silence-aligned chunk starts — the quiet-speech drops near long mid-file silence runs (#803). |
-| v3 dual-decode arbitration | `ASRConfig.dualDecodeArbitration = true` on the v3 no-mel path, CLI `--dual-decode-arbitration` | Parakeet TDT v3 no-mel batch long audio | Opt-in quality mode for files where one boundary strategy is clearly safer than another. |
+| Mel-context | `ASRConfig(melChunkContext: true)`, CLI `--mel-context` (default for all models) | Batch TDT long audio | Preserves the existing 80 ms left-context behavior for non-first chunks. |
+| v3 no-mel | Opt in via `ASRConfig(melChunkContext: false)`, CLI `--no-mel-context` | Parakeet TDT v3 batch long audio | Avoids the v3 multilingual drift introduced by prepending mel context at chunk boundaries (#594), and — via silence-aligned chunk starts — the quiet-speech drops near long mid-file silence runs (#803). |
+| v3 dual-decode arbitration | `ASRConfig(melChunkContext: false, dualDecodeArbitration: true)`, CLI `--no-mel-context --dual-decode-arbitration` | Parakeet TDT v3 no-mel batch long audio | Opt-in quality mode for files where one boundary strategy is clearly safer than another. |
 | Parallel chunk workers | `ASRConfig.parallelChunkConcurrency` (default `4`, clamped to `>= 1`) | Stateless chunked batch TDT (all of the above) | Decodes independent chunks concurrently across a worker pool of cloned `AsrManager` instances. |
 | Post-merge repair pass | `ASRConfig.seamGapRepair = true` (default), CLI `--no-seam-gap-repair` | Multi-chunk batch TDT (all of the above) | Re-decodes suspicious inter-token gaps with fresh seam-free windows, splicing recovered tokens in. See "Post-Merge Repair Pass". |
 
@@ -95,6 +95,59 @@ inspection, no vocabulary/script/token filtering, no language hints).
 Off by default: the wins are quality-tier rather than correctness-tier, and
 the probe adds a modest constant overhead (≈1.1–1.5× depending on file
 length) over the regular `melChunkContext = false` path.
+
+## Conversational Audio Regression (#954)
+
+The default enables mel context for every model. The optional
+`melChunkContextOverride` remains `nil` when no preference is supplied and
+resolves to `true`; explicit `true` and `false` settings are preserved.
+
+Releases starting with v0.15.7 changed the v3 default to no-mel with
+silence-aligned starts (#869). In [issue #954's follow-up](https://github.com/FluidInference/FluidAudio/issues/954#issuecomment-5906367883),
+the reporter isolated dropped words, substitutions, and invented repetitions
+to that default on two conversational recordings. Explicit `--mel-context`
+restored their v0.15.6 transcripts and all known-answer checks. These are
+reporter results; the confidential interview is not a public test fixture.
+
+For affected releases, explicitly select the earlier chunking strategy:
+
+```bash
+swift run fluidaudiocli transcribe talk.wav --mel-context --word-timestamps --output-json out.json
+```
+
+```swift
+let manager = AsrManager(config: ASRConfig(melChunkContext: true))
+```
+
+This restores the earlier default strategy, not a guarantee of identical output
+across releases: other decoder and seam fixes may also change transcripts.
+The no-mel path remains available for multilingual drift (#594) and quiet speech
+near long silence runs (#803). Neither path wins on every recording. Do not
+remove repeated words by text alone: natural hesitations may be genuine.
+
+### Known-answer checks
+
+Alongside aggregate WER, check fixed phrases containing names, numbers,
+negations, and quantifiers. For the public talk linked in #954, require `501c3`,
+`oversell`, `thousands of students`, and `JupyterHub`; reject
+`thousands of s students`. Check full recordings because short isolated clips
+move the chunk boundaries and may hide the failure.
+
+`LongFormChunkingRegressionTests` includes a small bundled real-recording check
+that compares default and explicit mel-context output. Its separate public-talk
+test is opt-in and never downloads audio or models. Supply the full recording
+from https://www.youtube.com/watch?v=so1YBsIM8Zo and a local compiled v3 bundle:
+
+```bash
+FLUIDAUDIO_ISSUE_954_AUDIO=/absolute/path/talk.wav \
+FLUIDAUDIO_ISSUE_954_MODELS=/absolute/path/parakeet-tdt-0.6b-v3 \
+swift test --filter LongFormChunkingRegressionTests.testPublicTalkKnownAnswers
+```
+
+Use the same audio bytes and model bundle for comparisons. The reporter's
+597.61 s remux is not bundled; a fresh download may use a different encoding.
+The test checks phrases, not the reported doubled-word count, since real
+stutters and encoding-dependent differences should not be silently removed.
 
 ## Boundary Search
 
@@ -136,8 +189,8 @@ but the two mechanisms behave differently:
   the chunk so the FastConformer encoder's depthwise convolutions have stable
   left context for the first emitted frame. The decoder is told to *skip*
   those leading frames via `contextSamples`; they do not produce tokens.
-  Enabled when `ASRConfig.melChunkContext` resolves to `true` (the default
-  for non-v3 models; v3 defaults to the no-mel path).
+  Enabled when `ASRConfig.melChunkContextOverride` resolves to `true` (the
+  default for all models).
 - **Warmup prefix** (`warmupPrefixSamples`, 0–7 encoder frames). Real audio
   from before the chunk start, decoded normally from frame 0; emitted tokens
   are suppressed up to the chunk start via `emitTokensAfterFrame`. Used only
@@ -652,8 +705,10 @@ RMS exceeds `0.008 / 0.3 ≈ 0.027`.
   trimmed and backfilled to end in speech, because the trigger is
   fixed-stride window *starts* landing mid-word on quiet speech, not the
   trailing silence. The v3 no-mel path's silence-aligned starts avoid the
-  class (validated on the LibriVox case), which is why v3 now defaults to
-  no-mel; the mel-context path retains the limitation.
+  class (validated on the LibriVox case). Opt in with `--no-mel-context`
+  for affected recordings; the default mel-context path retains this
+  limitation. Silence alignment can instead regress conversational speech
+  (#954), so compare known-answer phrases before choosing either path.
 - Repair validation corpora are English conference and quiet dictation
   audio; multilingual and music-heavy content is less exercised.
 
