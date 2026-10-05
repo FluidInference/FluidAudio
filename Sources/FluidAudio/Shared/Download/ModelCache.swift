@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// On-disk model-cache knowledge for the download stack (#765 Wave 4):
@@ -27,6 +28,181 @@ enum ModelCache {
             return false
         }
         return storedRevision == revision
+    }
+
+    /// Inventory every cached compiled bundle and plain file before listing a
+    /// legacy pinned cache. A revision marker covers all variants in this folder.
+    static func legacyCacheContents(
+        at repoPath: URL, revision: String
+    ) throws -> (bundles: Set<String>, files: Set<String>)? {
+        let fm = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard revision != "main",
+            !fm.fileExists(atPath: repoPath.appendingPathComponent(revisionMarkerName).path),
+            fm.fileExists(atPath: repoPath.path, isDirectory: &isDirectory), isDirectory.boolValue
+        else { return nil }
+
+        let root = repoPath.resolvingSymlinksInPath()
+        var bundles: Set<String> = root.pathExtension == "mlmodelc" ? [""] : []
+        var files: Set<String> = []
+        guard let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: nil) else {
+            return (bundles, files)
+        }
+        for case let item as URL in enumerator {
+            let item = item.resolvingSymlinksInPath()
+            let relative = String(item.path.dropFirst(root.path.count + 1))
+            if item.pathExtension == "mlmodelc" {
+                bundles.insert(relative)
+                enumerator.skipDescendants()
+                continue
+            }
+            guard !relative.hasSuffix(".partial"), !relative.hasSuffix(".partial.etag"),
+                let attributes = try attributesIfPresent(at: item),
+                attributes[.type] as? FileAttributeType == .typeRegular
+            else { continue }
+            files.insert(relative)
+        }
+        return (bundles, files)
+    }
+
+    /// Adopt only after the pinned listing covers every locally cached bundle.
+    /// Incomplete bundles are removed as a unit so the model-existence gate
+    /// re-enters download after an interruption. Existing markers remain authoritative.
+    static func adoptLegacyCache(
+        at repoPath: URL, revision: String, files: [RemoteFile], subPath: String? = nil
+    ) throws {
+        let fm = FileManager.default
+        guard let contents = try legacyCacheContents(at: repoPath, revision: revision) else { return }
+        let marker = repoPath.appendingPathComponent(revisionMarkerName)
+        var listedBundles: Set<String> = []
+        var listedFiles: Set<String> = []
+        var invalidBundles: Set<String> = []
+        var invalidFiles: Set<URL> = []
+        var keptFiles: [(url: URL, bundle: String?)] = []
+        for file in files {
+            let localPath = localPath(for: file.path, subPath: subPath)
+            let components = localPath.split(separator: "/")
+            let bundle =
+                repoPath.pathExtension == "mlmodelc"
+                ? ""
+                : components.firstIndex(where: { $0.hasSuffix(".mlmodelc") }).map {
+                    components[...$0].joined(separator: "/")
+                }
+            if let bundle { listedBundles.insert(bundle) }
+            listedFiles.insert(localPath)
+            let destination = repoPath.appendingPathComponent(localPath)
+            guard try hasMatchingContent(file, at: destination) else {
+                if let bundle {
+                    invalidBundles.insert(bundle)
+                } else {
+                    invalidFiles.insert(destination)
+                }
+                continue
+            }
+            keptFiles.append((destination, bundle))
+        }
+        invalidBundles.formUnion(contents.bundles.subtracting(listedBundles))
+        for file in contents.files.subtracting(listedFiles) {
+            invalidFiles.insert(repoPath.appendingPathComponent(file))
+        }
+        var removals = invalidBundles.sorted().map {
+            $0.isEmpty ? repoPath : repoPath.appendingPathComponent($0)
+        }
+        removals.append(contentsOf: invalidFiles)
+        // Rejected or missing files must not return through finished-partial reuse.
+        for file in invalidFiles {
+            removals.append(file.appendingPathExtension("partial"))
+            removals.append(file.appendingPathExtension("partial.etag"))
+        }
+        for file in keptFiles where file.bundle.map({ !invalidBundles.contains($0) }) ?? true {
+            removals.append(file.url.appendingPathExtension("partial"))
+            removals.append(file.url.appendingPathExtension("partial.etag"))
+        }
+        for path in removals {
+            do {
+                try fm.removeItem(at: path)
+            } catch {
+                guard isMissingFile(error) else { throw error }
+            }
+        }
+        try fm.createDirectory(at: repoPath, withIntermediateDirectories: true)
+        try Data((revision + "\n").utf8).write(to: marker, options: .atomic)
+    }
+
+    /// Size is only a pre-check: an unknown size can still match its content ID.
+    private static func hasMatchingContent(_ file: RemoteFile, at destination: URL) throws -> Bool {
+        guard let contentID = file.contentID,
+            let attributes = try attributesIfPresent(at: destination),
+            attributes[.type] as? FileAttributeType == .typeRegular,
+            let size = (attributes[.size] as? NSNumber)?.int64Value,
+            file.size < 0 || size == Int64(file.size)
+        else { return false }
+
+        let expected: String
+        let hexLength: Int
+        switch contentID {
+        case .lfsSHA256(let oid):
+            expected = oid.lowercased()
+            hexLength = 64
+        case .gitBlobSHA1(let oid):
+            expected = oid.lowercased()
+            hexLength = 40
+        }
+        guard expected.utf8.count == hexLength,
+            expected.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) })
+        else { return false }
+
+        do {
+            switch contentID {
+            case .lfsSHA256:
+                return try hashFile(at: destination, using: SHA256()) == expected
+            case .gitBlobSHA1:
+                var hasher = Insecure.SHA1()
+                hasher.update(data: Data("blob \(size)\0".utf8))
+                return try hashFile(at: destination, using: hasher) == expected
+            }
+        } catch {
+            guard isMissingFile(error) else { throw error }
+            return false
+        }
+    }
+
+    /// Stream large weights in bounded chunks rather than materializing them in memory.
+    private static func hashFile<H: HashFunction>(at url: URL, using initialHasher: H) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = initialHasher
+        while let chunk = try handle.read(upToCount: 1_048_576), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func localPath(for remotePath: String, subPath: String?) -> String {
+        guard let subPath, remotePath.hasPrefix("\(subPath)/") else { return remotePath }
+        return String(remotePath.dropFirst(subPath.count + 1))
+    }
+
+    /// Missing-file races are harmless; permission and other I/O errors still propagate.
+    static func isMissingFile(_ error: Error) -> Bool {
+        let error = error as NSError
+        if error.domain == NSCocoaErrorDomain,
+            error.code == NSFileNoSuchFileError || error.code == NSFileReadNoSuchFileError
+        {
+            return true
+        }
+        if error.domain == NSPOSIXErrorDomain, error.code == Int(POSIXErrorCode.ENOENT.rawValue) { return true }
+        guard let underlying = error.userInfo[NSUnderlyingErrorKey] as? Error else { return false }
+        return isMissingFile(underlying)
+    }
+
+    private static func attributesIfPresent(at url: URL) throws -> [FileAttributeKey: Any]? {
+        do {
+            return try FileManager.default.attributesOfItem(atPath: url.path)
+        } catch {
+            guard isMissingFile(error) else { throw error }
+            return nil
+        }
     }
 
     /// Prepare a managed cache for downloads from one resolved revision.

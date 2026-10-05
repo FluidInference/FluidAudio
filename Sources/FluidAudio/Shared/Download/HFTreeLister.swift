@@ -2,9 +2,22 @@ import Foundation
 
 /// A file discovered in a HuggingFace repository tree listing.
 struct RemoteFile: Equatable, Sendable {
+    enum ContentID: Equatable, Sendable {
+        case lfsSHA256(String)
+        case gitBlobSHA1(String)
+    }
+
     let path: String
     /// Size in bytes as reported by the tree API; `-1` when not reported.
     let size: Int
+    /// LFS content hash, or the Git blob hash for a regular file (not an LFS pointer).
+    let contentID: ContentID?
+
+    init(path: String, size: Int, contentID: ContentID? = nil) {
+        self.path = path
+        self.size = size
+        self.contentID = contentID
+    }
 }
 
 /// The one tree-listing implementation for the download stack (#765 Wave 3),
@@ -93,7 +106,17 @@ enum HFTreeLister {
                     )
                 } else if itemType == "file" {
                     guard include(itemPath, false) else { continue }
-                    files.append(RemoteFile(path: itemPath, size: item["size"] as? Int ?? -1))
+                    let contentID: RemoteFile.ContentID?
+                    if item["lfs"] != nil {
+                        // The top-level oid of an LFS entry hashes its pointer,
+                        // not the resolved content downloaded into the cache.
+                        let lfs = item["lfs"] as? [String: Any]
+                        contentID = (lfs?["oid"] as? String).map { .lfsSHA256($0) }
+                    } else {
+                        contentID = (item["oid"] as? String).map { .gitBlobSHA1($0) }
+                    }
+                    files.append(
+                        RemoteFile(path: itemPath, size: item["size"] as? Int ?? -1, contentID: contentID))
                 }
             }
 
