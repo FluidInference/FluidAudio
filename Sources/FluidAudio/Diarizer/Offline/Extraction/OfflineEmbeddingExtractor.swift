@@ -806,10 +806,32 @@ struct OfflineEmbeddingExtractor {
                     "FBANK model missing \(fbankOutputName) output at batch index \(index)"
                 )
             }
+            recenterOnSignal(featureArray, audio: audioArrays[index])
             results.append(featureArray)
         }
 
         return results
+    }
+
+    /// Applies `SilenceAwareFbank` to one `[1, 1, bands, frames]` FBANK output in place.
+    private func recenterOnSignal(_ features: MLMultiArray, audio: MLMultiArray) {
+        guard features.dataType == .float32, audio.dataType == .float32, features.shape.count == 4 else {
+            return
+        }
+        let bandCount = features.shape[2].intValue
+        let frameCount = features.shape[3].intValue
+        let audioPointer = audio.dataPointer.assumingMemoryBound(to: Float.self)
+        let silent = SilenceAwareFbank.silentFrames(
+            audio: UnsafeBufferPointer(start: audioPointer, count: audio.count),
+            frameCount: frameCount
+        )
+        SilenceAwareFbank.recenter(
+            features: features.dataPointer.assumingMemoryBound(to: Float.self),
+            bandCount: bandCount,
+            bandStride: features.strides[2].intValue,
+            frameStride: features.strides[3].intValue,
+            silent: silent
+        )
     }
 
     private func prepareFbankInput(
