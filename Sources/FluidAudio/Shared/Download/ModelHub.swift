@@ -502,11 +502,16 @@ public enum ModelHub {
             }
         }
 
+        let requestedPaths = Set(filesToDownload.map(\.path))
+        // Validate all cached variants before stamping the shared marker,
+        // but only fetch files selected for this caller's download.
         filesToDownload = try await filesForLegacyAdoption(
-            filesToDownload, at: repoPath, repo: repo, revision: revision, subPath: subPath, fetch: treeFetch)
+            filesToDownload, at: repoPath, repo: repo, revision: revision, subPath: subPath,
+            includeRepoRootFiles: true, fetch: treeFetch)
         try ModelCache.adoptLegacyCache(
             at: repoPath, revision: revision, files: filesToDownload, subPath: subPath)
         try ModelCache.prepareForDownload(at: repoPath, revision: revision)
+        filesToDownload.removeAll { !requestedPaths.contains($0.path) }
         logger.info("Found \(filesToDownload.count) files to download")
 
         // Compute total known bytes for byte-weighted progress.
@@ -628,17 +633,11 @@ public enum ModelHub {
         let requestedPaths = Set(filesToDownload.map(\.path))
         filesToDownload = try await filesForLegacyAdoption(
             filesToDownload, at: revisionCache, repo: repo, revision: revision, subPath: subdirectory,
-            fetch: HFTreeLister.fetch(using: listingSession))
+            includeRepoRootFiles: false, fetch: HFTreeLister.fetch(using: listingSession))
         try ModelCache.adoptLegacyCache(
             at: revisionCache, revision: revision, files: filesToDownload, subPath: subdirectory)
         try ModelCache.prepareForDownload(at: revisionCache, revision: revision)
-        if let shouldSkip {
-            filesToDownload.removeAll { file in
-                guard !requestedPaths.contains(file.path) else { return false }
-                let components = file.path.split(separator: "/")
-                return components.indices.contains { shouldSkip(components[...$0].joined(separator: "/")) }
-            }
-        }
+        filesToDownload.removeAll { !requestedPaths.contains($0.path) }
         let totalFiles = filesToDownload.count
         logger.info("Found \(totalFiles) files in \(subdirectory)")
 
@@ -687,10 +686,10 @@ public enum ModelHub {
     }
 
     /// A legacy marker covers every cached variant, so extend the calling
-    /// variant's listing to all local compiled bundles and root files first.
+    /// variant's listing to all local compiled bundles and plain files first.
     private static func filesForLegacyAdoption(
         _ files: [RemoteFile], at repoPath: URL, repo: Repo, revision: String, subPath: String?,
-        fetch: HFTreeLister.Fetch
+        includeRepoRootFiles: Bool, fetch: HFTreeLister.Fetch
     ) async throws -> [RemoteFile] {
         guard let contents = try ModelCache.legacyCacheContents(at: repoPath, revision: revision) else { return files }
         var additional = try await HFTreeLister.listTree(
@@ -701,11 +700,16 @@ public enum ModelHub {
                     $0.isEmpty || local == $0 || local.hasPrefix($0 + "/")
                         || (isDirectory && $0.hasPrefix(local + "/"))
                 }
-                return inBundle || (!isDirectory && contents.rootFiles.contains(local))
+                let plainFile =
+                    contents.files.contains(local)
+                    || (isDirectory && contents.files.contains { $0.hasPrefix(local + "/") })
+                return inBundle || plainFile
             }, fetch: fetch)
         let covered = Set((files + additional).map { ModelCache.localPath(for: $0.path, subPath: subPath) })
-        let missingRoots = contents.rootFiles.subtracting(covered)
-        if subPath != nil, !missingRoots.isEmpty {
+        let missingRoots = Set(contents.files.filter { !$0.contains("/") }).subtracting(covered)
+        // Only repo downloads flatten a subPath and can share root auxiliaries.
+        // Subdirectory downloads preserve remote paths and never use root files.
+        if includeRepoRootFiles, subPath != nil, !missingRoots.isEmpty {
             additional += try await HFTreeLister.listTree(
                 repoRemotePath: repo.remotePath, revision: revision,
                 include: { path, isDirectory in !isDirectory && missingRoots.contains(path) }, fetch: fetch)

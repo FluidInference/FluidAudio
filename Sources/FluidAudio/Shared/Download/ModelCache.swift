@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// On-disk model-cache knowledge for the download stack (#765 Wave 4):
@@ -29,11 +30,11 @@ enum ModelCache {
         return storedRevision == revision
     }
 
-    /// Inventory every cached compiled bundle and root file before listing a
+    /// Inventory every cached compiled bundle and plain file before listing a
     /// legacy pinned cache. A revision marker covers all variants in this folder.
     static func legacyCacheContents(
         at repoPath: URL, revision: String
-    ) throws -> (bundles: Set<String>, rootFiles: Set<String>)? {
+    ) throws -> (bundles: Set<String>, files: Set<String>)? {
         let fm = FileManager.default
         var isDirectory: ObjCBool = false
         guard revision != "main",
@@ -43,9 +44,9 @@ enum ModelCache {
 
         let root = repoPath.resolvingSymlinksInPath()
         var bundles: Set<String> = root.pathExtension == "mlmodelc" ? [""] : []
-        var rootFiles: Set<String> = []
+        var files: Set<String> = []
         guard let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: nil) else {
-            return (bundles, rootFiles)
+            return (bundles, files)
         }
         for case let item as URL in enumerator {
             let item = item.resolvingSymlinksInPath()
@@ -55,13 +56,13 @@ enum ModelCache {
                 enumerator.skipDescendants()
                 continue
             }
-            guard !relative.contains("/"), !relative.hasSuffix(".partial"), !relative.hasSuffix(".partial.etag"),
+            guard !relative.hasSuffix(".partial"), !relative.hasSuffix(".partial.etag"),
                 let attributes = try attributesIfPresent(at: item),
                 attributes[.type] as? FileAttributeType == .typeRegular
             else { continue }
-            rootFiles.insert(relative)
+            files.insert(relative)
         }
-        return (bundles, rootFiles)
+        return (bundles, files)
     }
 
     /// Adopt only after the pinned listing covers every locally cached bundle.
@@ -74,7 +75,7 @@ enum ModelCache {
         guard let contents = try legacyCacheContents(at: repoPath, revision: revision) else { return }
         let marker = repoPath.appendingPathComponent(revisionMarkerName)
         var listedBundles: Set<String> = []
-        var listedRoots: Set<String> = []
+        var listedFiles: Set<String> = []
         var invalidBundles: Set<String> = []
         var invalidFiles: Set<URL> = []
         var keptFiles: [(url: URL, bundle: String?)] = []
@@ -88,13 +89,9 @@ enum ModelCache {
                     components[...$0].joined(separator: "/")
                 }
             if let bundle { listedBundles.insert(bundle) }
-            if !localPath.contains("/") { listedRoots.insert(localPath) }
+            listedFiles.insert(localPath)
             let destination = repoPath.appendingPathComponent(localPath)
-            guard file.size > 0,
-                let attributes = try attributesIfPresent(at: destination),
-                attributes[.type] as? FileAttributeType == .typeRegular,
-                (attributes[.size] as? NSNumber)?.int64Value == Int64(file.size)
-            else {
+            guard try hasMatchingContent(file, at: destination) else {
                 if let bundle {
                     invalidBundles.insert(bundle)
                 } else {
@@ -105,8 +102,8 @@ enum ModelCache {
             keptFiles.append((destination, bundle))
         }
         invalidBundles.formUnion(contents.bundles.subtracting(listedBundles))
-        for rootFile in contents.rootFiles.subtracting(listedRoots) {
-            invalidFiles.insert(repoPath.appendingPathComponent(rootFile))
+        for file in contents.files.subtracting(listedFiles) {
+            invalidFiles.insert(repoPath.appendingPathComponent(file))
         }
         var removals = invalidBundles.sorted().map {
             $0.isEmpty ? repoPath : repoPath.appendingPathComponent($0)
@@ -125,6 +122,55 @@ enum ModelCache {
         }
         try fm.createDirectory(at: repoPath, withIntermediateDirectories: true)
         try Data((revision + "\n").utf8).write(to: marker, options: .atomic)
+    }
+
+    /// Size is only a pre-check: an unknown size can still match its content ID.
+    private static func hasMatchingContent(_ file: RemoteFile, at destination: URL) throws -> Bool {
+        guard let contentID = file.contentID,
+            let attributes = try attributesIfPresent(at: destination),
+            attributes[.type] as? FileAttributeType == .typeRegular,
+            let size = (attributes[.size] as? NSNumber)?.int64Value,
+            file.size < 0 || size == Int64(file.size)
+        else { return false }
+
+        let expected: String
+        let hexLength: Int
+        switch contentID {
+        case .lfsSHA256(let oid):
+            expected = oid.lowercased()
+            hexLength = 64
+        case .gitBlobSHA1(let oid):
+            expected = oid.lowercased()
+            hexLength = 40
+        }
+        guard expected.utf8.count == hexLength,
+            expected.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) })
+        else { return false }
+
+        do {
+            switch contentID {
+            case .lfsSHA256:
+                return try hashFile(at: destination, using: SHA256()) == expected
+            case .gitBlobSHA1:
+                var hasher = Insecure.SHA1()
+                hasher.update(data: Data("blob \(size)\0".utf8))
+                return try hashFile(at: destination, using: hasher) == expected
+            }
+        } catch {
+            guard isMissingFile(error) else { throw error }
+            return false
+        }
+    }
+
+    /// Stream large weights in bounded chunks rather than materializing them in memory.
+    private static func hashFile<H: HashFunction>(at url: URL, using initialHasher: H) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var hasher = initialHasher
+        while let chunk = try handle.read(upToCount: 1_048_576), !chunk.isEmpty {
+            hasher.update(data: chunk)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     static func localPath(for remotePath: String, subPath: String?) -> String {
