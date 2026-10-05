@@ -109,6 +109,11 @@ enum ModelCache {
             $0.isEmpty ? repoPath : repoPath.appendingPathComponent($0)
         }
         removals.append(contentsOf: invalidFiles)
+        // Rejected or missing files must not return through finished-partial reuse.
+        for file in invalidFiles {
+            removals.append(file.appendingPathExtension("partial"))
+            removals.append(file.appendingPathExtension("partial.etag"))
+        }
         for file in keptFiles where file.bundle.map({ !invalidBundles.contains($0) }) ?? true {
             removals.append(file.url.appendingPathExtension("partial"))
             removals.append(file.url.appendingPathExtension("partial.etag"))

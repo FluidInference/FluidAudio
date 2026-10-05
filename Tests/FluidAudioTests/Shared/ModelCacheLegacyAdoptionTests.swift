@@ -295,21 +295,95 @@ final class ModelCacheLegacyAdoptionTests: XCTestCase {
         XCTAssertFalse(ModelCache.allModelsExist(at: repoPath, models: ["encoder.mlmodelc"]))
     }
 
-    func testKeptFileLosesStaleSidecarsButRemovedFileKeepsThem() throws {
-        for file in ["kept.json", "removed.json"] {
-            try makeFile(file, contents: file == "kept.json" ? "local" : "truncated")
-            try makeFile(file + ".partial", contents: "par")
+    func testKeptRejectedAndMissingFilesLoseStaleSidecars() throws {
+        for file in ["kept.json", "removed.json", "missing.json"] {
+            if file != "missing.json" { try makeFile(file, contents: file == "kept.json" ? "local" : "stale") }
+            try makeFile(file + ".partial", contents: "stale")
             try makeFile(file + ".partial.etag", contents: "\"etag\"")
         }
 
-        try prepare([listedFile(path: "kept.json", size: 5), listedFile(path: "removed.json", size: 5)])
+        try prepare([
+            listedFile(path: "kept.json", size: 5),
+            listedFile(path: "removed.json", size: 5),
+            listedFile(path: "missing.json", size: 5),
+        ])
 
         XCTAssertTrue(exists("kept.json"))
         XCTAssertFalse(exists("kept.json.partial"))
         XCTAssertFalse(exists("kept.json.partial.etag"))
         XCTAssertFalse(exists("removed.json"))
-        XCTAssertTrue(exists("removed.json.partial"))
-        XCTAssertTrue(exists("removed.json.partial.etag"))
+        XCTAssertFalse(exists("missing.json"))
+        for file in ["removed.json", "missing.json"] {
+            XCTAssertFalse(exists(file + ".partial"))
+            XCTAssertFalse(exists(file + ".partial.etag"))
+        }
+        XCTAssertTrue(ModelCache.matchesRevision(at: repoPath, revision: revision))
+    }
+
+    func testRejectedAndMissingLegacyFilesCannotReuseFinishedStalePartials() async throws {
+        try makeFile("metadata/rejected.json", contents: "stale")
+        for file in ["rejected.json", "missing.json"] {
+            try makeFile("metadata/" + file + ".partial", contents: "stale")
+            try makeFile("metadata/" + file + ".partial.etag", contents: "\"old-etag\"")
+        }
+        TreeStubURLProtocol.trees = [
+            "metadata": [
+                TreeStubURLProtocol.fileEntry("metadata/rejected.json", contents: "fresh", lfs: false),
+                TreeStubURLProtocol.fileEntry("metadata/missing.json", contents: "fresh", lfs: false),
+            ]
+        ]
+        TreeStubURLProtocol.fileBody = Data("fresh".utf8)
+
+        try await ModelHub.download(
+            .diarizer, subdirectory: "metadata", to: repoPath, configuration: stubConfiguration)
+
+        XCTAssertEqual(TreeStubURLProtocol.fileRequestCount, 2, "both paths must fetch fresh bytes")
+        for file in ["rejected.json", "missing.json"] {
+            XCTAssertEqual(
+                try Data(contentsOf: repoPath.appendingPathComponent("metadata/" + file)), Data("fresh".utf8))
+            XCTAssertFalse(exists("metadata/" + file + ".partial"))
+            XCTAssertFalse(exists("metadata/" + file + ".partial.etag"))
+        }
+        XCTAssertTrue(ModelCache.matchesRevision(at: repoPath.appendingPathComponent("metadata"), revision: revision))
+    }
+
+    func testRepoRefetchesRequestedFileWithoutFetchingRejectedOtherVariant() async throws {
+        let repo = Repo.diarizer
+        let streaming = ModelNames.getRequiredModelNames(for: repo, variant: nil).sorted()
+        let offline = try XCTUnwrap(
+            ModelNames.getRequiredModelNames(for: repo, variant: "offline").sorted().first { $0.hasSuffix(".mlmodelc") }
+        )
+        var trees: [String: [[String: Any]]] = ["": []]
+        for name in streaming + [offline] {
+            try makeFile("\(repo.folderName)/\(name)/config.json", contents: name == offline ? "stale" : "local")
+            trees["", default: []].append(["path": name, "type": "directory"])
+            trees[name] = [TreeStubURLProtocol.fileEntry("\(name)/config.json")]
+        }
+        let requested = "plda-parameters.json"
+        try makeFile("\(repo.folderName)/\(requested)", contents: "stale")
+        try makeFile("\(repo.folderName)/\(requested).partial", contents: "stale")
+        try makeFile("\(repo.folderName)/\(requested).partial.etag", contents: "\"old-etag\"")
+        trees["", default: []].append(TreeStubURLProtocol.fileEntry(requested, contents: "fresh", lfs: false))
+        TreeStubURLProtocol.trees = trees
+        TreeStubURLProtocol.fileBody = Data("fresh".utf8)
+
+        try await ModelHub.download(
+            repo, to: repoPath, additionalModelNames: [requested], configuration: stubConfiguration)
+
+        XCTAssertEqual(TreeStubURLProtocol.fileRequestCount, 1, "only the caller's rejected file must be fetched")
+        XCTAssertEqual(
+            try Data(contentsOf: repoPath.appendingPathComponent("\(repo.folderName)/\(requested)")), Data("fresh".utf8)
+        )
+        XCTAssertFalse(exists("\(repo.folderName)/\(requested).partial"))
+        XCTAssertFalse(exists("\(repo.folderName)/\(requested).partial.etag"))
+        XCTAssertFalse(exists("\(repo.folderName)/\(offline)"))
+        for name in streaming {
+            XCTAssertEqual(
+                try Data(contentsOf: repoPath.appendingPathComponent("\(repo.folderName)/\(name)/config.json")),
+                Data("local".utf8))
+        }
+        XCTAssertTrue(
+            ModelCache.matchesRevision(at: repoPath.appendingPathComponent(repo.folderName), revision: revision))
     }
 
     func testConcurrentAdoptersTolerateDisappearingFiles() async throws {
