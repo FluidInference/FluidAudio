@@ -136,6 +136,7 @@ public final class DiarizerManager {
     /// - Returns: `DiarizationResult` containing:
     ///   - `segments`: Array of speaker segments with speaker IDs, timestamps, and embeddings
     ///   - `speakerDatabase`: Dictionary mapping speaker IDs to embeddings (only when debugMode enabled)
+    ///   - `chunkEmbeddings`: Per-chunk speaker embeddings (only when exposeChunkEmbeddings enabled)
     ///   - `timings`: Performance metrics (only when debugMode enabled)
     /// - Throws: DiarizerError if not initialized or processing fails
     ///
@@ -174,12 +175,13 @@ public final class DiarizerManager {
         var chunkBuffer = [Float](repeating: 0.0, count: max(chunkSize, 1))
 
         var allSegments: [TimedSpeakerSegment] = []
+        var allChunkEmbeddings: [ChunkEmbedding] = []
 
         let startIndex = samples.startIndex
         let endIndex = samples.endIndex
         let totalSamples = samples.distance(from: startIndex, to: endIndex)
 
-        for chunkStartOffset in stride(from: 0, to: totalSamples, by: stepSize) {
+        for (chunkIndex, chunkStartOffset) in stride(from: 0, to: totalSamples, by: stepSize).enumerated() {
             let chunkStart = samples.index(startIndex, offsetBy: chunkStartOffset)
             let remainingSamples = samples.distance(from: chunkStart, to: endIndex)
             let chunkEndOffset = min(chunkSize, remainingSamples)
@@ -187,8 +189,9 @@ public final class DiarizerManager {
             let chunk = samples[chunkStart..<chunkEnd]
             let chunkOffset = Double(chunkStartOffset) / Double(sampleRate) + startTime
 
-            let (chunkSegments, chunkTimings) = try processChunkWithSpeakerTracking(
+            let (chunkSegments, chunkEmbeddings, chunkTimings) = try processChunkWithSpeakerTracking(
                 chunk,
+                chunkIndex: chunkIndex,
                 chunkOffset: chunkOffset,
                 models: models,
                 sampleRate: sampleRate,
@@ -196,6 +199,7 @@ public final class DiarizerManager {
                 chunkBuffer: &chunkBuffer
             )
             allSegments.append(contentsOf: chunkSegments)
+            allChunkEmbeddings.append(contentsOf: chunkEmbeddings)
 
             segmentationTime += chunkTimings.segmentationTime
             embeddingTime += chunkTimings.embeddingTime
@@ -209,6 +213,8 @@ public final class DiarizerManager {
         let postProcessingStartTime = Date()
         let filteredSegments = allSegments  // No post-processing
         postProcessingTime = Date().timeIntervalSince(postProcessingStartTime)
+
+        let publicChunkEmbeddings = config.exposeChunkEmbeddings ? allChunkEmbeddings : nil
 
         if config.debugMode {
             let timings = PipelineTimings(
@@ -227,9 +233,11 @@ public final class DiarizerManager {
             }
 
             return DiarizationResult(
-                segments: filteredSegments, speakerDatabase: speakerDB, timings: timings)
+                segments: filteredSegments, speakerDatabase: speakerDB,
+                chunkEmbeddings: publicChunkEmbeddings, timings: timings)
         } else {
-            return DiarizationResult(segments: filteredSegments)
+            return DiarizationResult(
+                segments: filteredSegments, chunkEmbeddings: publicChunkEmbeddings)
         }
     }
 
@@ -248,18 +256,21 @@ public final class DiarizerManager {
     ///
     /// - Parameters:
     ///   - chunk: Audio chunk to process (can be any RandomAccessCollection)
+    ///   - chunkIndex: Zero-based index of this chunk in the full audio
     ///   - chunkOffset: Time offset of this chunk in the full audio
     ///   - models: Diarization models for processing
     ///   - sampleRate: Audio sample rate
-    /// - Returns: Tuple of (segments with speaker IDs, timing metrics)
+    /// - Returns: Tuple of (segments with speaker IDs, chunk embeddings — empty unless
+    ///   `config.exposeChunkEmbeddings`, timing metrics)
     private func processChunkWithSpeakerTracking<C>(
         _ chunk: C,
+        chunkIndex: Int,
         chunkOffset: Double,
         models: DiarizerModels,
         sampleRate: Int = 16000,
         chunkSize: Int,
         chunkBuffer: inout [Float]
-    ) throws -> ([TimedSpeakerSegment], ChunkTimings)
+    ) throws -> ([TimedSpeakerSegment], [ChunkEmbedding], ChunkTimings)
     where C: RandomAccessCollection, C.Element == Float, C.Index == Int {
         let segmentationStartTime = Date()
 
@@ -387,13 +398,68 @@ public final class DiarizerManager {
             speakerActivities: speakerActivities
         )
 
+        let chunkEmbeddings =
+            config.exposeChunkEmbeddings
+            ? Self.buildChunkEmbeddings(
+                chunkIndex: chunkIndex,
+                speakerIds: speakerIds,
+                embeddings: embeddings,
+                binarizedSegments: binarizedSegments,
+                slidingWindow: slidingFeature.slidingWindow
+            )
+            : []
+
         let timings = ChunkTimings(
             segmentationTime: segmentationTime,
             embeddingTime: embeddingTime,
             clusteringTime: clusteringTime
         )
 
-        return (segments, timings)
+        return (segments, chunkEmbeddings, timings)
+    }
+
+    /// Map one chunk's speaker-tracking output to the public `[ChunkEmbedding]`
+    /// representation: one entry per local speaker that received a speaker ID,
+    /// carrying the same `speakerId` and `embedding256` that speaker's segments
+    /// carry. Local speakers filtered for low activity or an invalid embedding
+    /// (empty ID) are skipped.
+    ///
+    /// A speaker can have an entry in a chunk without a segment there: an ID needs
+    /// only `minActiveFramesCount` active frames (and no duration at all when it
+    /// matches an existing speaker), while a segment needs one contiguous run of
+    /// `minSpeechDuration`. The span runs from the speaker's first to its last
+    /// active frame in the chunk, as in the offline pipeline.
+    ///
+    /// `internal` so unit tests can exercise the mapping without loading models.
+    static func buildChunkEmbeddings(
+        chunkIndex: Int,
+        speakerIds: [String],
+        embeddings: [[Float]],
+        binarizedSegments: [[[Float]]],
+        slidingWindow: SlidingWindow
+    ) -> [ChunkEmbedding] {
+        guard let frames = binarizedSegments.first else { return [] }
+        var result: [ChunkEmbedding] = []
+        for (speakerIndex, speakerId) in speakerIds.enumerated() {
+            guard !speakerId.isEmpty, speakerIndex < embeddings.count else { continue }
+            let isActive = { (frame: [Float]) in speakerIndex < frame.count && frame[speakerIndex] > 0 }
+            guard let firstFrame = frames.firstIndex(where: isActive),
+                let lastFrame = frames.lastIndex(where: isActive)
+            else {
+                continue
+            }
+            result.append(
+                ChunkEmbedding(
+                    speakerId: speakerId,
+                    chunkIndex: chunkIndex,
+                    speakerIndex: speakerIndex,
+                    startTimeSeconds: slidingWindow.time(forFrame: firstFrame),
+                    endTimeSeconds: slidingWindow.time(forFrame: lastFrame + 1),
+                    embedding256: embeddings[speakerIndex]
+                )
+            )
+        }
+        return result
     }
 
     /// Count activity frames per speaker.
