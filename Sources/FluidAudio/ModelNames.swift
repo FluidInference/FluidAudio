@@ -118,6 +118,12 @@ public enum Repo: String, CaseIterable, Sendable {
     /// Conversion lives in mobius (`models/tts/inflect-v2`).
     case inflectMicro = "FluidInference/inflect-v2-coreml/micro"
     case inflectNano = "FluidInference/inflect-v2-coreml/nano"
+    /// Paradee-8M (Kokoro-82M distilled to 8M, single voice). One repo with two
+    /// precision subdirectories (`int8/`, `fp32/`), each holding
+    /// `ParadeeText.mlmodelc` + `ParadeeAcoustic.mlmodelc` + `vocab.json`.
+    /// Conversion notes are on the model card.
+    case paradeeInt8 = "FluidInference/paradee-8m-coreml/int8"
+    case paradeeFp32 = "FluidInference/paradee-8m-coreml/fp32"
     /// Chatterbox Multilingual (ResembleAI, 23 languages, **beta**) — T3 Llama-520M
     /// AR speech-token generator (CFG batch 2, MLState KV decode) + S3Gen
     /// flow-matching mel decoder + HiFT vocoder. Repo root holds the
@@ -232,6 +238,10 @@ public enum Repo: String, CaseIterable, Sendable {
             return "inflect-v2-coreml/micro"
         case .inflectNano:
             return "inflect-v2-coreml/nano"
+        case .paradeeInt8:
+            return "paradee-8m-coreml/int8"
+        case .paradeeFp32:
+            return "paradee-8m-coreml/fp32"
         }
     }
 
@@ -262,6 +272,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/StyleTTS-2-coreml"
         case .inflectMicro, .inflectNano:
             return "FluidInference/inflect-v2-coreml"
+        case .paradeeInt8, .paradeeFp32:
+            return "FluidInference/paradee-8m-coreml"
         default:
             return "FluidInference/\(name)"
         }
@@ -319,6 +331,10 @@ public enum Repo: String, CaseIterable, Sendable {
             return "micro"
         case .inflectNano:
             return "nano"
+        case .paradeeInt8:
+            return "int8"
+        case .paradeeFp32:
+            return "fp32"
         default:
             return nil
         }
@@ -377,6 +393,10 @@ public enum Repo: String, CaseIterable, Sendable {
             return "inflect-v2-coreml/micro"
         case .inflectNano:
             return "inflect-v2-coreml/nano"
+        case .paradeeInt8:
+            return "paradee-8m-coreml/int8"
+        case .paradeeFp32:
+            return "paradee-8m-coreml/fp32"
         default:
             return name.replacingOccurrences(of: "-coreml", with: "")
         }
@@ -1437,6 +1457,16 @@ public enum ModelNames {
             [encoderFile] + InflectConstants.frameBuckets.map { synthesizerFile(frames: $0) })
     }
 
+    /// Paradee-8M model names. File names match
+    /// `FluidInference/paradee-8m-coreml/<int8|fp32>/`.
+    public enum Paradee {
+        public static let textFile = "ParadeeText.mlmodelc"
+        public static let acousticFile = "ParadeeAcoustic.mlmodelc"
+        public static let vocabFile = "vocab.json"
+
+        public static let requiredModels: Set<String> = [textFile, acousticFile, vocabFile]
+    }
+
     /// LuxTTS (ZipVoice-Distill) model names. The HF repo publishes the same
     /// text encoder + flow-matching decoder in two graph layouts:
     ///   - `gpu/`  — original graph; fastest on Mac GPU (do NOT run on ANE:
@@ -1859,6 +1889,8 @@ public enum ModelNames {
             return ModelNames.LuxTts.requiredFiles(variant: variant)
         case .inflectMicro, .inflectNano:
             return ModelNames.Inflect.requiredModels
+        case .paradeeInt8, .paradeeFp32:
+            return ModelNames.Paradee.requiredModels
         }
     }
 }

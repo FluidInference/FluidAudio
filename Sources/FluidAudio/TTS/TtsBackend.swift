@@ -71,4 +71,12 @@ public enum TtsBackend: Sendable {
     ///
     /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
     case chatterboxNano
+    /// Paradee-8M (beta) — Kokoro-82M distilled to 8.07M params, one voice
+    /// (`af_heart`), 24 kHz English. Two CoreML graphs (text side → host
+    /// duration expansion + source noise → acoustic side with the in-graph
+    /// phase-lock filter); KokoroAne's English frontend feeds it. CPU / ANE
+    /// only (the LSTMs abort on the GPU).
+    ///
+    /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
+    case paradee
 }

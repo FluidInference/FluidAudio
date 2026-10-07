@@ -65,6 +65,7 @@ Reference each language as `--corpus minimax-<lang>`:
 | StyleTTS2   | `minimax-english`  | `english` only (LibriTTS iteration_3, zero-shot from `--reference` audio) |
 | Chatterbox (beta) | `minimax-english` | 18 of the 23 upstream languages via `--language` (zh/ja/he/ko/ru unported); built-in voice, macOS 15+ |
 | Chatterbox Nano (beta) | `minimax-english` | `english` only; inline paralinguistic tags (`[laugh]`, `[chuckle]`, …); built-in voice, macOS 15+ |
+| Paradee (beta) | `minimax-english` | `english` only (`af_heart`); `--variant int8` (default) or `fp32` |
 | Supertonic-3 | `minimax-english` | 31 ISO codes minus `zh`: `english`, `korean`, `japanese`, `arabic`, `bulgarian`, `czech`, `danish`, `german`, `greek`, `spanish`, `estonian`, `finnish`, `french`, `hindi`, `croatian`, `hungarian`, `indonesian`, `italian`, `lithuanian`, `latvian`, `dutch`, `polish`, `portuguese`, `romanian`, `russian`, `slovak`, `slovenian`, `swedish`, `turkish`, `ukrainian`, `vietnamese`. Voice styling via `--voice-style <preset.json>` |
 
 Lines beginning with `#` are comments. Custom corpora can still be
