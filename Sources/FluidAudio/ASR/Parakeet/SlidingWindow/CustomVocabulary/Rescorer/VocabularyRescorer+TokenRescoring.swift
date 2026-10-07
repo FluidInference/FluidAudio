@@ -410,8 +410,10 @@ extension VocabularyRescorer {
     ///
     /// Uses the same candidate discovery and safety rules as ``ctcTokenRescore``
     /// without computing or consuming CTC probabilities. A false result permits
-    /// skipping acoustic inference. When acoustic rescue is enabled, returns true
-    /// conservatively because rescue can find terms absent from text candidates.
+    /// skipping acoustic inference for transcript replacements. Callers needing
+    /// standalone keyword detections must still run acoustic inference. When
+    /// acoustic rescue is enabled, returns true conservatively because rescue
+    /// can find terms absent from text candidates.
     ///
     /// - Parameters:
     ///   - transcript: Untouched transcript from the TDT decoder.

@@ -109,12 +109,13 @@ final class VocabularyCandidateDiscoveryTests: XCTestCase {
             XCTAssertEqual(discovery, !evidence.candidates.isEmpty, "\(transcript) -> \(term)")
             let session = try await VocabularyBoostingSession(
                 vocabulary: context, ctcModels: models, config: .init(spotterRescueEnabled: false))
-            let threshold = ContextBiasingConstants.rescorerConfig(forVocabSize: context.terms.count).minSimilarity
+            let sessionThreshold = ContextBiasingConstants.rescorerConfig(forVocabSize: context.terms.count)
+                .minSimilarity
             XCTAssertEqual(
                 session.hasCTCRescoringCandidates(text: transcript, tokenTimings: timings),
                 rescorer.hasCTCRescoringCandidates(
                     transcript: transcript, tokenTimings: timings,
-                    minSimilarity: max(threshold, context.minSimilarity)))
+                    minSimilarity: max(sessionThreshold, context.minSimilarity)))
             if discovery { positive += 1 } else { negative += 1 }
             XCTAssertFalse(rescorer.hasCTCRescoringCandidates(transcript: transcript, tokenTimings: []))
             if threshold == 0.99 { XCTAssertFalse(discovery) }
