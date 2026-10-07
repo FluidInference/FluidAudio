@@ -46,6 +46,29 @@ extension StreamingNemotronMultilingualAsrManager {
     private static let minSpeechWindows = 2  // spans shorter than 160 ms are not rescued
     private static let maxSpanSamples = 15 * 16000  // give up past 15 s (span emitted nothing that long)
 
+    /// Project the token/timing and rescue-span state onto the live transcript
+    /// without changing the full accumulator used by polling and finalization.
+    nonisolated internal static func partialPublicationTokenIds(
+        liveIds: [Int], liveTimings: [TokenTiming], langTagTokenIds: Set<Int>,
+        openSpan: (startFrame: Int, lastSpeechFrame: Int, preRollFrames: Int, overflowed: Bool)?,
+        nextSpanStartFrame: Int
+    ) -> [Int] {
+        liveIds
+    }
+
+    /// Shared publication path for normal chunk decode and committed rescues.
+    internal func publishPartialTranscript(using callback: NemotronMultilingualPartialCallback?) {
+        guard let callback = callback, let tokenizer = tokenizer else { return }
+        let ids = Self.partialPublicationTokenIds(
+            liveIds: accumulatedTokenIds, liveTimings: accumulatedTokenTimings,
+            langTagTokenIds: config.langTagTokenIds,
+            openSpan: rescueSpanOpen
+                ? (rescueSpanStartFrame, rescueSpanLastSpeechFrame, rescueSpanPreRollFrames, rescueSpanOverflowed)
+                : nil,
+            nextSpanStartFrame: rescueFrameCursor - rescuePreRollTail.count / ASRConstants.samplesPerEncoderFrame)
+        callback(tokenizer.decode(ids: ids).text)
+    }
+
     /// `processChunk` plus blank-span bookkeeping. All streaming call sites
     /// route through this; the rescue itself calls `processChunk` directly.
     internal func processChunkTracked(_ samples: [Float], nextChunkSamples: [Float]? = nil) async throws {
@@ -307,9 +330,7 @@ extension StreamingNemotronMultilingualAsrManager {
             "Blank-span rescue recovered \(stagedIds.count) token(s) from a "
                 + String(format: "%.2f", Double(span.count) / 16000.0) + "s span at frame \(spanStartFrame)"
         )
-        if let callback = savedPartialCallback {
-            callback(tokenizer.decode(ids: accumulatedTokenIds).text)
-        }
+        publishPartialTranscript(using: savedPartialCallback)
     }
 
     /// Insert rescued tokens at the span's timestamp position instead of
