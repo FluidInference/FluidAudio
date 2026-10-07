@@ -24,6 +24,40 @@ The paper introduces a dynamic programming algorithm for CTC-based keyword spott
 
 Both approaches achieve identical 99.4% accuracy. Approach 1 is faster but only works with TDT-CTC-110M because that model has a built-in CTC head. Approach 2 works with any TDT model but loads a separate CTC encoder.
 
+## Optional preflight for transcript-only consumers
+
+A prepared `VocabularyBoostingSession` can check whether a transcript has any
+candidate requiring CTC evidence before running acoustic rescoring:
+
+```swift
+if session.hasCTCRescoringCandidates(
+    text: result.text,
+    tokenTimings: result.tokenTimings ?? []
+) {
+    let rescored = await session.rescore(
+        text: result.text,
+        tokenTimings: result.tokenTimings ?? [],
+        audioSamples: audio
+    )
+    // Use rescored.text when a replacement was applied.
+}
+// Otherwise keep result.text.
+```
+
+This uses the same aliases, compounds, similarity thresholds and safety rules as
+rescoring. It performs no CTC inference. An empty vocabulary or timing list
+returns `false`. With acoustic rescue enabled, nonempty input returns `true`
+conservatively: the spotter can find a term even when text matching cannot.
+Disabling rescue changes recognition behavior; choose that policy separately
+from whether to use preflight.
+
+Use this only when consuming transcript replacements. Applications that also
+need `detectedTerms` must still run `rescore`: keyword detections can exist
+without a text replacement candidate. The existing `rescore` API retains that
+behavior. Callers managing their own CTC head can use
+`VocabularyRescorer.hasCTCRescoringCandidates` with the same `minSimilarity` they
+pass to `ctcTokenRescore`.
+
 ## Model Compatibility
 
 FluidAudio supports two ASR models with different architectures:

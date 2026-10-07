@@ -423,6 +423,7 @@ extension VocabularyRescorer {
         tokenTimings: [TokenTiming],
         minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor
     ) -> Bool {
+        guard !vocabulary.terms.isEmpty, !tokenTimings.isEmpty else { return false }
         if config.spotterRescueEnabled { return true }
         var candidateEvidence: CandidateEvidenceCollector?
         var candidateFound: Bool? = false
@@ -532,8 +533,6 @@ extension VocabularyRescorer {
         }
         var replacedIndices = Set<Int>()
         var pendingReplacements: [PendingReplacement] = []
-
-        // Build normalized vocabulary set for guard checks
 
         // Lowest per-term similarity across the vocabulary. The BK-tree search
         // bound is derived from this floor so that terms with a lower per-term
@@ -762,8 +761,6 @@ extension VocabularyRescorer {
         }
         var replacedIndices = Set<Int>()
         var pendingReplacements: [PendingReplacement] = []  // Two-pass: collect first, apply later
-
-        // Build normalized vocabulary set for guard checks
 
         let normalizedWords = wordTimings.map { Self.normalizeForSimilarity($0.word) }
 

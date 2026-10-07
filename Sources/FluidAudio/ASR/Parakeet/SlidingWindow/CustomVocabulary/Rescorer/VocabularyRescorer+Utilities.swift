@@ -61,6 +61,21 @@ extension VocabularyRescorer {
         return forms
     }
 
+    /// Prepare immutable term forms once, retaining the default matcher ordering.
+    static func prepareNormalizedForms(for vocabulary: CustomVocabularyContext) -> [TermFormKey: [NormalizedForm]] {
+        var aliasesByCanonical: [String: [String]] = [:]
+        for term in vocabulary.terms {
+            aliasesByCanonical[term.textLowercased, default: []].append(contentsOf: term.aliases ?? [])
+        }
+        var formsByText: [TermFormKey: [NormalizedForm]] = [:]
+        for term in vocabulary.terms {
+            formsByText[TermFormKey(term)] = Self.normalizedForms(
+                canonicalTerm: term.text,
+                aliases: (aliasesByCanonical[term.textLowercased] ?? []) + (term.aliases ?? []))
+        }
+        return formsByText
+    }
+
     /// Build all normalized forms (canonical + aliases) for a vocabulary term
     func buildNormalizedForms(for term: CustomVocabularyTerm) -> [NormalizedForm] {
         if let prepared = normalizedTermForms[TermFormKey(term)] { return prepared }

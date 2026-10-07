@@ -192,16 +192,7 @@ public struct VocabularyRescorer: Sendable {
         bkTree: BKTree?,
         bkTreeMaxDistance: Int
     ) {
-        var aliasesByCanonical: [String: [String]] = [:]
-        for term in vocabulary.terms {
-            aliasesByCanonical[term.textLowercased, default: []].append(contentsOf: term.aliases ?? [])
-        }
-        var formsByText: [TermFormKey: [NormalizedForm]] = [:]
-        for term in vocabulary.terms {
-            formsByText[TermFormKey(term)] = Self.normalizedForms(
-                canonicalTerm: term.text,
-                aliases: (aliasesByCanonical[term.textLowercased] ?? []) + (term.aliases ?? []))
-        }
+        let formsByText = Self.prepareNormalizedForms(for: vocabulary)
         self.normalizedTermForms = formsByText
         self.vocabularyNormalizedSet = Set(formsByText.values.flatMap { $0.map(\.normalized) })
         self.spotter = spotter

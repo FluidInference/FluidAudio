@@ -6,6 +6,28 @@ import XCTest
 
 @MainActor
 final class VocabularyCandidateDiscoveryTests: XCTestCase {
+    func testPreparedFormsPreserveAliasOrderingAndGuardSetWithoutModels() throws {
+        let terms = [
+            CustomVocabularyTerm(text: "ESLint", aliases: ["E S lint", "es lint"]),
+            CustomVocabularyTerm(text: "eslint", aliases: ["E S LINT", "easylint"]),
+            CustomVocabularyTerm(text: "Claude Code", aliases: ["cloud code", "", "!!!"]),
+            CustomVocabularyTerm(text: "AI", aliases: nil),
+        ]
+        let forms = VocabularyRescorer.prepareNormalizedForms(for: CustomVocabularyContext(terms: terms))
+        for term in terms {
+            let aliases =
+                terms.filter { $0.textLowercased == term.textLowercased }
+                .flatMap { $0.aliases ?? [] } + (term.aliases ?? [])
+            let expected = VocabularyRescorer.normalizedForms(canonicalTerm: term.text, aliases: aliases)
+            XCTAssertEqual(try XCTUnwrap(forms[VocabularyRescorer.TermFormKey(term)]), expected)
+        }
+        let originalGuardSet = Set(
+            terms.flatMap { [$0.text] + ($0.aliases ?? []) }
+                .map(VocabularyRescorer.normalizeForSimilarity).filter { !$0.isEmpty })
+        XCTAssertEqual(Set(forms.values.flatMap { $0.map(\.normalized) }), originalGuardSet)
+        XCTAssertTrue(VocabularyRescorer.prepareNormalizedForms(for: CustomVocabularyContext(terms: [])).isEmpty)
+    }
+
     func testDiscoveryMatchesExactScoringCandidatesWithInstalledTokenizerAndAcousticEvidence() async throws {
         let directory = CtcModels.defaultCacheDirectory(for: .ctc110m)
         guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("tokenizer.json").path),
@@ -85,6 +107,14 @@ final class VocabularyCandidateDiscoveryTests: XCTestCase {
                 transcript: transcript, tokenTimings: timings,
                 logProbs: probabilities.logProbs, frameDuration: probabilities.frameDuration)
             XCTAssertEqual(discovery, !evidence.candidates.isEmpty, "\(transcript) -> \(term)")
+            let session = try await VocabularyBoostingSession(
+                vocabulary: context, ctcModels: models, config: .init(spotterRescueEnabled: false))
+            let threshold = ContextBiasingConstants.rescorerConfig(forVocabSize: context.terms.count).minSimilarity
+            XCTAssertEqual(
+                session.hasCTCRescoringCandidates(text: transcript, tokenTimings: timings),
+                rescorer.hasCTCRescoringCandidates(
+                    transcript: transcript, tokenTimings: timings,
+                    minSimilarity: max(threshold, context.minSimilarity)))
             if discovery { positive += 1 } else { negative += 1 }
             XCTAssertFalse(rescorer.hasCTCRescoringCandidates(transcript: transcript, tokenTimings: []))
             if threshold == 0.99 { XCTAssertFalse(discovery) }
@@ -93,9 +123,15 @@ final class VocabularyCandidateDiscoveryTests: XCTestCase {
         XCTAssertGreaterThan(negative, 0)
         let rescue = try await VocabularyRescorer.create(
             spotter: spotter,
-            vocabulary: CustomVocabularyContext(terms: []), ctcModelDirectory: directory)
+            vocabulary: CustomVocabularyContext(terms: [CustomVocabularyTerm(text: "Quilter")]),
+            ctcModelDirectory: directory)
+        XCTAssertFalse(rescue.hasCTCRescoringCandidates(transcript: "", tokenTimings: []))
+        let unrelatedTimings = [TokenTiming(token: "▁unrelated", tokenId: 1, startTime: 0, endTime: 1, confidence: 1)]
         XCTAssertTrue(
-            rescue.hasCTCRescoringCandidates(transcript: "", tokenTimings: []),
-            "Acoustic rescue cannot be skipped by a text-only probe")
+            rescue.hasCTCRescoringCandidates(transcript: "unrelated", tokenTimings: unrelatedTimings),
+            "Acoustic rescue can require evidence without a text candidate")
+        let empty = try await VocabularyRescorer.create(
+            spotter: spotter, vocabulary: CustomVocabularyContext(terms: []), ctcModelDirectory: directory)
+        XCTAssertFalse(empty.hasCTCRescoringCandidates(transcript: "unrelated", tokenTimings: unrelatedTimings))
     }
 }
