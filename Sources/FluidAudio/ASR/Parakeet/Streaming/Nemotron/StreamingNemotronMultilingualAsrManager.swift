@@ -2,9 +2,12 @@ import AVFoundation
 @preconcurrency import CoreML
 import Foundation
 
-/// Callback invoked when new tokens are decoded (for live transcription updates).
-/// Fires with the running transcript text only — the language tag, if any,
-/// is surfaced via `detectedLanguage()`.
+/// Callback delivering cumulative transcript text; language tags use `detectedLanguage()`.
+/// With blank rescue enabled, text is settled and only extends the previous text;
+/// chunks with nothing newly settled may repeat it unchanged. An unresolved blank
+/// span can hold back later text for the 15 s span cap (15.04 s at window granularity)
+/// plus the rest of that chunk in audio time; processing time is additional.
+/// `getPartialTranscript()` may already include that text; `finish()` flushes the rest.
 public typealias NemotronMultilingualPartialCallback = @Sendable (String) -> Void
 
 /// High-level manager for the Nemotron Speech Streaming Multilingual 0.6B pipeline.
@@ -265,6 +268,7 @@ public actor StreamingNemotronMultilingualAsrManager {
 
     // Callbacks
     internal var partialCallback: NemotronMultilingualPartialCallback?
+    internal var partialPublicationSuppressionDepth: Int = 0
 
     // Stats
     internal var processedChunks: Int = 0

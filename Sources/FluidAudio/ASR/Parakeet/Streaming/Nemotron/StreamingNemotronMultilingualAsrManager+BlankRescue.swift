@@ -86,6 +86,7 @@ extension StreamingNemotronMultilingualAsrManager {
     internal func publishPartialTranscript(
         using callback: NemotronMultilingualPartialCallback?, isFinal: Bool = false
     ) {
+        guard partialPublicationSuppressionDepth == 0, !inBlankRescue else { return }
         guard let callback = callback, let tokenizer = tokenizer else { return }
         guard !isFinal, Self.blankRescueEnabled, Self.rescueRmsThreshold > 0 else {
             callback(tokenizer.decode(ids: accumulatedTokenIds).text)
@@ -111,21 +112,23 @@ extension StreamingNemotronMultilingualAsrManager {
         let chunkStartFrame = rescueFrameCursor
         // Normal decode and every rescue in this chunk must settle before
         // any callback can expose text beyond the insertion frontier.
-        let savedPartialCallback = partialCallback
-        partialCallback = nil
-        defer { partialCallback = savedPartialCallback }
-        try await processChunk(samples, nextChunkSamples: nextChunkSamples)
-        rescueFrameCursor += samples.count / ASRConstants.samplesPerEncoderFrame
-        try await updateRescueSpans(chunk: samples, chunkStartFrame: chunkStartFrame)
+        do {
+            partialPublicationSuppressionDepth += 1
+            defer { partialPublicationSuppressionDepth -= 1 }
+            try await processChunk(samples, nextChunkSamples: nextChunkSamples)
+            rescueFrameCursor += samples.count / ASRConstants.samplesPerEncoderFrame
+            try await updateRescueSpans(chunk: samples, chunkStartFrame: chunkStartFrame)
+        }
         // Span resolution can release old tokens even when this chunk's
         // normal decode emitted nothing (including VAD-skipped silence).
-        publishPartialTranscript(using: savedPartialCallback)
+        publishPartialTranscript(using: partialCallback)
     }
 
     /// Close a span left open by end-of-stream. Called from `finish()` after
     /// the trailing chunk is processed and before the transcript is decoded.
     internal func finalizeRescueSpanIfNeeded() async throws {
-        if Self.blankRescueEnabled, Self.rescueRmsThreshold > 0, rescueSpanOpen {
+        guard Self.blankRescueEnabled, Self.rescueRmsThreshold > 0 else { return }
+        if rescueSpanOpen {
             try await closeSpanAndMaybeRescue()
         }
         publishPartialTranscript(using: partialCallback, isFinal: true)
@@ -271,8 +274,7 @@ extension StreamingNemotronMultilingualAsrManager {
         // Suppress partial callbacks for the duration of the trial decode —
         // they would surface unvalidated, out-of-order text. The tracked
         // chunk or finish publishes once all rescues have settled instead.
-        let savedPartialCallback = partialCallback
-        partialCallback = nil
+        partialPublicationSuppressionDepth += 1
 
         inBlankRescue = true
         defer {
@@ -294,7 +296,7 @@ extension StreamingNemotronMultilingualAsrManager {
             chunkCount = savedChunkCount
             processedChunks = savedProcessedChunks
             vadConsecutiveLowChunks = savedVadRun
-            partialCallback = savedPartialCallback
+            partialPublicationSuppressionDepth -= 1
             inBlankRescue = false
         }
 

@@ -174,6 +174,63 @@ final class NemotronMultilingualPublicationTests: XCTestCase {
         XCTAssertEqual(publications.last, "Hallo Welt. कि")
     }
 
+    func testCallbackInstalledDuringRescueCannotPublishTrialTokens() async throws {
+        let manager = Manager()
+        let tokenizer = try makeTokenizer()
+        let originalUpdates = OSAllocatedUnfairLock<[String]>(initialState: [])
+        let replacementUpdates = OSAllocatedUnfairLock<[String]>(initialState: [])
+        await manager.setPartialCallback { text in originalUpdates.withLock { $0.append(text) } }
+        await manager.setPublicationState(
+            tokenizer: tokenizer, ids: [hello, world], timings: [timing(hello, 5), timing(world, 14)])
+        await manager.setRescueDecodeActive(true)
+
+        // The actor may accept a new callback at any decode await. Neither
+        // ordinary nor final publication may expose the trial accumulator.
+        await manager.setPartialCallback { text in replacementUpdates.withLock { $0.append(text) } }
+        await manager.publishCurrentState()
+        await manager.publishCurrentState(isFinal: true)
+        XCTAssertEqual(originalUpdates.withLock { $0 }, [])
+        XCTAssertEqual(replacementUpdates.withLock { $0 }, [])
+
+        await manager.setPublicationState(
+            tokenizer: tokenizer, ids: [hello, period], timings: [timing(hello, 5), timing(period, 17)])
+        await manager.setRescueDecodeActive(false)
+        await manager.publishCurrentState()
+        await manager.publishCurrentState()
+        XCTAssertEqual(originalUpdates.withLock { $0 }, [])
+        XCTAssertEqual(replacementUpdates.withLock { $0 }, ["Hallo.", "Hallo."])
+    }
+
+    func testNestedSuppressionKeepsTheCurrentCallbackUntilTheChunkSettles() async throws {
+        let manager = Manager()
+        let tokenizer = try makeTokenizer()
+        let originalUpdates = OSAllocatedUnfairLock<[String]>(initialState: [])
+        let replacementUpdates = OSAllocatedUnfairLock<[String]>(initialState: [])
+        await manager.setPartialCallback { text in originalUpdates.withLock { $0.append(text) } }
+        await manager.setPublicationState(
+            tokenizer: tokenizer, ids: [hello, period], timings: [timing(hello, 5), timing(period, 17)])
+
+        // Model-free state fixtures use the same counter and publication
+        // method as the tracked chunk and its nested rescue trial decode.
+        await manager.adjustPublicationSuppressionDepth(by: 1)
+        await manager.setPartialCallback { text in replacementUpdates.withLock { $0.append(text) } }
+        await manager.publishCurrentState()
+        await manager.adjustPublicationSuppressionDepth(by: 1)
+        await manager.publishCurrentState(isFinal: true)
+        await manager.adjustPublicationSuppressionDepth(by: -1)
+        await manager.publishCurrentState()
+        XCTAssertEqual(originalUpdates.withLock { $0 }, [])
+        XCTAssertEqual(replacementUpdates.withLock { $0 }, [])
+
+        await manager.adjustPublicationSuppressionDepth(by: -1)
+        await manager.publishCurrentState()
+        await manager.publishCurrentState(isFinal: true)
+        let depth = await manager.partialPublicationSuppressionDepth
+        XCTAssertEqual(depth, 0)
+        XCTAssertEqual(originalUpdates.withLock { $0 }, [])
+        XCTAssertEqual(replacementUpdates.withLock { $0 }, ["Hallo.", "Hallo."])
+    }
+
     private func timing(_ id: Int, _ frame: Int) -> TokenTiming {
         let pieces = [hello: "▁Hallo", period: ".", world: "▁Welt", later: "▁Später", boundary: "▁"]
         let time = Double(frame) * ASRConstants.secondsPerEncoderFrame
@@ -219,7 +276,15 @@ extension StreamingNemotronMultilingualAsrManager {
         rescueSpanSpeechWindows = openSpanStart == nil ? 0 : 1
     }
 
-    fileprivate func publishCurrentState() {
-        publishPartialTranscript(using: partialCallback)
+    fileprivate func setRescueDecodeActive(_ active: Bool) {
+        inBlankRescue = active
+    }
+
+    fileprivate func adjustPublicationSuppressionDepth(by delta: Int) {
+        partialPublicationSuppressionDepth += delta
+    }
+
+    fileprivate func publishCurrentState(isFinal: Bool = false) {
+        publishPartialTranscript(using: partialCallback, isFinal: isFinal)
     }
 }
