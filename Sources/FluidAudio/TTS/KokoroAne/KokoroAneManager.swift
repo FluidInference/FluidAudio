@@ -452,9 +452,18 @@ public actor KokoroAneManager {
     /// and vocab-supported punctuation kept as prosody/pause tokens.
     private func phonemize(text: String) async throws -> String {
         let phonemizer = await ensureEnglishPhonemizer()
-        return try await phonemizer.phonemize(text) { word in
+        let raw = try await phonemizer.phonemize(text) { word in
             try await G2PModel.shared.phonemize(word: word)
         }
+        return Self.misakiOutputForm(raw)
+    }
+
+    /// misaki's flap step for Kokoro v1.0 (`G2P.__call__`): `ɾ` → `T`. The
+    /// lexicon stores the raw flap ("metal" was read as "mattle"). misaki also
+    /// maps the glottal stop `ʔ` → `t`, but this chain reads `ʔn` better than
+    /// `tn` ("button" became "butt"), so `ʔ` is kept.
+    static func misakiOutputForm(_ phonemes: String) -> String {
+        phonemes.replacingOccurrences(of: "ɾ", with: "T")
     }
 
     /// Build (and cache) the English frontend: chain vocab → allowed
