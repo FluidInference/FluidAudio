@@ -10,9 +10,16 @@ public struct KokoroAneStageTimings: Sendable, Equatable {
     public var vocoder: Double = 0
     public var tail: Double = 0
 
+    /// ANE-v3 native source/STFT time; zero for legacy calls.
+    public var nativeSource: Double = 0
+    /// ANE-v3 masked decoder time; zero on the original vocoder path.
+    public var decoder: Double = 0
+    /// ANE-v3 fused generator/iSTFT time; zero on the original vocoder path.
+    public var generator: Double = 0
+
     /// Sum of all stages, in milliseconds.
     public var totalMs: Double {
-        albert + postAlbert + alignment + prosody + noise + vocoder + tail
+        albert + postAlbert + alignment + prosody + noise + vocoder + tail + nativeSource + decoder + generator
     }
 
     public init() {}
@@ -27,6 +34,9 @@ public struct KokoroAneStageTimings: Sendable, Equatable {
         noise += other.noise
         vocoder += other.vocoder
         tail += other.tail
+        nativeSource += other.nativeSource
+        decoder += other.decoder
+        generator += other.generator
     }
 }
 
@@ -72,6 +82,9 @@ public struct KokoroAneSynthesisResult: Sendable {
     /// Per-stage timings.
     public let timings: KokoroAneStageTimings
 
+    /// True when every synthesized chunk used the ANE-v3 fast vocoder.
+    public let usedFastVocoder: Bool
+
     /// Convenience: audio duration in seconds.
     public var durationSeconds: Double {
         Double(samples.count) / Double(sampleRate)
@@ -86,7 +99,8 @@ public struct KokoroAneSynthesisResult: Sendable {
         inputIds: [Int32] = [],
         predictedDurations: [Int32] = [],
         normalizedText: String? = nil,
-        phonemes: String = ""
+        phonemes: String = "",
+        usedFastVocoder: Bool = false
     ) {
         self.samples = samples
         self.sampleRate = sampleRate
@@ -97,6 +111,7 @@ public struct KokoroAneSynthesisResult: Sendable {
         self.normalizedText = normalizedText
         self.phonemes = phonemes
         self.timings = timings
+        self.usedFastVocoder = usedFastVocoder
     }
 
     /// Join per-chunk results in order: samples, ids and durations are
@@ -113,7 +128,8 @@ public struct KokoroAneSynthesisResult: Sendable {
             acousticFrames: parts.reduce(0) { $0 + $1.acousticFrames },
             timings: timings,
             inputIds: parts.flatMap(\.inputIds),
-            predictedDurations: parts.flatMap(\.predictedDurations)
+            predictedDurations: parts.flatMap(\.predictedDurations),
+            usedFastVocoder: !parts.isEmpty && parts.allSatisfy(\.usedFastVocoder)
         )
     }
 }

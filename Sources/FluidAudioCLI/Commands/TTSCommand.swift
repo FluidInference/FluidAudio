@@ -62,6 +62,7 @@ public struct TTS {
         // KokoroAne language variant — only consulted when backend == .kokoroAne.
         // Parsed from the `--variant` flag (en/english/zh/mandarin).
         var kokoroAneVariant: KokoroAneVariant = .english
+        var kokoroVersion: KokoroAneVersion = .legacy
         // Inflect model size — only consulted when backend == .inflect.
         // Parsed from `--variant` (micro/nano) or the backend token
         // (inflect-micro / inflect-nano).
@@ -134,6 +135,13 @@ public struct TTS {
                     metricsPath = arguments[i + 1]
                     i += 1
                 }
+            case "--kokoro-version":
+                guard i + 1 < arguments.count, let version = KokoroAneVersion(rawValue: arguments[i + 1]) else {
+                    print("--kokoro-version expects legacy or v3")
+                    exit(1)
+                }
+                kokoroVersion = version
+                i += 1
             case "--phonemes":
                 treatAsPhonemes = true
             case "--variant", "--model-variant":
@@ -393,7 +401,7 @@ public struct TTS {
         case .kokoroAne:
             await runKokoroAne(
                 text: text, output: output, voice: voice, metricsPath: metricsPath,
-                variant: kokoroAneVariant, lexiconPath: lexiconPath,
+                variant: kokoroAneVariant, version: kokoroVersion, lexiconPath: lexiconPath,
                 treatAsPhonemes: treatAsPhonemes)
         case .styletts2:
             await runStyleTTS2(
@@ -895,7 +903,7 @@ public struct TTS {
 
     private static func runKokoroAne(
         text: String, output: String, voice: String, metricsPath: String?,
-        variant: KokoroAneVariant, lexiconPath: String?, treatAsPhonemes: Bool
+        variant: KokoroAneVariant, version: KokoroAneVersion, lexiconPath: String?, treatAsPhonemes: Bool
     ) async {
         do {
             let tStart = Date()
@@ -907,7 +915,7 @@ public struct TTS {
                 voice == TtsConstants.recommendedVoice
                 ? variant.defaultVoice : voice
             let manager = KokoroAneManager(
-                variant: variant, defaultVoice: resolvedVoice)
+                variant: variant, defaultVoice: resolvedVoice, version: version)
 
             // --lexicon is Mandarin-only. For English, log + ignore so users
             // aren't silently surprised by a flag with no effect.
@@ -980,6 +988,10 @@ public struct TTS {
                     + " noise=\(String(format: "%.1f", detailed.timings.noise))"
                     + " vocoder=\(String(format: "%.1f", detailed.timings.vocoder))"
                     + " tail=\(String(format: "%.1f", detailed.timings.tail))"
+                    + " nativeSource=\(String(format: "%.1f", detailed.timings.nativeSource))"
+                    + " decoder=\(String(format: "%.1f", detailed.timings.decoder))"
+                    + " generator=\(String(format: "%.1f", detailed.timings.generator))"
+                    + " fastVocoder=\(detailed.usedFastVocoder)"
                     + " total=\(String(format: "%.1f", detailed.timings.totalMs))"
             )
 
@@ -1576,6 +1588,7 @@ public struct TTS {
                                      word  @bopomofo1        (escape: @-prefixed,
                                                               bypasses tone sandhi)
                                    Ignored for KokoroAne English (no lexicon support yet).
+              --kokoro-version     Kokoro architecture: legacy (default) or v3 (en/ja/zh, macOS 15 / iOS 18+).
               --variant            KokoroAne language (values: en,zh,ja,es,fr).
                                    For --backend kokoro-ane --variant zh, Hanzi
                                    input is auto-phonemized through the bundled

@@ -1,0 +1,23 @@
+This toolkit's optional adapted generator uses the optimized Core ML graph from
+mattmireles/kokoro-coreml (Apache License 2.0).
+
+Source: https://github.com/mattmireles/kokoro-coreml
+Source revision: a3f1ff27b1d8683efa9976704b46cb1d96da1a4b
+Model: https://huggingface.co/mattmireles/kokoro-coreml
+Model revision: 9183566f294ca3f31a63fd2767cf5848bfebfd50
+
+Modifications by FluidInference: verify convolution and linear parameters
+against our checkpoint export, replace differing folded style-projection biases
+and inverse-STFT kernels, add provenance metadata, and integrate with our
+existing front end, masked decoder, and deterministic native source DSP.
+For the Mandarin variant, transfer all convolution/linear parameters, Snake
+activation scales and folded reciprocals from the separate v1.1-zh checkpoint.
+See generator-provenance.json beside generated models for every changed constant.
+
+fast_pipeline.py and the native source/STFT stage also draw architectural
+inspiration from the same project. The source excitation retains this toolkit's
+deterministic CoreMLSineGenV2 semantics.
+
+Retain this notice and mattmireles-LICENSE when distributing adapted artifacts.
+Underlying Kokoro weights: hexgrad/Kokoro-82M and hexgrad/Kokoro-82M-v1.1-zh,
+Apache License 2.0.

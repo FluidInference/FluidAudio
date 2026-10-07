@@ -1,0 +1,65 @@
+name: Kokoro ANE-v3 validation
+
+on:
+  pull_request:
+    paths:
+      - 'Sources/FluidAudio/TTS/KokoroAne/**'
+      - 'Tests/FluidAudioTests/TTS/KokoroAne/**'
+      - '.github/workflows/kokoro-v3-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kokoro-v3-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  focused-tests:
+    name: Kokoro unit tests (macOS)
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run focused tests
+        run: swift test --filter 'KokoroAneV3Tests|JapaneseCutletTests'
+
+  ios:
+    name: Kokoro iOS build and simulator tests
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build iOS device library
+        run: >-
+          xcodebuild -scheme FluidAudio -destination 'generic/platform=iOS'
+          -derivedDataPath .build-ios CODE_SIGNING_ALLOWED=NO build
+      - name: Choose installed iPhone simulator
+        run: |
+          xcrun simctl list devices available -j > /tmp/kokoro-simulators.json
+          python3 - <<'PY'
+          import json, os
+          devices = json.load(open('/tmp/kokoro-simulators.json'))['devices']
+          candidates = [d['udid'] for runtime, items in devices.items() if 'iOS' in runtime
+                        for d in items if d['isAvailable'] and d['name'].startswith('iPhone')]
+          if not candidates:
+              raise SystemExit('No installed iPhone simulator runtime')
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('KOKORO_SIMULATOR_ID=' + candidates[0] + '\n')
+          PY
+      - name: Run iOS API and Japanese frontend unit tests
+        run: >-
+          xcodebuild -scheme FluidAudio
+          -destination "platform=iOS Simulator,id=$KOKORO_SIMULATOR_ID"
+          -derivedDataPath .build-ios-simulator -resultBundlePath kokoro-ios.xcresult
+          -only-testing:FluidAudioTests/KokoroAneV3Tests
+          -only-testing:FluidAudioTests/JapaneseCutletTests
+          -skip-testing:FluidAudioTests/KokoroAneV3Tests/testRealSDKInputsAndFallbacks
+          CODE_SIGNING_ALLOWED=NO test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kokoro-ios-test-results
+          path: kokoro-ios.xcresult
+          if-no-files-found: ignore
