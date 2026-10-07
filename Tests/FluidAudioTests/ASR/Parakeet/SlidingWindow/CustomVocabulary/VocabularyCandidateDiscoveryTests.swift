@@ -26,6 +26,28 @@ final class VocabularyCandidateDiscoveryTests: XCTestCase {
         let probabilities = try await spotter.computeLogProbs(for: audio)
         XCTAssertFalse(probabilities.logProbs.isEmpty)
         let tokenizer = try await CtcTokenizer.load(from: directory)
+        // Duplicate canonical spellings retain alias order and provenance.
+        let aliasTerms = [
+            CustomVocabularyTerm(text: "ESLint", aliases: ["E S lint", "es lint"]),
+            CustomVocabularyTerm(text: "eslint", aliases: ["E S LINT", "easylint"]),
+            CustomVocabularyTerm(text: "Claude Code", aliases: ["cloud code"]),
+        ]
+        let aliasContext = CustomVocabularyContext(terms: aliasTerms)
+        let prepared = try await VocabularyRescorer.create(
+            spotter: spotter, vocabulary: aliasContext,
+            config: .init(spotterRescueEnabled: false), ctcModelDirectory: directory)
+        for term in aliasTerms + [CustomVocabularyTerm(text: "ESLint", aliases: ["ee ess lint"])] {
+            let allAliases =
+                aliasTerms.filter { $0.textLowercased == term.textLowercased }
+                .flatMap { $0.aliases ?? [] } + (term.aliases ?? [])
+            let expected = VocabularyRescorer.normalizedForms(canonicalTerm: term.text, aliases: allAliases)
+            XCTAssertEqual(prepared.buildNormalizedForms(for: term), expected)
+        }
+        let expectedSet = Set(
+            aliasTerms.flatMap { [$0.text] + ($0.aliases ?? []) }
+                .map(VocabularyRescorer.normalizeForSimilarity).filter { !$0.isEmpty })
+        XCTAssertEqual(prepared.vocabularyNormalizedSet, expectedSet)
+
         let cases: [(String, String, [String], Float?)] = [
             ("quiltor", "Quilter", [], nil),
             ("Quilter", "Quilter", [], nil),

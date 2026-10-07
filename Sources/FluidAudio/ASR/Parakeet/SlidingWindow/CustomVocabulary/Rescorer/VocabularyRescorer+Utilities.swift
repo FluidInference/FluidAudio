@@ -33,7 +33,7 @@ extension VocabularyRescorer {
     // MARK: - Normalized Forms
 
     /// Represents a normalized form of a vocabulary term (canonical or alias)
-    struct NormalizedForm: Hashable {
+    struct NormalizedForm: Hashable, Sendable {
         let normalized: String
         let wordCount: Int
         let matchedAlias: String?
@@ -63,6 +63,7 @@ extension VocabularyRescorer {
 
     /// Build all normalized forms (canonical + aliases) for a vocabulary term
     func buildNormalizedForms(for term: CustomVocabularyTerm) -> [NormalizedForm] {
+        if let prepared = normalizedTermForms[TermFormKey(term)] { return prepared }
         var aliases: [String] = []
         let termLower = term.textLowercased
 
@@ -345,26 +346,6 @@ extension VocabularyRescorer {
         "#", ".", "@", "%", "&", "*", "/", "\\", "_", "-", "`", "'", "’", "^",
     ]
 
-    /// Build set of normalized vocabulary terms for guard checks
-    func buildVocabularyNormalizedSet() -> Set<String> {
-        var normalizedSet = Set<String>()
-        for term in vocabulary.terms {
-            let normalized = Self.normalizeForSimilarity(term.text)
-            if !normalized.isEmpty {
-                normalizedSet.insert(normalized)
-            }
-            // Also add aliases if present
-            if let aliases = term.aliases {
-                for alias in aliases {
-                    let normalizedAlias = Self.normalizeForSimilarity(alias)
-                    if !normalizedAlias.isEmpty {
-                        normalizedSet.insert(normalizedAlias)
-                    }
-                }
-            }
-        }
-        return normalizedSet
-    }
 }
 
 // MARK: - Token Word Boundary Utilities

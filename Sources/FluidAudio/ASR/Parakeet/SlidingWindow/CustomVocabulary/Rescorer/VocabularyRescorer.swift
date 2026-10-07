@@ -17,6 +17,18 @@ public struct VocabularyRescorer: Sendable {
     let vocabulary: CustomVocabularyContext
     let ctcTokenizer: CtcTokenizer?
     let debugMode: Bool
+    let normalizedTermForms: [TermFormKey: [NormalizedForm]]
+    let vocabularyNormalizedSet: Set<String>
+
+    struct TermFormKey: Hashable, Sendable {
+        let text: String
+        let aliases: [String]
+
+        init(_ term: CustomVocabularyTerm) {
+            text = term.text
+            aliases = term.aliases ?? []
+        }
+    }
 
     // BK-tree for efficient approximate string matching (experimental)
     // When enabled, uses BK-tree to find candidate vocabulary terms within edit distance
@@ -180,6 +192,18 @@ public struct VocabularyRescorer: Sendable {
         bkTree: BKTree?,
         bkTreeMaxDistance: Int
     ) {
+        var aliasesByCanonical: [String: [String]] = [:]
+        for term in vocabulary.terms {
+            aliasesByCanonical[term.textLowercased, default: []].append(contentsOf: term.aliases ?? [])
+        }
+        var formsByText: [TermFormKey: [NormalizedForm]] = [:]
+        for term in vocabulary.terms {
+            formsByText[TermFormKey(term)] = Self.normalizedForms(
+                canonicalTerm: term.text,
+                aliases: (aliasesByCanonical[term.textLowercased] ?? []) + (term.aliases ?? []))
+        }
+        self.normalizedTermForms = formsByText
+        self.vocabularyNormalizedSet = Set(formsByText.values.flatMap { $0.map(\.normalized) })
         self.spotter = spotter
         self.vocabulary = vocabulary
         self.config = config

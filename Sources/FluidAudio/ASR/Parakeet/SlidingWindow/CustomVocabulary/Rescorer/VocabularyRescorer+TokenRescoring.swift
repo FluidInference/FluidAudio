@@ -534,7 +534,6 @@ extension VocabularyRescorer {
         var pendingReplacements: [PendingReplacement] = []
 
         // Build normalized vocabulary set for guard checks
-        let vocabularyNormalizedSet = buildVocabularyNormalizedSet()
 
         // Lowest per-term similarity across the vocabulary. The BK-tree search
         // bound is derived from this floor so that terms with a lower per-term
@@ -765,7 +764,8 @@ extension VocabularyRescorer {
         var pendingReplacements: [PendingReplacement] = []  // Two-pass: collect first, apply later
 
         // Build normalized vocabulary set for guard checks
-        let vocabularyNormalizedSet = buildVocabularyNormalizedSet()
+
+        let normalizedWords = wordTimings.map { Self.normalizeForSimilarity($0.word) }
 
         // TERM-CENTRIC LOOP: For each vocabulary term, find similar TDT words and run constrained CTC
         for term in vocabulary.terms {
@@ -913,7 +913,7 @@ extension VocabularyRescorer {
                     guard !replacedIndices.contains(wordIdx) else { continue }
 
                     let tdtWord = timing.word
-                    let normalizedWord = Self.normalizeForSimilarity(tdtWord)
+                    let normalizedWord = normalizedWords[wordIdx]
                     guard !normalizedWord.isEmpty else { continue }
 
                     // Skip if already exact match to canonical (no replacement needed)
@@ -951,11 +951,11 @@ extension VocabularyRescorer {
                     // Pre-compute normalized adjacent words (only if needed)
                     let normalized2: String? =
                         (wordIdx + 1 < wordTimings.count && !replacedIndices.contains(wordIdx + 1))
-                        ? Self.normalizeForSimilarity(wordTimings[wordIdx + 1].word)
+                        ? normalizedWords[wordIdx + 1]
                         : nil
                     let normalized3: String? =
                         (wordIdx + 2 < wordTimings.count && !replacedIndices.contains(wordIdx + 2))
-                        ? Self.normalizeForSimilarity(wordTimings[wordIdx + 2].word)
+                        ? normalizedWords[wordIdx + 2]
                         : nil
 
                     // 2-word compound matching
@@ -1018,7 +1018,7 @@ extension VocabularyRescorer {
                     // STOPWORD CHECKS
                     let spanWords =
                         matchedSpanLength >= 2
-                        ? (0..<matchedSpanLength).map { Self.normalizeForSimilarity(wordTimings[wordIdx + $0].word) }
+                        ? (0..<matchedSpanLength).map { normalizedWords[wordIdx + $0] }
                         : []
                     let (shouldSkipStopword, adjustedSimilarity) = checkStopwordRules(
                         normalizedWord: normalizedWord,
