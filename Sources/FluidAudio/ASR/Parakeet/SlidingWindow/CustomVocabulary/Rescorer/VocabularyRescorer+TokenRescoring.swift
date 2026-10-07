@@ -346,6 +346,7 @@ extension VocabularyRescorer {
         minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor
     ) -> RescoreOutput {
         var candidateEvidence: CandidateEvidenceCollector?
+        var candidateFound: Bool?
         return evaluateTokenCandidates(
             transcript: transcript,
             tokenTimings: tokenTimings,
@@ -354,7 +355,8 @@ extension VocabularyRescorer {
             cbw: cbw,
             marginSeconds: marginSeconds,
             minSimilarity: minSimilarity,
-            candidateEvidence: &candidateEvidence
+            candidateEvidence: &candidateEvidence,
+            candidateFound: &candidateFound
         )
     }
 
@@ -385,6 +387,7 @@ extension VocabularyRescorer {
         minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor
     ) -> CandidateEvidenceOutput {
         var candidateEvidence: CandidateEvidenceCollector? = CandidateEvidenceCollector()
+        var candidateFound: Bool?
         _ = evaluateTokenCandidates(
             transcript: transcript,
             tokenTimings: tokenTimings,
@@ -393,13 +396,48 @@ extension VocabularyRescorer {
             cbw: cbw,
             marginSeconds: marginSeconds,
             minSimilarity: minSimilarity,
-            candidateEvidence: &candidateEvidence
+            candidateEvidence: &candidateEvidence,
+            candidateFound: &candidateFound
         )
         return CandidateEvidenceOutput(
             baseText: transcript,
             baseWords: candidateEvidence?.baseWords ?? [],
             candidates: candidateEvidence?.candidates ?? []
         )
+    }
+
+    /// Whether rescoring can require acoustic evidence for this transcript.
+    ///
+    /// Uses the same candidate discovery and safety rules as ``ctcTokenRescore``
+    /// without computing or consuming CTC probabilities. A false result permits
+    /// skipping acoustic inference. When acoustic rescue is enabled, returns true
+    /// conservatively because rescue can find terms absent from text candidates.
+    ///
+    /// - Parameters:
+    ///   - transcript: Untouched transcript from the TDT decoder.
+    ///   - tokenTimings: Token-level timings from the TDT decoder.
+    ///   - minSimilarity: The same vocabulary threshold used for rescoring.
+    /// - Returns: False only when rescoring has no candidate requiring CTC evidence.
+    public func hasCTCRescoringCandidates(
+        transcript: String,
+        tokenTimings: [TokenTiming],
+        minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor
+    ) -> Bool {
+        if config.spotterRescueEnabled { return true }
+        var candidateEvidence: CandidateEvidenceCollector?
+        var candidateFound: Bool? = false
+        _ = evaluateTokenCandidates(
+            transcript: transcript,
+            tokenTimings: tokenTimings,
+            logProbs: [],
+            frameDuration: 0,
+            cbw: 0,
+            marginSeconds: 0,
+            minSimilarity: minSimilarity,
+            candidateEvidence: &candidateEvidence,
+            candidateFound: &candidateFound
+        )
+        return candidateFound == true
     }
 
     private func evaluateTokenCandidates(
@@ -410,7 +448,8 @@ extension VocabularyRescorer {
         cbw: Float,
         marginSeconds: Double,
         minSimilarity: Float,
-        candidateEvidence: inout CandidateEvidenceCollector?
+        candidateEvidence: inout CandidateEvidenceCollector?,
+        candidateFound: inout Bool?
     ) -> RescoreOutput {
         // Build word-level timings once at the entrypoint and pass into both
         // dispatch paths. Computing this once instead of twice avoids
@@ -438,7 +477,8 @@ extension VocabularyRescorer {
                 cbw: cbw,
                 marginSeconds: marginSeconds,
                 minSimilarity: minSimilarity,
-                candidateEvidence: &candidateEvidence
+                candidateEvidence: &candidateEvidence,
+                candidateFound: &candidateFound
             )
         } else {
             return rescoreWithConstrainedCTCTermCentric(
@@ -449,7 +489,8 @@ extension VocabularyRescorer {
                 cbw: cbw,
                 marginSeconds: marginSeconds,
                 minSimilarity: minSimilarity,
-                candidateEvidence: &candidateEvidence
+                candidateEvidence: &candidateEvidence,
+                candidateFound: &candidateFound
             )
         }
     }
@@ -472,9 +513,10 @@ extension VocabularyRescorer {
         cbw: Float = ContextBiasingConstants.defaultCbw,
         marginSeconds: Double = ContextBiasingConstants.defaultMarginSeconds,
         minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor,
-        candidateEvidence: inout CandidateEvidenceCollector?
+        candidateEvidence: inout CandidateEvidenceCollector?,
+        candidateFound: inout Bool?
     ) -> RescoreOutput {
-        guard !wordTimings.isEmpty, !logProbs.isEmpty else {
+        guard !wordTimings.isEmpty, candidateFound != nil || !logProbs.isEmpty else {
             return RescoreOutput(text: transcript, replacements: [], wasModified: false)
         }
 
@@ -644,6 +686,11 @@ extension VocabularyRescorer {
                     spanEndTime: spanEndTime
                 )
 
+                // Stop at the exact scoring boundary, after all text safety guards.
+                if candidateFound != nil {
+                    candidateFound = true
+                    return RescoreOutput(text: transcript, replacements: [], wasModified: false)
+                }
                 let result = evaluateCTCMatch(
                     candidate: matchCandidate,
                     logProbs: logProbs,
@@ -698,9 +745,10 @@ extension VocabularyRescorer {
         cbw: Float = ContextBiasingConstants.defaultCbw,
         marginSeconds: Double = ContextBiasingConstants.defaultMarginSeconds,
         minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor,
-        candidateEvidence: inout CandidateEvidenceCollector?
+        candidateEvidence: inout CandidateEvidenceCollector?,
+        candidateFound: inout Bool?
     ) -> RescoreOutput {
-        guard !wordTimings.isEmpty, !logProbs.isEmpty else {
+        guard !wordTimings.isEmpty, candidateFound != nil || !logProbs.isEmpty else {
             return RescoreOutput(text: transcript, replacements: [], wasModified: false)
         }
 
@@ -826,6 +874,11 @@ extension VocabularyRescorer {
                             spanEndTime: spanEndTime
                         )
 
+                        // Stop at the exact scoring boundary, after all text safety guards.
+                        if candidateFound != nil {
+                            candidateFound = true
+                            return RescoreOutput(text: transcript, replacements: [], wasModified: false)
+                        }
                         let result = evaluateCTCMatch(
                             candidate: matchCandidate,
                             logProbs: logProbs,
@@ -1005,6 +1058,11 @@ extension VocabularyRescorer {
                         spanEndTime: spanEndTime
                     )
 
+                    // Stop at the exact scoring boundary, after all text safety guards.
+                    if candidateFound != nil {
+                        candidateFound = true
+                        return RescoreOutput(text: transcript, replacements: [], wasModified: false)
+                    }
                     let result = evaluateCTCMatch(
                         candidate: matchCandidate,
                         logProbs: logProbs,
