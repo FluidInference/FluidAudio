@@ -11,7 +11,7 @@ import Foundation
 /// spans that produced nothing:
 ///
 ///   1. Track speech spans with a per-encoder-frame (80 ms) RMS gate.
-///   2. When a span closes (240 ms of silence) and no token timing falls
+///   2. When a span closes (160 ms of silence) and no token timing falls
 ///      inside it, re-decode the buffered span audio on fresh encoder caches
 ///      and decoder state, appending any recovered tokens to the transcript.
 ///   3. Restore the live stream's state afterwards — the main decode path is
@@ -53,12 +53,44 @@ extension StreamingNemotronMultilingualAsrManager {
         openSpan: (startFrame: Int, lastSpeechFrame: Int, preRollFrames: Int, overflowed: Bool)?,
         nextSpanStartFrame: Int
     ) -> [Int] {
-        liveIds
+        let insertionFrame: Int
+        if let span = openSpan {
+            // Lexical output remains inside this span's attribution window
+            // as it grows; overflow also permanently rules out a rescue.
+            guard !span.overflowed,
+                !Self.spanEmittedLexicalToken(
+                    liveTimings, startFrame: span.startFrame, lastSpeechFrame: span.lastSpeechFrame)
+            else { return liveIds }
+            insertionFrame = max(0, span.startFrame - span.preRollFrames)
+        } else {
+            // A future span can re-decode the retained silent pre-roll. Its
+            // earliest emission is at that pre-roll's first frame, not onset.
+            insertionFrame = max(0, nextSpanStartFrame)
+        }
+        let insertionSec = Double(insertionFrame) * ASRConstants.secondsPerEncoderFrame
+        // Match mergeRescuedTokens: only strictly later timings can move.
+        // Map that timing prefix back to IDs, skipping untimed language tags.
+        let settledTimingCount = liveTimings.firstIndex { $0.startTime > insertionSec } ?? liveTimings.count
+        var timedSeen = 0
+        for (index, id) in liveIds.enumerated() {
+            guard !langTagTokenIds.contains(id) else { continue }
+            if timedSeen == settledTimingCount {
+                return Array(liveIds[..<index])
+            }
+            timedSeen += 1
+        }
+        return liveIds
     }
 
-    /// Shared publication path for normal chunk decode and committed rescues.
-    internal func publishPartialTranscript(using callback: NemotronMultilingualPartialCallback?) {
+    /// Publish only settled IDs live; finish flushes the full accumulator.
+    internal func publishPartialTranscript(
+        using callback: NemotronMultilingualPartialCallback?, isFinal: Bool = false
+    ) {
         guard let callback = callback, let tokenizer = tokenizer else { return }
+        guard !isFinal, Self.blankRescueEnabled, Self.rescueRmsThreshold > 0 else {
+            callback(tokenizer.decode(ids: accumulatedTokenIds).text)
+            return
+        }
         let ids = Self.partialPublicationTokenIds(
             liveIds: accumulatedTokenIds, liveTimings: accumulatedTokenTimings,
             langTagTokenIds: config.langTagTokenIds,
@@ -77,16 +109,26 @@ extension StreamingNemotronMultilingualAsrManager {
             return
         }
         let chunkStartFrame = rescueFrameCursor
+        // Normal decode and every rescue in this chunk must settle before
+        // any callback can expose text beyond the insertion frontier.
+        let savedPartialCallback = partialCallback
+        partialCallback = nil
+        defer { partialCallback = savedPartialCallback }
         try await processChunk(samples, nextChunkSamples: nextChunkSamples)
         rescueFrameCursor += samples.count / ASRConstants.samplesPerEncoderFrame
         try await updateRescueSpans(chunk: samples, chunkStartFrame: chunkStartFrame)
+        // Span resolution can release old tokens even when this chunk's
+        // normal decode emitted nothing (including VAD-skipped silence).
+        publishPartialTranscript(using: savedPartialCallback)
     }
 
     /// Close a span left open by end-of-stream. Called from `finish()` after
     /// the trailing chunk is processed and before the transcript is decoded.
     internal func finalizeRescueSpanIfNeeded() async throws {
-        guard Self.blankRescueEnabled, Self.rescueRmsThreshold > 0, rescueSpanOpen else { return }
-        try await closeSpanAndMaybeRescue()
+        if Self.blankRescueEnabled, Self.rescueRmsThreshold > 0, rescueSpanOpen {
+            try await closeSpanAndMaybeRescue()
+        }
+        publishPartialTranscript(using: partialCallback, isFinal: true)
     }
 
     /// Walk the chunk in 80 ms windows, advancing the span state machine.
@@ -160,30 +202,30 @@ extension StreamingNemotronMultilingualAsrManager {
 
         guard !overflowed, speechWindows >= Self.minSpeechWindows else { return }
 
-        // One frame of onset slack (the RMS gate can trail the acoustics);
-        // five frames (400 ms) of closing slack because RNN-T emissions lag
-        // the audio — a span's token often lands a few frames into the
-        // trailing silence, and counting it prevents a duplicate emission
-        // from the rescue.
-        let openSec =
-            (Double(startFrame) - 1) * ASRConstants.secondsPerEncoderFrame
-        let closeSec =
-            (Double(lastSpeechFrame) + 5) * ASRConstants.secondsPerEncoderFrame
-        // Only lexical tokens count as span output: with long pauses the
-        // decode often spends the span's frames emitting the previous
-        // sentence's terminal punctuation ("afternoon." + dropped word) —
-        // punctuation alone must not mask a swallowed word.
-        let spanEmitted = accumulatedTokenTimings.contains {
-            $0.startTime >= openSec && $0.startTime <= closeSec
-                && Self.containsLexicalContent($0.token)
-        }
-        guard !spanEmitted else { return }
+        guard
+            !Self.spanEmittedLexicalToken(
+                accumulatedTokenTimings, startFrame: startFrame, lastSpeechFrame: lastSpeechFrame)
+        else { return }
 
         recordDetectedBlankSpan()
         try await rescueDecode(
             span: spanAudio,
             spanStartFrame: startFrame - preRollFrames,
             spanEndFrame: lastSpeechFrame + 1)
+    }
+
+    /// One frame of onset slack and five frames of closing slack account for
+    /// the RMS gate and delayed RNN-T emissions. Punctuation alone must not
+    /// mask a swallowed word. Publication and rescue share this predicate so
+    /// an open span released early can never later qualify for insertion.
+    nonisolated private static func spanEmittedLexicalToken(
+        _ timings: [TokenTiming], startFrame: Int, lastSpeechFrame: Int
+    ) -> Bool {
+        let openSec = (Double(startFrame) - 1) * ASRConstants.secondsPerEncoderFrame
+        let closeSec = (Double(lastSpeechFrame) + 5) * ASRConstants.secondsPerEncoderFrame
+        return timings.contains {
+            $0.startTime >= openSec && $0.startTime <= closeSec && Self.containsLexicalContent($0.token)
+        }
     }
 
     /// A speech span decoded to all-blank live; a rescue is being attempted.
@@ -227,8 +269,8 @@ extension StreamingNemotronMultilingualAsrManager {
         let savedProcessedChunks = processedChunks
         let savedVadRun = vadConsecutiveLowChunks
         // Suppress partial callbacks for the duration of the trial decode —
-        // they would surface unvalidated, out-of-order text. A single
-        // callback fires after a successful commit instead.
+        // they would surface unvalidated, out-of-order text. The tracked
+        // chunk or finish publishes once all rescues have settled instead.
         let savedPartialCallback = partialCallback
         partialCallback = nil
 
@@ -330,7 +372,6 @@ extension StreamingNemotronMultilingualAsrManager {
             "Blank-span rescue recovered \(stagedIds.count) token(s) from a "
                 + String(format: "%.2f", Double(span.count) / 16000.0) + "s span at frame \(spanStartFrame)"
         )
-        publishPartialTranscript(using: savedPartialCallback)
     }
 
     /// Insert rescued tokens at the span's timestamp position instead of
