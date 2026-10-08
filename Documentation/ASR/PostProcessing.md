@@ -81,6 +81,8 @@ The engine is a prebuilt Rust static library (about 8 MB per architecture slice 
 .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.15.7", traits: [])
 ```
 
+Since #990, `traits: []` also turns off the `TTS` and `Diarizer` traits. To drop only the engine, list the traits you still need, e.g. `traits: ["TTS", "Diarizer"]` (see [Package traits](../../README.md#installation)).
+
 With the trait disabled:
 
 - `TextNormalizer` and `NemoTextNormalizer` remain in the API. `isNativeAvailable`, `isTnAvailable`, and `NemoTextNormalizer.isAvailable` report `false`.
@@ -116,4 +118,4 @@ Existing `import FluidAudio` lines keep compiling. Measured on a universal macOS
 
 **The xcframework still downloads.** The binary target is declared unconditionally and only the dependency edge is trait-conditioned, so a clean resolve still fetches the 49 MB `NemoTextProcessing.xcframework.zip` even with the trait off. Ship size is unaffected; CI and cold checkouts pay the download. That is a SwiftPM limitation, not something the package can change.
 
-To build the package itself without the engine: `swift build --disable-default-traits`.
+To build the package itself without the engine: `swift build --traits TTS,Diarizer` (the CLI and tests need both).

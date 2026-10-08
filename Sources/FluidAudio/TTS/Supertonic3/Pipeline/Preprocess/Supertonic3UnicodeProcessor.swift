@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Text preprocessor that mirrors the upstream `UnicodeProcessor` from
@@ -194,3 +195,4 @@ struct Supertonic3UnicodeProcessor {
         }
     }
 }
+#endif

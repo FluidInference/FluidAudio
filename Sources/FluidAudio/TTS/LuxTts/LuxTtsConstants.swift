@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Compile-time constants for the LuxTTS (ZipVoice-Distill) backend.
@@ -99,3 +100,4 @@ public enum LuxTtsConstants {
     /// Overlap used when joining continuation-prompted spans.
     public static let continuationCrossfadeSeconds = 0.03
 }
+#endif

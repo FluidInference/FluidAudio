@@ -22,6 +22,8 @@ Pod::Spec.new do |spec|
 
   spec.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
+    # SwiftPM trait flags (#990); CocoaPods always builds every subsystem.
+    'SWIFT_ACTIVE_COMPILATION_CONDITIONS' => '$(inherited) TTS Diarizer',
     'ARCHS[sdk=macosx*]' => 'arm64',
     'EXCLUDED_ARCHS[sdk=macosx*]' => 'x86_64',
     'ARCHS[sdk=iphonesimulator*]' => 'arm64',

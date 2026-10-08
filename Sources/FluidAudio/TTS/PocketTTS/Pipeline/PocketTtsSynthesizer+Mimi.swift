@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -149,3 +150,4 @@ extension PocketTtsSynthesizer {
         return Array(UnsafeBufferPointer(start: ptr, count: count))
     }
 }
+#endif

@@ -953,6 +953,7 @@ public enum ModelNames {
                 }
             }
 
+            #if Diarizer
             public var defaultConfiguration: SortformerConfig {
                 switch self {
                 case .fastV2:
@@ -971,6 +972,7 @@ public enum ModelNames {
                     return .efficientV2_1
                 }
             }
+            #endif
 
             /// Compiled-model path for this variant at the default (`.fp16`) precision.
             public var fileName: String {
@@ -982,9 +984,11 @@ public enum ModelNames {
                 return "\(precision.subdirectory)/\(name).mlmodelc"
             }
 
+            #if Diarizer
             public func isCompatible(with config: SortformerConfig) -> Bool {
                 defaultConfiguration.isCompatible(with: config)
             }
+            #endif
         }
 
         /// Repo subdirectory holding the default (`.fp16`) model set. Both v3 sets are the
@@ -1007,6 +1011,7 @@ public enum ModelNames {
             return variant.fileName(precision: precision)
         }
 
+        #if Diarizer
         /// Bundle name for a given configuration (honors `config.precision`)
         public static func bundle(for config: SortformerConfig) -> String? {
             guard let variant = config.modelVariant else {
@@ -1015,6 +1020,7 @@ public enum ModelNames {
             assert(variant.isCompatible(with: config), "ERROR: Model variant and configuration are not compatible.")
             return variant.fileName(precision: config.precision)
         }
+        #endif
 
         /// Default bundle name
         public static var defaultBundle: String {
@@ -1191,6 +1197,7 @@ public enum ModelNames {
         /// per language (#793).
         public static let encoderRecoverPinvFile = "encoder_recover_pinv.bin"
 
+        #if TTS
         /// FlowLM filename for a given precision. Both variants ship in the
         /// same `v2/<lang>/` directory upstream; only the FlowLM transformer
         /// has an int8 variant — `cond_step`, `flow_decoder`, and
@@ -1242,6 +1249,7 @@ public enum ModelNames {
                 ]
             }
         }
+        #endif
 
         /// Required files for the default precision. Kept for callers that
         /// haven't been updated to pass a precision argument.
@@ -1431,10 +1439,13 @@ public enum ModelNames {
             "synthesizer_f\(frames).mlmodelc"
         }
 
+        /// Synthesizer frame buckets; `InflectConstants.frameBuckets` reads these.
+        public static let frameBuckets = [256, 384, 512, 640, 768, 896, 1024, 2048]
+
         /// Encoder + all 8 synthesizer buckets (downloaded up front; buckets
-        /// load lazily). Buckets mirror `InflectConstants.frameBuckets`.
+        /// load lazily).
         public static let requiredModels: Set<String> = Set(
-            [encoderFile] + InflectConstants.frameBuckets.map { synthesizerFile(frames: $0) })
+            [encoderFile] + frameBuckets.map { synthesizerFile(frames: $0) })
     }
 
     /// LuxTTS (ZipVoice-Distill) model names. The HF repo publishes the same
@@ -1713,6 +1724,7 @@ public enum ModelNames {
             flowFile,
             vocoderFile,
         ]
+        #if TTS
         /// Required model set for an output capacity ("extended" swaps in
         /// the N1000/T2000 S3Gen pair).
         public static func requiredModels(capacity: ChatterboxNanoOutputCapacity) -> Set<String> {
@@ -1723,6 +1735,7 @@ public enum ModelNames {
                 return [prefillFile, decodeFile, flowFileExtended, vocoderFileExtended]
             }
         }
+        #endif
         /// Non-model assets fetched individually (nested under `tables/` and
         /// `tokenizer/`, which the repo-root model walk does not descend into).
         public static let auxFiles: [String] = [
@@ -1852,8 +1865,12 @@ public enum ModelNames {
             return ModelNames.Chatterbox.requiredModels
         case .chatterboxNano:
             // Variant: "extended" → N1000/T2000 S3Gen bucket pair (~30 s).
+            #if TTS
             let capacity = ChatterboxNanoOutputCapacity(rawValue: variant ?? "") ?? .standard
             return ModelNames.ChatterboxNano.requiredModels(capacity: capacity)
+            #else
+            return ModelNames.ChatterboxNano.requiredModels
+            #endif
         case .luxtts:
             // Variants: "gpu" (macOS) / "ane" (iOS); nil → platform default.
             return ModelNames.LuxTts.requiredFiles(variant: variant)

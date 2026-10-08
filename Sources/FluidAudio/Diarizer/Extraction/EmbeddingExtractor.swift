@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 import CoreML
 import OSLog
@@ -239,3 +240,4 @@ public final class EmbeddingExtractor {
         return embedding
     }
 }
+#endif

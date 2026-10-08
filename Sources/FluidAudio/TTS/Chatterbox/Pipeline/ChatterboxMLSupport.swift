@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -120,3 +121,4 @@ enum ChatterboxMLSupport {
         }
     }
 }
+#endif

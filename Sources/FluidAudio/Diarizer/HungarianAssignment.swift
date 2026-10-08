@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 
 // MARK: - Hungarian (O(n^3) min-cost assignment on a square cost matrix)
@@ -96,3 +97,4 @@ enum HungarianAssignment {
         }
     }
 }
+#endif

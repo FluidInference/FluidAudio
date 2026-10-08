@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -1479,3 +1480,4 @@ public struct PocketTtsSynthesizer {
     }
 
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -413,3 +414,4 @@ struct ChatterboxNanoSynthesizer {
         return samples
     }
 }
+#endif

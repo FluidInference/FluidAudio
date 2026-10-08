@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -125,3 +126,4 @@ extension Float {
         return sqrtf(-2.0 * logf(u1)) * cosf(2.0 * .pi * u2)
     }
 }
+#endif

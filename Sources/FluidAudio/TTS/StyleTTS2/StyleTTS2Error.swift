@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Errors that can surface during StyleTTS2 initialization or synthesis.
@@ -39,3 +40,4 @@ public enum StyleTTS2Error: Error, LocalizedError, Sendable {
         }
     }
 }
+#endif

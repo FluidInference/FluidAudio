@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 import CoreML
 import Foundation
@@ -238,3 +239,4 @@ public struct SegmentationProcessor {
         )
     }
 }
+#endif

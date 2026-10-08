@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Fixed pipeline parameters for the Inflect v2 CoreML backend. Values mirror
@@ -25,7 +26,7 @@ public enum InflectConstants {
     /// Synthesizer frame buckets (each `synthesizer_f<N>.mlmodelc`). The
     /// smallest bucket ≥ the predicted frame length is used; audio is trimmed
     /// to the exact length afterwards.
-    public static let frameBuckets = [256, 384, 512, 640, 768, 896, 1024, 2048]
+    public static let frameBuckets = ModelNames.Inflect.frameBuckets
 
     /// Largest bucket — a chunk whose predicted duration exceeds this throws.
     public static var maxFrames: Int { frameBuckets.last! }
@@ -44,3 +45,4 @@ public enum InflectConstants {
     /// Edge fade applied to each chunk (ms), matching upstream `edge_fade`.
     public static let edgeFadeMs: Double = 5.0
 }
+#endif

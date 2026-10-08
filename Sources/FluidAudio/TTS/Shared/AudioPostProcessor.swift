@@ -1,3 +1,4 @@
+#if TTS
 import Accelerate
 import Foundation
 
@@ -144,3 +145,4 @@ public enum AudioPostProcessor {
         }
     }
 }
+#endif

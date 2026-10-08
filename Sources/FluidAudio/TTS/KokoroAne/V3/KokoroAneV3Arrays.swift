@@ -1,3 +1,4 @@
+#if TTS
 // Array conversions adapted from FluidAudio (MIT).
 import Accelerate
 @preconcurrency import CoreML
@@ -179,3 +180,4 @@ enum KokoroAneV3Arrays {
         return (0..<count).map { Float(truncating: arr[$0]) }
     }
 }
+#endif

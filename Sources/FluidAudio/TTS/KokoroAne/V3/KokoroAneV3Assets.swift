@@ -1,3 +1,4 @@
+#if TTS
 import CryptoKit
 import Foundation
 
@@ -336,3 +337,4 @@ enum KokoroAneV3Assets {
         return local
     }
 }
+#endif

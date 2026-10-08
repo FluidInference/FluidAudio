@@ -147,6 +147,21 @@ dependencies: [
 .product(name: "FluidAudio", package: "FluidAudio")
 ```
 
+**Package traits (Swift 6.2+ / Xcode 26+):** all three are on by default. Drop the subsystems an app never reaches to shrink the build:
+
+| Trait | Covers |
+|-------|--------|
+| `TTS` | All TTS backends plus the ~1 MB LuxTTS G2P resource bundle |
+| `Diarizer` | Speaker diarization (pyannote, Sortformer, LS-EEND, Nemotron 3) |
+| `NemoTextProcessing` | NeMo text normalization engine, see [PostProcessing.md](Documentation/ASR/PostProcessing.md#opting-out-of-the-engine) |
+
+```swift
+.package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.17.7", traits: [])            // ASR + VAD only
+.package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.17.7", traits: ["Diarizer"])  // + diarization
+```
+
+`traits: []` turns off all three. Before #990 it only dropped the NeMo engine, so apps that use diarization and pass `traits: []` should switch to `traits: ["Diarizer"]`. Older toolchains always build everything.
+
 **CocoaPods:** We recommend using [cocoapods-spm](https://github.com/trinhngocthuyen/cocoapods-spm) for better SPM integration, but if needed, you can also use our podspec: `pod 'FluidAudio', '~> 0.12.4'`
 
 ### Other Frameworks

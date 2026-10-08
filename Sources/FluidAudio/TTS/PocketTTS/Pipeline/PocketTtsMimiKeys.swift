@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -132,3 +133,4 @@ struct PocketTtsMimiKeys: Sendable {
     }
 
 }
+#endif

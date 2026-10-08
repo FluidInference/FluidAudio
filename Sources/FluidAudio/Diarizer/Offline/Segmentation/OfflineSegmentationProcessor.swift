@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 @preconcurrency import CoreML
 import Foundation
@@ -558,3 +559,4 @@ extension OfflineSegmentationProcessor {
         }
     }
 }
+#endif

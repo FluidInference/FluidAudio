@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -107,3 +108,4 @@ struct NeuTtsModels: Sendable {
         return root
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Deterministic standard-normal generator for the VITS prior sample
@@ -51,3 +52,4 @@ struct InflectNoise {
         }
     }
 }
+#endif

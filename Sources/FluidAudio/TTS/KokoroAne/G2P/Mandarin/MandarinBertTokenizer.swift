@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Minimal BERT WordPiece tokenizer for the g2pW polyphone disambiguator.
@@ -142,3 +143,4 @@ public struct MandarinBertTokenizer: Sendable {
         )
     }
 }
+#endif

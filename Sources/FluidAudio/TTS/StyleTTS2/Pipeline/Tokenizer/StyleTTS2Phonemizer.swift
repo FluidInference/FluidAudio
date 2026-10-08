@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// English-only StyleTTS2 phonemizer.
@@ -272,3 +273,4 @@ public struct StyleTTS2Phonemizer: Sendable {
         return out
     }
 }
+#endif

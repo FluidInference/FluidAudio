@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Constants for the PocketTTS flow-matching language model TTS backend.
@@ -192,3 +193,4 @@ public enum PocketTtsModelPlacement: String, Sendable, Hashable {
     /// Trial 23); mimi decode is unchanged.
     case aneState = "ane-state"
 }
+#endif

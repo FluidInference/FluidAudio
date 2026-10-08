@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// `[510, 256]` flat fp32 voice pack (e.g. `af_heart.bin`).
@@ -85,3 +86,4 @@ public struct KokoroAneVoicePack: Sendable {
         )
     }
 }
+#endif

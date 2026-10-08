@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -206,3 +207,4 @@ struct PocketTtsLayerKeys: Sendable {
         return Int(String(suffix.reversed()))
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 import CoreML
 import Foundation
@@ -531,3 +532,4 @@ public final class DiarizerManager {
     }
 
 }
+#endif

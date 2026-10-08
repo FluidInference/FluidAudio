@@ -1,4 +1,6 @@
+#if TTS
 import Foundation
+import LuxTtsG2pResources
 
 /// English text → espeak-IPA phonemes for LuxTTS (phase 2).
 ///
@@ -76,9 +78,9 @@ public struct LuxTtsG2p: Sendable {
     /// Load the bundled lexicon + aux tables.
     public init() throws {
         guard
-            let lexiconURL = Bundle.module.url(
+            let lexiconURL = LuxTtsG2pResources.bundle.url(
                 forResource: "luxtts_en_us_lexicon.tsv", withExtension: "zz"),
-            let auxURL = Bundle.module.url(
+            let auxURL = LuxTtsG2pResources.bundle.url(
                 forResource: "luxtts_en_us_g2p_aux", withExtension: "json")
         else {
             throw LuxTtsError.tokenizerFailed("bundled G2P resources missing")
@@ -763,3 +765,4 @@ public struct LuxTtsG2p: Sendable {
         return parts.filter { !$0.isEmpty }
     }
 }
+#endif

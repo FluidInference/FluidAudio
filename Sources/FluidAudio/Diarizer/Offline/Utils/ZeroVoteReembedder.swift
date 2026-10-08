@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 
 /// Pure decision logic for the zero-vote re-embed post-pass.
@@ -129,3 +130,4 @@ enum ZeroVoteReembedder {
         return dot / ((normA * normB).squareRoot())
     }
 }
+#endif

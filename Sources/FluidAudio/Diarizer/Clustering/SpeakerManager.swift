@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 import Foundation
 import OSLog
@@ -634,3 +635,4 @@ public struct SpeakerManager: Sendable {
         }
     }
 }
+#endif

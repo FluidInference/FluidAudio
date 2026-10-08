@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Rule-based Spanish grapheme-to-phoneme frontend for the Kokoro ANE Spanish
@@ -531,3 +532,4 @@ enum SpanishG2P {
     private static let nasals = Set("mnɲŋ".unicodeScalars)
     private static let vocalicPhones = Set("aeiouɛIAWOɪʊ".unicodeScalars)
 }
+#endif

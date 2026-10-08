@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Compile-time constants for the Chatterbox Nano backend (beta model
@@ -103,3 +104,4 @@ public enum ChatterboxNanoOutputCapacity: String, CaseIterable, Sendable {
         max(0, flowTokenBucket - promptTokens - ChatterboxNanoConstants.silenceTokenCount)
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Errors that can occur during PocketTTS synthesis.
@@ -20,3 +21,4 @@ public enum PocketTTSError: LocalizedError {
         }
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Errors that can surface during Supertonic-3 initialization or synthesis.
@@ -48,3 +49,4 @@ public enum Supertonic3Error: Error, LocalizedError, Sendable {
         }
     }
 }
+#endif

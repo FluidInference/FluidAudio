@@ -1,3 +1,4 @@
+#if TTS
 import Accelerate
 import Foundation
 
@@ -249,3 +250,4 @@ public final class StyleTTS2MelExtractor {
         return out
     }
 }
+#endif
