@@ -67,6 +67,10 @@ public struct TTS {
         // Parsed from `--variant` (micro/nano) or the backend token
         // (inflect-micro / inflect-nano).
         var inflectVariant: InflectVariant = .micro
+        // Paradee weight precision — only consulted when backend == .paradee.
+        var paradeeVariant: ParadeeVariant = .int8
+        var paradeeSpeed: Float = ParadeeConstants.defaultSpeed
+        var paradeeSeed: UInt64 = 0
         var lexiconPath: String? = nil
         var text: String? = nil
         // KokoroAne: treat the positional/`--text` value as a pre-computed
@@ -162,6 +166,10 @@ public struct TTS {
                         inflectVariant = .micro
                     case "nano", "inflect-nano":
                         inflectVariant = .nano
+                    case "int8":
+                        paradeeVariant = .int8
+                    case "fp32":
+                        paradeeVariant = .fp32
                     default:
                         logger.warning("Unknown variant preference '\(arguments[i + 1])'; ignoring")
                     }
@@ -200,6 +208,8 @@ public struct TTS {
                         backend = .chatterbox
                     case "chatterbox-nano":
                         backend = .chatterboxNano
+                    case "paradee", "paradee-8m":
+                        backend = .paradee
                     default:
                         logger.warning("Unknown backend '\(arguments[i + 1])'; using kokoro-ane")
                     }
@@ -236,6 +246,7 @@ public struct TTS {
                 if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
                     supertonicSpeed = v
                     luxttsSpeed = v
+                    paradeeSpeed = v
                     i += 1
                 }
             case "--prompt-audio":
@@ -290,6 +301,7 @@ public struct TTS {
                     luxttsSeed = parsed
                     neuttsSeed = parsed
                     chatterboxSeed = parsed
+                    paradeeSeed = parsed
                     i += 1
                 }
             case "--emotion":
@@ -447,6 +459,87 @@ public struct TTS {
             await runChatterboxNano(
                 text: text, output: output, capacity: nanoCapacity,
                 seed: chatterboxSeed, metricsPath: metricsPath)
+        case .paradee:
+            await runParadee(
+                text: text, output: output, variant: paradeeVariant,
+                treatAsPhonemes: treatAsPhonemes, speed: paradeeSpeed, seed: paradeeSeed,
+                metricsPath: metricsPath)
+        }
+    }
+
+    /// Run Paradee-8M TTS. With `--phonemes` the positional text is treated as
+    /// a misaki-style phoneme string and bypasses the English frontend.
+    private static func runParadee(
+        text: String, output: String,
+        variant: ParadeeVariant, treatAsPhonemes: Bool,
+        speed: Float, seed: UInt64,
+        metricsPath: String?
+    ) async {
+        do {
+            let tStart = Date()
+            let manager = ParadeeManager(variant: variant)
+
+            let tLoad0 = Date()
+            try await manager.initialize()
+            let tLoad1 = Date()
+
+            logger.info("Paradee \(variant.rawValue) \(treatAsPhonemes ? "phoneme" : "text") synthesis")
+            let tSynth0 = Date()
+            let samples =
+                treatAsPhonemes
+                ? try await manager.synthesize(phonemes: text, speed: speed, noiseSeed: seed)
+                : try await manager.synthesize(text: text, speed: speed, noiseSeed: seed)
+            let tSynth1 = Date()
+
+            let outURL = resolveInputURL(output)
+            try FileManager.default.createDirectory(
+                at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let wav = try AudioWAV.data(
+                from: samples, sampleRate: Double(ParadeeConstants.sampleRate), normalize: false)
+            try wav.write(to: outURL)
+
+            let loadS = tLoad1.timeIntervalSince(tLoad0)
+            let synthS = tSynth1.timeIntervalSince(tSynth0)
+            let totalS = tSynth1.timeIntervalSince(tStart)
+            let audioSecs = Double(samples.count) / Double(ParadeeConstants.sampleRate)
+            let rtfx = synthS > 0 ? audioSecs / synthS : 0
+
+            logger.info("Paradee synthesis complete")
+            logger.info("  Load: \(String(format: "%.3f", loadS))s")
+            logger.info("  Synthesis: \(String(format: "%.3f", synthS))s")
+            logger.info("  Audio: \(String(format: "%.3f", audioSecs))s")
+            logger.info("  RTFx: \(String(format: "%.2f", rtfx))x")
+            logger.info("  Total: \(String(format: "%.3f", totalS))s")
+            logger.info("  Output: \(outURL.path)")
+
+            if let metricsPath {
+                let metricsDict: [String: Any] = [
+                    "backend": "paradee-\(variant.rawValue)",
+                    "text": text,
+                    "phonemes_mode": treatAsPhonemes,
+                    "speed": Double(speed),
+                    "seed": seed,
+                    "output": outURL.path,
+                    "model_load_time_s": loadS,
+                    "inference_time_s": synthS,
+                    "audio_duration_s": audioSecs,
+                    "realtime_speed": rtfx,
+                    "total_time_s": totalS,
+                ]
+                let artifactsRoot = try ensureArtifactsRoot()
+                let mURL = resolveOutputURL(
+                    metricsPath, artifactsRoot: artifactsRoot, expectsDirectory: false)
+                try FileManager.default.createDirectory(
+                    at: mURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                let json = try JSONSerialization.data(
+                    withJSONObject: metricsDict, options: [.prettyPrinted])
+                try json.write(to: mURL)
+                logger.info("Metrics saved: \(mURL.path)")
+            }
+        } catch {
+            logger.error("Paradee Error: \(error)")
+            print("Paradee failed: \(error)")
+            exit(1)
         }
     }
 
@@ -1549,7 +1642,13 @@ public struct TTS {
               --backend            TTS backend: kokoro-ane (default), pocket, styletts2,
                                    supertonic3, luxtts, neutts (beta), inflect (beta),
                                    chatterbox (beta, multilingual, macOS 15+),
-                                   chatterbox-nano (beta, English + [laugh]/[chuckle] tags, macOS 15+)
+                                   chatterbox-nano (beta, English + [laugh]/[chuckle] tags, macOS 15+),
+                                   paradee (beta, 8M English, voice af_heart)
+                                   Paradee:
+                                     --variant int8|fp32        weights (default int8)
+                                     --speed 1.0                speech rate (default 1.0)
+                                     --seed N                   source-noise seed (default 0)
+                                     --phonemes                 treat input as misaki phonemes
                                    Chatterbox (built-in voice, 18 languages):
                                      --lang de                  language code (default en)
                                      --seed N                   sampling seed (default 42)

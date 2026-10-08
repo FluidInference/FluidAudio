@@ -341,6 +341,12 @@ public enum TtsBenchmarkCommand {
                     phrases: phrases, corpusLabel: corpusLabel,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
                     asrChoice: asrChoice)
+            case .paradee:
+                try await runParadee(
+                    phrases: phrases, corpusLabel: corpusLabel,
+                    variant: ParadeeVariant(rawValue: variantArg?.lowercased() ?? "") ?? .int8,
+                    preset: preset, outputJson: outputJson, audioDir: audioDir,
+                    asrChoice: asrChoice)
             }
         } catch {
             logger.error("tts-benchmark failed: \(error)")
@@ -837,6 +843,60 @@ public enum TtsBenchmarkCommand {
         }
     }
 
+    private static func runParadee(
+        phrases: [(category: String, text: String)],
+        corpusLabel: String,
+        variant: ParadeeVariant,
+        preset: TtsComputeUnitPreset,
+        outputJson: String?,
+        audioDir: String?,
+        asrChoice: AsrChoice
+    ) async throws {
+        // The LSTMs abort on the GPU, so only CPU and ANE routings exist.
+        let appliedPreset: TtsComputeUnitPreset = preset == .allAne ? .allAne : .cpuOnly
+        if appliedPreset != preset, preset != .default {
+            logger.warning("Paradee runs .cpuOnly or .cpuAndNeuralEngine; --compute-units \(preset.cliValue) ignored.")
+        }
+        let manager = ParadeeManager(
+            variant: variant, computeUnits: appliedPreset == .allAne ? .cpuAndNeuralEngine : .cpuOnly)
+        let coldStart = Date()
+        try await manager.initialize()
+        let coldStartS = Date().timeIntervalSince(coldStart)
+        logger.info(String(format: "Cold start (initialize): %.2fs", coldStartS))
+
+        let firstStart = Date()
+        _ = try await manager.synthesize(text: "Initialization warm-up.")
+        let firstSynthMs = Date().timeIntervalSince(firstStart) * 1000
+        logger.info(String(format: "First synth: %.0f ms", firstSynthMs))
+
+        try await runPhraseLoop(
+            backendId: "paradee-\(variant.rawValue)",
+            voiceLabel: "af_heart",
+            corpusLabel: corpusLabel,
+            phrases: phrases,
+            preset: appliedPreset,
+            coldStartS: coldStartS,
+            firstSynthMs: firstSynthMs,
+            outputJson: outputJson,
+            audioDir: audioDir,
+            asrChoice: asrChoice,
+            normalizeWavs: false,
+            extraSummary: ["language": "en", "seed": 0]
+        ) { text in
+            let t0 = Date()
+            let samples = try await manager.synthesize(text: text)
+            let synthMs = Date().timeIntervalSince(t0) * 1000
+            return BackendPhraseSample(
+                synthMs: synthMs,
+                ttftMs: synthMs,
+                samples: samples,
+                sampleRate: ParadeeConstants.sampleRate,
+                stageMs: [:],
+                extraFields: [:]
+            )
+        }
+    }
+
     /// Map `--language` or a `minimax-<lang>` corpus name onto a Chatterbox
     /// language code. Falls back to English.
     private static func resolveChatterboxLanguage(explicit: String?, corpus: String) -> String {
@@ -1121,6 +1181,7 @@ public enum TtsBenchmarkCommand {
         case supertonic3
         case chatterbox
         case chatterboxNano
+        case paradee
 
         var defaultCorpus: String {
             return "minimax-english"
@@ -1141,6 +1202,8 @@ public enum TtsBenchmarkCommand {
             return .chatterbox
         case "chatterbox-nano", "chatterboxnano":
             return .chatterboxNano
+        case "paradee", "paradee-8m":
+            return .paradee
         default:
             logger.warning("Unknown backend '\(name)' — defaulting to kokoro-ane")
             return .kokoroAne
