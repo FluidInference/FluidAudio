@@ -1,4 +1,95 @@
-# Kokoro ANE (7-Stage)
+# Kokoro ANE
+
+## ANE version 3
+
+Opt in with `version: .v3`. Existing callers continue to use `.legacy`.
+ANE-v3 requires macOS 15 or iOS 18 and uses a hybrid pipeline: static
+Albert and masked decoder graphs on CPU/ANE, native Accelerate source/STFT
+processing, and a CPU/GPU generator adapted from
+[mattmireles/kokoro-coreml](https://github.com/mattmireles/kokoro-coreml).
+Core ML chooses hardware within each requested compute-unit policy; this
+is not an ANE-only runtime. V3 currently accepts only the default compute
+policy (or `.aneTailGpu`). The v3 route is fixed and includes GPU execution,
+even when the legacy OS-dependent default would select CPU. Spanish and French
+remain supported by `.legacy`; requesting them with `.v3` fails before downloading.
+
+```swift
+import FluidAudio
+
+let english = KokoroAneManager(version: .v3)
+try await english.initialize(preloadVoices: ["af_bella"])
+let enWav = try await english.synthesize(text: "Hello world.", voice: "af_bella")
+
+let mandarin = KokoroAneManager(variant: .mandarin, version: .v3)
+let zhWav = try await mandarin.synthesize(text: "你好世界。", voice: "zm_010")
+
+// Native Japanese text frontend; dictionary assets download on first use.
+let japanese = KokoroAneManager(variant: .japanese, version: .v3)
+let jaWav = try await japanese.synthesize(text: "こんにちは、世界。", voice: "jm_kumo")
+```
+
+The SDK downloads the following immutable release from
+[`FluidInference/kokoro-82m-coreml`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/6c0750dd02ef9d981fb82f147d784a3f171755ee/ANE-v3):
+
+| Language | HF directory | Default voice | Additional examples |
+|----------|--------------|---------------|---------------------|
+| English | `ANE-v3` | `af_heart` | `af_bella`, `am_adam`, `am_michael` |
+| Japanese | `ANE-v3/ja` | `jf_alpha` | `jf_gongitsune`, `jf_nezumi`, `jm_kumo` |
+| Mandarin | `ANE-v3/zh` | `zf_001` | `zf_002`, `zm_009`, `zm_010` |
+
+V3 checks the pinned manifest and model-file hashes, fetches its pinned
+seven-stage dependencies, and compiles source `.mlpackage` files on the
+target device. The first load includes downloads and compilation. Later
+loads reuse the downloaded packages and locally compiled models. Its cache
+is separate from legacy assets:
+`<Models>/kokoro-82m-coreml/ANE-v3/<release revision>/<en|ja|zh>/`.
+Passing `directory:` overrides the `<Models>` root. Voice packs download
+on demand; English JSON voice rows are converted to the runtime's binary
+layout. Text frontends retain their existing shared asset caches.
+
+The SDK adopts `KokoroProsody_v2` (fp32 prosody) and `KokoroTail_v2`
+(COLA-corrected output level) from the pinned base revision instead of reverting
+those fixes when enabling v3. Those two stages, and Mandarin `KokoroNoise_v2`,
+use published compiled bundles because complete source packages are unavailable.
+All downloaded model files are verified against the pinned tree's content hashes.
+
+Albert uses 32/64-token buckets, including boundary tokens, then the dynamic
+Albert model for longer requests. Decoder buckets cover 120/200 acoustic
+frames. Above 200 frames (five seconds of generated audio), synthesis uses
+the original vocoder and tail. The overall input limit remains 510 phonemes;
+V3 also rejects requests exceeding 2,000 predicted acoustic frames.
+Chunk longer speech upstream to benefit from the fast path.
+
+```swift
+let result = try await english.synthesizeDetailed(text: "Hello world.")
+print(result.usedFastVocoder) // True only when every chunk used the fast vocoder.
+print(result.timings.nativeSource, result.timings.decoder, result.timings.generator)
+print(result.timings.totalMs) // Sum of timed stages, excluding downloads and text processing.
+```
+
+The CLI exposes the same selection:
+
+```bash
+swift run -c release fluidaudiocli tts "Hello world." \
+  --backend kokoro-ane --kokoro-version v3 --voice af_bella --output en.wav
+swift run -c release fluidaudiocli tts "你好世界。" \
+  --backend kokoro-ane --kokoro-version v3 --variant zh --output zh.wav
+swift run -c release fluidaudiocli tts "こんにちは、世界。" \
+  --backend kokoro-ane --kokoro-version v3 --variant ja --output ja.wav
+```
+
+The bounded real-model integration test is opt-in with
+`FLUIDAUDIO_RUN_KOKORO_V3=1 swift test --filter KokoroAneV3Tests`.
+Set `KOKORO_V3_TEST_CACHE` to override its model cache root. It covers both
+fast decoder sizes, dynamic/long-input fallback, alternate voices, reload,
+English, Mandarin and Japanese text, and explicit phoneme input. Local Apple Silicon
+checks are development evidence. The dedicated workflow builds for iOS devices
+and runs API/frontend tests in an iPhone simulator. Neither simulator tests nor
+compilation validate physical-device ANE/GPU inference or sustained stability.
+The existing OS 26.4+/iOS 27 Core ML crash advisories still apply; v3 is not a
+confirmed workaround. Physical-device validation remains outstanding for this opt-in runtime.
+
+## Legacy seven-stage runtime
 
 Splits the Kokoro 82M graph into 7 CoreML stages so the ANE-friendly layers
 (Albert / PostAlbert / Alignment / Vocoder) stay resident on the Neural Engine

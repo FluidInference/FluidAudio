@@ -167,6 +167,10 @@ public actor KokoroAneModelStore {
 
     private let logger = AppLogger(category: "KokoroAneModelStore")
 
+    /// Runtime architecture selected when the store is created.
+    public nonisolated let version: KokoroAneVersion
+    private var v3Pipeline: KokoroAneV3Pipeline?
+    private var loadingTask: Task<Void, Error>?
     private var models: [KokoroAneStage: MLModel] = [:]
     private var vocab: KokoroAneVocab?
     private var voicePacks: [String: KokoroAneVoicePack] = [:]
@@ -186,8 +190,10 @@ public actor KokoroAneModelStore {
     public init(
         directory: URL? = nil,
         computeUnits: KokoroAneComputeUnits = .default,
-        variant: KokoroAneVariant = .english
+        variant: KokoroAneVariant = .english,
+        version: KokoroAneVersion = .legacy
     ) {
+        self.version = version
         self.directory = directory
         self.computeUnits = computeUnits
         self.variant = variant
@@ -200,7 +206,39 @@ public actor KokoroAneModelStore {
     /// retryable: if any stage throws, `self.models` stays empty and the next
     /// call retries from scratch instead of returning early on a partial state.
     public func loadIfNeeded() async throws {
-        guard models.isEmpty else { return }
+        guard !isLoaded else { return }
+        if let task = loadingTask { return try await task.value }
+        let task = Task { try await self.loadModels() }
+        loadingTask = task
+        defer { loadingTask = nil }
+        try await task.value
+    }
+
+    private func loadModels() async throws {
+        if version == .v3 {
+            guard #available(macOS 15, iOS 18, *) else {
+                throw KokoroAneError.inputProcessingFailed("ANE-v3 requires macOS 15 / iOS 18 or newer")
+            }
+            try KokoroAneV3Assets.validateVariant(variant)
+            guard computeUnits == .default || computeUnits == .aneTailGpu else {
+                throw KokoroAneError.inputProcessingFailed(
+                    "ANE-v3 uses its validated hybrid ANE/GPU routing; use default compute units")
+            }
+            let root = try await KokoroAneV3Assets.ensure(variant: variant, directory: directory)
+            let loadedVocab = try KokoroAneVocab.load(from: root.appendingPathComponent("vocab.json"))
+            let voiceURL = try await KokoroAneV3Assets.ensureVoice(variant.defaultVoice, variant: variant, root: root)
+            let defaultPack = try KokoroAneVoicePack.load(from: voiceURL)
+            let pipeline = try KokoroAneV3Pipeline(
+                baseDirectory: root.appendingPathComponent("base"),
+                fastDirectory: root.appendingPathComponent("fast"),
+                decoderDirectory: root.appendingPathComponent("decoder"))
+            try Task.checkCancellation()
+            v3Pipeline = pipeline
+            vocab = loadedVocab
+            voicePacks[variant.defaultVoice] = defaultPack
+            repoDirectory = root
+            return
+        }
 
         let repoDir = try await KokoroAneResourceDownloader.ensureModels(
             variant: variant, directory: directory)
@@ -234,6 +272,7 @@ public actor KokoroAneModelStore {
 
         // Commit. Past this point a partial-failure retry would re-download
         // and recompile, which is OK — that's the documented contract.
+        try Task.checkCancellation()
         self.models = pendingModels
         self.vocab = loadedVocab
         self.repoDirectory = repoDir
@@ -241,6 +280,29 @@ public actor KokoroAneModelStore {
         // Pre-load the default voice. Voice-pack failure does not invalidate
         // the model cache (voices are mutable runtime state).
         _ = try await voicePack(variant.defaultVoice)
+    }
+
+    func synthesizeV3(
+        inputIds: [Int32], styleS: [Float], styleTimbre: [Float], speed: Float
+    ) throws -> KokoroAneSynthesisResult {
+        guard let pipeline = v3Pipeline else { throw KokoroAneError.modelNotLoaded("ANE-v3") }
+        let result = try pipeline.synthesize(inputIds: inputIds, style: styleTimbre + styleS, speed: speed)
+        let stages = result.stageMilliseconds
+        var timings = KokoroAneStageTimings()
+        timings.albert = stages.filter { $0.key == "Albert" || $0.key.hasPrefix("Albert_") }.values.reduce(0, +)
+        timings.postAlbert = stages["PostAlbert", default: 0]
+        timings.alignment = stages["Alignment", default: 0]
+        timings.prosody = stages["Prosody", default: 0]
+        timings.noise = stages["Noise", default: 0]
+        timings.vocoder = stages["Vocoder", default: 0]
+        timings.tail = stages["Tail", default: 0]
+        timings.nativeSource = stages["NativeSource", default: 0]
+        timings.decoder = stages.filter { $0.key.hasPrefix("Decoder_") }.values.reduce(0, +)
+        timings.generator = stages["SourceGenerator", default: 0]
+        return KokoroAneSynthesisResult(
+            samples: result.samples, sampleRate: KokoroAneConstants.sampleRate,
+            encoderTokens: inputIds.count, acousticFrames: result.acousticFrames, timings: timings,
+            inputIds: inputIds, predictedDurations: result.durationFrames, usedFastVocoder: result.usedFastVocoder)
     }
 
     public func model(for stage: KokoroAneStage) throws -> MLModel {
@@ -262,8 +324,13 @@ public actor KokoroAneModelStore {
         guard let repoDir = repoDirectory else {
             throw KokoroAneError.modelNotLoaded("voice pack (repo not initialized)")
         }
-        let url = try await KokoroAneResourceDownloader.ensureVoicePack(
-            voice, repoDirectory: repoDir, variant: variant)
+        let url: URL
+        if version == .v3 {
+            url = try await KokoroAneV3Assets.ensureVoice(voice, variant: variant, root: repoDir)
+        } else {
+            url = try await KokoroAneResourceDownloader.ensureVoicePack(
+                voice, repoDirectory: repoDir, variant: variant)
+        }
         let pack = try KokoroAneVoicePack.load(from: url)
         voicePacks[voice] = pack
         logger.info("Loaded voice pack '\(voice)'")
@@ -271,7 +338,7 @@ public actor KokoroAneModelStore {
     }
 
     public var isLoaded: Bool {
-        models.count == KokoroAneStage.allCases.count && vocab != nil
+        (version == .v3 ? v3Pipeline != nil : models.count == KokoroAneStage.allCases.count) && vocab != nil
     }
 
     /// Lazy-load and cache the Mandarin G2P pipeline (binary dicts +
@@ -445,6 +512,8 @@ public actor KokoroAneModelStore {
     }
 
     public func cleanup() {
+        loadingTask?.cancel()
+        v3Pipeline = nil
         models.removeAll()
         voicePacks.removeAll()
         vocab = nil

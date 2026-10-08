@@ -1,6 +1,6 @@
 import Foundation
 
-/// High-level facade for the Kokoro 82M 7-stage CoreML chain
+/// High-level facade for the legacy Kokoro chain or opt-in ANE-v3 runtime
 /// (ANE-resident, derived from [laishere/kokoro-coreml](https://github.com/laishere/kokoro-coreml)).
 ///
 /// Splits the model into 7 CoreML graphs with per-stage compute-unit
@@ -53,24 +53,27 @@ public actor KokoroAneManager {
     /// English G2P assets.
     private var englishFrontendReady = false
 
+    /// Select `.v3` for the pinned hybrid ANE/GPU pipeline (macOS 15 / iOS 18+).
+    /// A supplied model store owns the runtime version and compute policy.
     public init(
         variant: KokoroAneVariant = .english,
         defaultVoice: String? = nil,
         directory: URL? = nil,
         computeUnits: KokoroAneComputeUnits = .default,
-        modelStore: KokoroAneModelStore? = nil
+        modelStore: KokoroAneModelStore? = nil,
+        version: KokoroAneVersion = .legacy
     ) {
         self.variant = variant
         self.defaultVoice = defaultVoice ?? variant.defaultVoice
         self.store =
             modelStore
             ?? KokoroAneModelStore(
-                directory: directory, computeUnits: computeUnits, variant: variant)
+                directory: directory, computeUnits: computeUnits, variant: variant, version: version)
     }
 
     // MARK: - Lifecycle
 
-    /// Download (if missing), load all 7 mlmodelcs + vocab + default voice
+    /// Download (if missing), load the selected runtime + vocab + default voice
     /// pack. Optionally pre-warm additional voice packs.
     public func initialize(preloadVoices: Set<String>? = nil) async throws {
         if let advisory = Self.osAdvisory(for: ProcessInfo.processInfo.operatingSystemVersion) {
@@ -430,13 +433,14 @@ public actor KokoroAneManager {
         let phonemeCount = KokoroAneVocab.phonemeLength(phonemes)
         let (styleS, styleTimbre) = pack.slice(for: phonemeCount)
 
-        var result = try await KokoroAneSynthesizer.synthesize(
-            inputIds: inputIds,
-            styleS: styleS,
-            styleTimbre: styleTimbre,
-            speed: speed,
-            store: store
-        )
+        var result: KokoroAneSynthesisResult
+        if store.version == .v3 {
+            result = try await store.synthesizeV3(
+                inputIds: inputIds, styleS: styleS, styleTimbre: styleTimbre, speed: speed)
+        } else {
+            result = try await KokoroAneSynthesizer.synthesize(
+                inputIds: inputIds, styleS: styleS, styleTimbre: styleTimbre, speed: speed, store: store)
+        }
         result.normalizedText = normalizedText
         result.phonemes = phonemes
         return result
