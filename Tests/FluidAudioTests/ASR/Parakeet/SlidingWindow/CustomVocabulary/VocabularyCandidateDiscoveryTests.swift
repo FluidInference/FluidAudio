@@ -28,6 +28,39 @@ final class VocabularyCandidateDiscoveryTests: XCTestCase {
         XCTAssertTrue(VocabularyRescorer.prepareNormalizedForms(for: CustomVocabularyContext(terms: [])).isEmpty)
     }
 
+    func testRescuePreflightRespectsVocabularySizeWithInstalledModels() async throws {
+        let directory = CtcModels.defaultCacheDirectory(for: .ctc110m)
+        guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("tokenizer.json").path) else {
+            throw XCTSkip("Install CTC 110M to exercise rescue preflight")
+        }
+        let models = try await CtcModels.loadDirect(from: directory)
+        let spotter = CtcKeywordSpotter(models: models)
+        let tokenizer = try await CtcTokenizer.load(from: directory)
+        let threshold = ContextBiasingConstants.largeVocabThreshold
+        let unrelatedTimings = [TokenTiming(token: "▁unrelated", tokenId: 1, startTime: 0, endTime: 1, confidence: 1)]
+        let candidateTimings = [TokenTiming(token: "▁quiltor", tokenId: 1, startTime: 0, endTime: 1, confidence: 1)]
+        for count in [threshold, threshold + 1] {
+            let terms = ["Quilter"] + (1..<count).map { "Kubernetes extension \($0)" }
+            let context = CustomVocabularyContext(
+                terms: terms.map {
+                    CustomVocabularyTerm(text: $0, ctcTokenIds: tokenizer.encode($0))
+                })
+            let rescorer = try await VocabularyRescorer.create(
+                spotter: spotter, vocabulary: context, ctcModelDirectory: directory)
+            let session = try await VocabularyBoostingSession(vocabulary: context, ctcModels: models)
+            XCTAssertEqual(
+                rescorer.hasCTCRescoringCandidates(transcript: "unrelated", tokenTimings: unrelatedTimings),
+                count <= threshold, "Rescue only requires CTC evidence for small vocabularies")
+            XCTAssertEqual(
+                session.hasCTCRescoringCandidates(text: "unrelated", tokenTimings: unrelatedTimings),
+                count <= threshold, "Prepared sessions must use the same rescue size gate")
+            XCTAssertTrue(
+                rescorer.hasCTCRescoringCandidates(transcript: "quiltor", tokenTimings: candidateTimings),
+                "Text candidates still require CTC evidence above the rescue threshold")
+            XCTAssertTrue(session.hasCTCRescoringCandidates(text: "quiltor", tokenTimings: candidateTimings))
+        }
+    }
+
     func testDiscoveryMatchesExactScoringCandidatesWithInstalledTokenizerAndAcousticEvidence() async throws {
         let directory = CtcModels.defaultCacheDirectory(for: .ctc110m)
         guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("tokenizer.json").path),

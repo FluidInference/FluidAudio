@@ -46,8 +46,11 @@ if session.hasCTCRescoringCandidates(
 
 This uses the same aliases, compounds, similarity thresholds and safety rules as
 rescoring. It performs no CTC inference. An empty vocabulary or timing list
-returns `false`. With acoustic rescue enabled, nonempty input returns `true`
-conservatively: the spotter can find a term even when text matching cannot.
+returns `false`. When acoustic rescue is enabled on the term-centric path and the
+vocabulary size is at or below `ContextBiasingConstants.largeVocabThreshold`,
+nonempty input returns `true` conservatively: the spotter can find a term even
+when text matching cannot. Larger vocabularies and the experimental BK-tree path
+use text candidate discovery because acoustic rescue does not run there.
 Disabling rescue changes recognition behavior; choose that policy separately
 from whether to use preflight.
 

@@ -412,8 +412,8 @@ extension VocabularyRescorer {
     /// without computing or consuming CTC probabilities. A false result permits
     /// skipping acoustic inference for transcript replacements. Callers needing
     /// standalone keyword detections must still run acoustic inference. When
-    /// acoustic rescue is enabled, returns true conservatively because rescue
-    /// can find terms absent from text candidates.
+    /// term-centric acoustic rescue is enabled for this vocabulary size, returns
+    /// true conservatively because rescue can find terms absent from text candidates.
     ///
     /// - Parameters:
     ///   - transcript: Untouched transcript from the TDT decoder.
@@ -426,7 +426,11 @@ extension VocabularyRescorer {
         minSimilarity: Float = ContextBiasingConstants.minSimilarityFloor
     ) -> Bool {
         guard !vocabulary.terms.isEmpty, !tokenTimings.isEmpty else { return false }
-        if config.spotterRescueEnabled { return true }
+        if config.spotterRescueEnabled, !useBKTree,
+            vocabulary.terms.count <= ContextBiasingConstants.largeVocabThreshold
+        {
+            return true
+        }
         var candidateEvidence: CandidateEvidenceCollector?
         var candidateFound: Bool? = false
         _ = evaluateTokenCandidates(
