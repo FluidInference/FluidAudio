@@ -50,7 +50,7 @@ jobs:
           PY
       - name: Run iOS API and Japanese frontend unit tests
         run: >-
-          xcodebuild -scheme FluidAudio
+          xcodebuild -scheme FluidAudio-Package
           -destination "platform=iOS Simulator,id=$KOKORO_SIMULATOR_ID"
           -derivedDataPath .build-ios-simulator -resultBundlePath kokoro-ios.xcresult
           -only-testing:FluidAudioTests/KokoroAneV3Tests

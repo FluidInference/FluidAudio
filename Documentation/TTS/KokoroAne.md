@@ -87,7 +87,7 @@ checks are development evidence. The dedicated workflow builds for iOS devices
 and runs API/frontend tests in an iPhone simulator. Neither simulator tests nor
 compilation validate physical-device ANE/GPU inference or sustained stability.
 The existing OS 26.4+/iOS 27 Core ML crash advisories still apply; v3 is not a
-confirmed workaround. No stable SDK release is implied by the feature branch.
+confirmed workaround. Physical-device validation remains outstanding for this opt-in runtime.
 
 ## Legacy seven-stage runtime
 
