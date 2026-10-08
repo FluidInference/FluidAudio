@@ -330,9 +330,8 @@ extension StreamingNemotronMultilingualAsrManager {
             self.lastToken = currentToken
             self.hState = currentH
             self.cState = currentC
-            if !newTokens.isEmpty, let callback = partialCallback {
-                let decoded = tokenizer.decode(ids: accumulatedTokenIds)
-                callback(decoded.text)
+            if !newTokens.isEmpty {
+                publishPartialTranscript(using: partialCallback)
             }
             if let nextEnc = try await nextEncFuture {
                 self.prefetchedEncoded = nextEnc.encoded
@@ -551,9 +550,8 @@ extension StreamingNemotronMultilingualAsrManager {
         self.cState = currentC
 
         // Invoke partial callback if new tokens were decoded
-        if !newTokens.isEmpty, let callback = partialCallback {
-            let decoded = tokenizer.decode(ids: accumulatedTokenIds)
-            callback(decoded.text)
+        if !newTokens.isEmpty {
+            publishPartialTranscript(using: partialCallback)
         }
 
         // TRIPLE-STAGE PIPELINE: collect the next chunk's encoder output
