@@ -32,6 +32,12 @@ public struct DiarizerConfig: Sendable {
     /// Overlap between chunks (seconds).
     public var chunkOverlap: Float = 0.0
 
+    /// When true, `performCompleteDiarization` populates
+    /// `DiarizationResult.chunkEmbeddings` with one entry per (chunk, local speaker)
+    /// that received a speaker ID. Off by default, matching
+    /// `OfflineDiarizerConfig.exposeChunkEmbeddings`.
+    public var exposeChunkEmbeddings: Bool = false
+
     public static let `default` = DiarizerConfig()
 
     public init(
@@ -43,7 +49,8 @@ public struct DiarizerConfig: Sendable {
         minActiveFramesCount: Float = 10.0,
         debugMode: Bool = false,
         chunkDuration: Float = 10.0,
-        chunkOverlap: Float = 0.0
+        chunkOverlap: Float = 0.0,
+        exposeChunkEmbeddings: Bool = false
     ) {
         self.clusteringThreshold = clusteringThreshold
         self.minSpeechDuration = minSpeechDuration
@@ -54,6 +61,7 @@ public struct DiarizerConfig: Sendable {
         self.debugMode = debugMode
         self.chunkDuration = chunkDuration
         self.chunkOverlap = chunkOverlap
+        self.exposeChunkEmbeddings = exposeChunkEmbeddings
     }
 }
 
@@ -118,19 +126,22 @@ public struct PipelineTimings: Sendable, Codable {
     }
 }
 
-/// Per-chunk speaker embedding produced during offline diarization, surfaced for
+/// Per-chunk speaker embedding produced during diarization, surfaced for
 /// downstream consumers that need finer-grained data than `TimedSpeakerSegment`
-/// (e.g. cluster-level contamination correction). One entry per (segmentation
-/// chunk, powerset speaker slot) emitted by the embedding extraction step.
+/// (e.g. cluster-level contamination correction, or re-clustering the online
+/// diarizer's labels over the whole file). One entry per (segmentation chunk,
+/// local speaker slot) emitted by the embedding extraction step.
 ///
-/// The `embedding256` field carries the L2-normalized speaker embedding;
-/// `rho128` carries the PLDA-whitened representation when a PLDA model is
-/// loaded (un-normalized; magnitude carries confidence). `rho128` is empty
-/// when no PLDA model is available.
+/// The `embedding256` field carries the speaker embedding as the extractor
+/// emitted it. For `DiarizerManager` that is the raw WeSpeaker output — the same
+/// vector its segments carry — which is not unit-norm. `rho128` carries the
+/// PLDA-whitened representation when a PLDA model is loaded (un-normalized;
+/// magnitude carries confidence). `rho128` is empty when no PLDA model is
+/// available, which is always the case for `DiarizerManager`.
 public struct ChunkEmbedding: Sendable, Codable {
     /// Cluster identifier matching `DiarizationResult.segments[*].speakerId`
-    /// (formatted as "S1", "S2", ...). Use this to align chunks back to their
-    /// assigned cluster.
+    /// ("S1", "S2", ... for the offline pipeline; `SpeakerManager` IDs for
+    /// `DiarizerManager`). Use this to align chunks back to their assigned cluster.
     public let speakerId: String
     public let chunkIndex: Int
     public let speakerIndex: Int
@@ -164,9 +175,11 @@ public struct DiarizationResult: Sendable {
     /// Speaker database with embeddings (populated by offline pipelines for downstream use)
     public let speakerDatabase: [String: [Float]]?
 
-    /// Per-chunk speaker embeddings with cluster assignments. Populated by
-    /// offline pipelines when `OfflineDiarizerConfig.exposeChunkEmbeddings`
-    /// is enabled; nil otherwise. See `ChunkEmbedding` for field semantics.
+    /// Per-chunk speaker embeddings with cluster assignments. Populated by the
+    /// offline pipeline when `OfflineDiarizerConfig.exposeChunkEmbeddings` is
+    /// enabled, and by `DiarizerManager.performCompleteDiarization` when
+    /// `DiarizerConfig.exposeChunkEmbeddings` is enabled; nil otherwise.
+    /// See `ChunkEmbedding` for field semantics.
     public let chunkEmbeddings: [ChunkEmbedding]?
 
     /// Performance timings collected during diarization
