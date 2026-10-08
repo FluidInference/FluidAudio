@@ -248,6 +248,21 @@ Derived metrics:
 
 ## Text-to-Speech
 
+### Kokoro ANE v3 (FluidAudio v0.17.6)
+
+Selected M5 Pro / macOS 27.0 checks measured **49.45 / 35.85 / 53.97 ms**
+median inference for English / Japanese / Mandarin, producing 3.350 / 3.050 /
+3.675 seconds of audio. Each median uses five calls after two warmups; input
+phonemes are prepared in advance. Current v3 uses per-stage CPU/ANE and CPU/GPU
+policies plus native CPU DSP, rather than `.all` or an ANE-only policy.
+
+Applying CPU+ANE to every graph measured 511.40 / 474.45 / 584.19 ms; `.all`
+and CPU+GPU aborted in Apple's GPU RNN path before completing warmups.
+These are bounded local checks, not full-corpus results. See the
+[complete protocol, inputs, ranges, raw records and separate live-demo timings](TTS/Benchmarks.md#kokoro-ane-v3-selected-m5-pro-measurements).
+
+### Historical M4 Pro comparison
+
 We generated the same strings with to generate audio between 1s to ~300s in order to test the speed across a range of varying inputs on Pytorch CPU, MPS, and MLX pipeline, and compared it against the native Swift version with Core ML models.
 
 Each pipeline warmed up the models by running through it once with pesudo inputs, and then comparing the raw inference time with the model already loaded. You can see that for the Core ML model, we traded lower memory and very slightly faster inference for longer initial warm-up.
