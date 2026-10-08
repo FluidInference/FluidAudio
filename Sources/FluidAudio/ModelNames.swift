@@ -1361,9 +1361,13 @@ public enum ModelNames {
     /// JSON files. File names match the HuggingFace tree at
     /// `FluidInference/supertonic-3-coreml/`.
     public enum Supertonic3 {
-        public static let textEncoder = "TextEncoder"
-        public static let durationPredictor = "DurationPredictor"
-        public static let vectorEstimator = "VectorEstimator"
+        /// `_v2` builds emulate upstream's edge (replicate) padding at the right
+        /// edge of the valid region, so the T=128 text pad and the ANE latent
+        /// buckets no longer leak into the ConvNeXt convs. The Vocoder is causal
+        /// and unaffected, so it keeps its v1 name.
+        public static let textEncoder = "TextEncoder_v2"
+        public static let durationPredictor = "DurationPredictor_v2"
+        public static let vectorEstimator = "VectorEstimator_v2"
         public static let vocoder = "Vocoder"
 
         public static let textEncoderFile = textEncoder + ".mlmodelc"
@@ -1404,7 +1408,7 @@ public enum ModelNames {
         public static let variantsSubdir = "VectorEstimatorVariants"
 
         /// Bundle (dir) name of a VectorEstimator build, e.g.
-        /// `VectorEstimator`, `VectorEstimator_int4`, `VectorEstimator_L256_int8`.
+        /// `VectorEstimator_v2`, `VectorEstimator_v2_int4`, `VectorEstimator_v2_L256_int8`.
         public static func vectorEstimatorName(precisionSuffix: String?, bucket: Int?) -> String {
             var name = vectorEstimator
             if let bucket { name += "_L\(bucket)" }

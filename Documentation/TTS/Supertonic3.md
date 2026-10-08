@@ -184,10 +184,23 @@ All CoreML packages live under
 
 | Stage | mlmodelc | Notes |
 |---|---|---|
-| Text encoder | `TextEncoder.mlmodelc` | T=128 fixed, outputs `text_emb [1, 256, 128]` |
-| Duration predictor | `DurationPredictor.mlmodelc` | T=128 fixed, outputs scalar `duration` |
-| Vector estimator | `VectorEstimator.mlmodelc` | FP16 dynamic (RangeDim), CPU/GPU. 8 denoising steps with fused CFG (W_COND = 4.0, W_UNCOND = 3.0). See [variants](#vectorestimator-variants) for quantized / ANE builds |
+| Text encoder | `TextEncoder_v2.mlmodelc` | T=128 fixed, outputs `text_emb [1, 256, 128]` |
+| Duration predictor | `DurationPredictor_v2.mlmodelc` | T=128 fixed, outputs scalar `duration` |
+| Vector estimator | `VectorEstimator_v2.mlmodelc` | FP16 dynamic (RangeDim), CPU/GPU. 8 denoising steps with fused CFG (W_COND = 4.0, W_UNCOND = 3.0). See [variants](#vectorestimator-variants) for quantized / ANE builds |
 | Vocoder | `Vocoder.mlmodelc` | Outputs `wav` at 44.1 kHz mono Float32 |
+
+### v2 bundles (edge-pad fix)
+
+Upstream's ConvNeXt depthwise convs (text encoder, duration predictor, vector
+estimator) pad both sides with `mode=edge` on the *unpadded* sequence. The
+CoreML pipeline right-pads text to T=128 and, for the ANE buckets, the latent
+to L=128/256/512, so the v1 conv at the last valid frame read masked zeros
+instead of a replicated frame. That shortened durations ~1 %, shifted
+`text_emb` by up to ~0.3, and left audible energy in the last ~250 ms of each
+chunk on the bucketed path. The `_v2` builds fill padded frames with the last
+valid frame before each such conv (identical math when nothing is padded).
+Same inputs/outputs, sizes and ANE placement as v1; the causal vocoder is
+unchanged. The v1 bundles stay in the repo for older FluidAudio releases.
 
 Companion assets:
 
@@ -215,9 +228,9 @@ common case.
 
 | `Supertonic3VectorEstimator` | `--ve-variant` | shape | device | bundle |
 |---|---|---|---|---|
-| `.fp16Dynamic` (default) | `fp16` | RangeDim | CPU/GPU | `VectorEstimator.mlmodelc` (repo root) |
-| `.dynamic(q)` | `dyn-int8` / `dyn-int6` / `dyn-int4` | RangeDim | CPU/GPU | `VectorEstimatorVariants/VectorEstimator_int{8,6,4}.mlmodelc` |
-| `.aneBucketed(q)` | `int8` / `int6` / `int4` | fixed L=128/256/512 | **ANE** | `VectorEstimatorVariants/VectorEstimator_L{128,256,512}_int{8,6,4}.mlmodelc` |
+| `.fp16Dynamic` | `fp16` | RangeDim | CPU/GPU | `VectorEstimator_v2.mlmodelc` (repo root) |
+| `.dynamic(q)` | `dyn-int8` / `dyn-int6` / `dyn-int4` | RangeDim | CPU/GPU | `VectorEstimatorVariants/VectorEstimator_v2_int{8,6,4}.mlmodelc` |
+| `.aneBucketed(q)` (default `int4`) | `int8` / `int6` / `int4` | fixed L=128/256/512 | **ANE** | `VectorEstimatorVariants/VectorEstimator_v2_L{128,256,512}_int{8,6,4}.mlmodelc` |
 
 **Quantization → size only** (placement and latency are unchanged — ANE compute
 is precision-independent). All are post-training, weight-only:
