@@ -677,27 +677,37 @@ for the full language table.
 
 ### KokoroAne
 
-ANE-resident Kokoro 82M (4-stage on Neural Engine, 3-stage on GPU). Yields
-3-11× RTFx on Apple Silicon vs. the prior single-graph Kokoro path. English
-(`af_heart`) and Mandarin variants ship with a built-in G2P pipeline (BART
-CoreML for English OOV, jieba + sandhi + G2pW for Mandarin).
+Kokoro ANE v3 is available in **v0.17.6** for English, Japanese and Mandarin,
+with native text frontends. Opt in with `version: .v3`; existing callers keep
+`.legacy`. V3 requires macOS 15 / iOS 18 and combines CPU/ANE model stages,
+a CPU/GPU generator and native Accelerate DSP. It is not ANE-only or `.all`.
 
 ```swift
 import FluidAudio
 
-Task {
-    let manager = KokoroAneManager()
-    try await manager.initialize()
-    let samples = try await manager.synthesize(text: "Hello from FluidAudio.")
-    // `samples` is 24 kHz mono Float32 PCM
-}
+let manager = KokoroAneManager(version: .v3)
+try await manager.initialize()
+let result = try await manager.synthesizeDetailed(text: "Hello from FluidAudio.")
+// result.samples: 24 kHz mono Float32 PCM
+
+let japanese = KokoroAneManager(variant: .japanese, version: .v3)
+let mandarin = KokoroAneManager(variant: .mandarin, version: .v3)
 ```
 
 ```bash
-swift run fluidaudiocli tts "Hello from FluidAudio." --backend kokoroAne --output out.wav
+swift run -c release fluidaudiocli tts "Hello from FluidAudio." \
+  --backend kokoro-ane --kokoro-version v3 --output out.wav
 ```
 
-Model assets are cached under `~/.cache/fluidaudio/Models/kokoro/`.
+Selected M5 Pro demo inputs produced 3.05–3.68 seconds of audio in
+**36–54 ms median inference**, excluding text processing and loading. These
+are bounded local checks; see [benchmark methodology and live-demo timings](Documentation/TTS/Benchmarks.md#kokoro-ane-v3-selected-m5-pro-measurements).
+Models compile/cache on first use. Physical iOS inference remains unvalidated.
+See [setup, voices, model pins, caches and platform limits](Documentation/TTS/KokoroAne.md).
+
+Base weights: [hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)
+(English/Japanese) and [hexgrad/Kokoro-82M-v1.1-zh](https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh)
+(Mandarin). Core ML assets: [FluidInference/kokoro-82m-coreml](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/main/ANE-v3).
 
 ## Continuous Integration
 

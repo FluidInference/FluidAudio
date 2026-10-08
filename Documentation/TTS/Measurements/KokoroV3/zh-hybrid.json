@@ -1,0 +1,173 @@
+{
+  "inputIds" : [
+    0,
+    73,
+    127,
+    172,
+    88,
+    108,
+    169,
+    3,
+    88,
+    161,
+    171,
+    152,
+    172,
+    95,
+    144,
+    169,
+    153,
+    173,
+    30,
+    121,
+    169,
+    40,
+    127,
+    173,
+    137,
+    169,
+    151,
+    171,
+    88,
+    140,
+    172,
+    94,
+    124,
+    172,
+    4,
+    0
+  ],
+  "language" : "zh",
+  "loadMilliseconds" : 14134.340333,
+  "policy" : "hybrid",
+  "text" : "你好，欢迎使用本地语音合成。",
+  "trials" : [
+    {
+      "audioSeconds" : 3.675,
+      "fast" : true,
+      "frames" : 147,
+      "iteration" : -2,
+      "milliseconds" : 112.47575,
+      "peak" : 0.6953125,
+      "rms" : 0.08059115548018292,
+      "stages" : {
+        "Albert_64" : 2.6017079949378967,
+        "Alignment" : 1.095124989748001,
+        "Decoder_200" : 4.570374995470047,
+        "NativeSource" : 3.9683749973773956,
+        "PostAlbert" : 5.242749989032745,
+        "Prosody" : 8.480749994516373,
+        "SourceGenerator" : 85.87908300757408
+      }
+    },
+    {
+      "audioSeconds" : 3.675,
+      "fast" : true,
+      "frames" : 147,
+      "iteration" : -1,
+      "milliseconds" : 46.404708,
+      "peak" : 0.6953125,
+      "rms" : 0.08059115548018292,
+      "stages" : {
+        "Albert_64" : 1.3400420248508453,
+        "Alignment" : 0.901625007390976,
+        "Decoder_200" : 2.9789159893989563,
+        "NativeSource" : 3.893875002861023,
+        "PostAlbert" : 2.991084009408951,
+        "Prosody" : 4.288249999284744,
+        "SourceGenerator" : 29.589040994644165
+      }
+    },
+    {
+      "audioSeconds" : 3.675,
+      "fast" : true,
+      "frames" : 147,
+      "iteration" : 0,
+      "milliseconds" : 58.523583,
+      "peak" : 0.6953125,
+      "rms" : 0.08059115548018292,
+      "stages" : {
+        "Albert_64" : 1.3299579918384552,
+        "Alignment" : 0.5920830070972443,
+        "Decoder_200" : 2.8278749883174896,
+        "NativeSource" : 3.6107909977436066,
+        "PostAlbert" : 3.5314579904079437,
+        "Prosody" : 7.614499986171722,
+        "SourceGenerator" : 38.51012501120567
+      }
+    },
+    {
+      "audioSeconds" : 3.675,
+      "fast" : true,
+      "frames" : 147,
+      "iteration" : 1,
+      "milliseconds" : 45.457584,
+      "peak" : 0.6953125,
+      "rms" : 0.08059115548018292,
+      "stages" : {
+        "Albert_64" : 1.483916014432907,
+        "Alignment" : 0.6162090003490448,
+        "Decoder_200" : 2.8970830142498016,
+        "NativeSource" : 3.356750011444092,
+        "PostAlbert" : 2.9107919931411743,
+        "Prosody" : 4.826292008161545,
+        "SourceGenerator" : 28.890082985162735
+      }
+    },
+    {
+      "audioSeconds" : 3.675,
+      "fast" : true,
+      "frames" : 147,
+      "iteration" : 2,
+      "milliseconds" : 52.730167,
+      "peak" : 0.6953125,
+      "rms" : 0.08059115548018292,
+      "stages" : {
+        "Albert_64" : 1.690750002861023,
+        "Alignment" : 0.6295419931411743,
+        "Decoder_200" : 3.028082996606827,
+        "NativeSource" : 4.10979101061821,
+        "PostAlbert" : 4.600250005722046,
+        "Prosody" : 9.069750010967255,
+        "SourceGenerator" : 29.027415990829468
+      }
+    },
+    {
+      "audioSeconds" : 3.675,
+      "fast" : true,
+      "frames" : 147,
+      "iteration" : 3,
+      "milliseconds" : 54.476167,
+      "peak" : 0.6953125,
+      "rms" : 0.08059115548018292,
+      "stages" : {
+        "Albert_64" : 1.4238329827785492,
+        "Alignment" : 1.029875010251999,
+        "Decoder_200" : 3.1336670219898224,
+        "NativeSource" : 4.337332993745804,
+        "PostAlbert" : 3.971457988023758,
+        "Prosody" : 7.756166994571686,
+        "SourceGenerator" : 32.09708300232887
+      }
+    },
+    {
+      "audioSeconds" : 3.675,
+      "fast" : true,
+      "frames" : 147,
+      "iteration" : 4,
+      "milliseconds" : 53.97225,
+      "peak" : 0.6953125,
+      "rms" : 0.08059115548018292,
+      "stages" : {
+        "Albert_64" : 1.4665409922599792,
+        "Alignment" : 1.156125009059906,
+        "Decoder_200" : 3.1017920076847076,
+        "NativeSource" : 4.87679198384285,
+        "PostAlbert" : 3.976042002439499,
+        "Prosody" : 5.844582974910736,
+        "SourceGenerator" : 32.71441701054573
+      }
+    }
+  ],
+  "voice" : "zf_001"
+}

@@ -1,10 +1,103 @@
 # TTS Benchmarks
 
+## Kokoro ANE v3: selected M5 Pro measurements
+
+FluidAudio **v0.17.6** adds the opt-in `KokoroAneManager(version: .v3)`
+runtime for English, Japanese and Mandarin. These are small local development
+checks on **Apple M5 Pro, 24 GiB, macOS 27.0 (26A428)**, recorded October 7,
+2026 (Toronto). They do not replace the historical 100-phrase results below or
+establish cross-device performance or audio quality equivalence.
+
+### Compute-policy comparison
+
+The released runtime uses **per-stage hybrid routing**, not `.all`:
+Albert / PostAlbert / Alignment / Prosody / masked decoder request
+`.cpuAndNeuralEngine`; the generator requests `.cpuAndGPU`; native source/STFT
+runs on CPU through Accelerate. The long-input fallback requests CPU+ANE for
+Vocoder and CPU+GPU for Noise/Tail. Core ML chooses placement within each policy.
+
+| Policy applied to every Core ML model | English | Japanese | Mandarin |
+| --- | ---: | ---: | ---: |
+| Released hybrid routing | **49.45 ms** (40.52–66.98) | **35.85 ms** (35.41–36.36) | **53.97 ms** (45.46–58.52) |
+| `.cpuAndNeuralEngine` | 511.40 ms (464.74–526.83) | 474.45 ms (451.96–522.91) | 584.19 ms (505.66–596.27) |
+| `.all` | SIGABRT | SIGABRT | SIGABRT |
+| `.cpuAndGPU` | SIGABRT | SIGABRT | SIGABRT |
+
+Values are **median (minimum–maximum) of five timed runs after two discarded
+warmups**, one isolated process per language/policy, serial execution, rotating
+policy order by language. Timed calls within each policy are consecutive; other
+desktop apps remained running. A local copy of the released pipeline changed
+only the requested compute units and added diagnostic logging outside timed
+runs. The public v3 API does not accept these global overrides. Native CPU work
+remained unchanged.
+
+The monotonic timer wraps `pipeline.synthesize(inputIds:style:speed:)` through
+complete PCM, including native DSP and array handling, excluding text processing,
+phonemization, model loading, WAV encoding and playback. These are complete-audio
+latencies, not streaming first-audio measurements. They are not just the sum of
+reported per-stage timers.
+
+| Input | Voice | Audio produced by successful policies |
+| --- | --- | ---: |
+| The quick brown fox jumps over the lazy dog. | `af_heart` | 3.350 s |
+| こんにちは、今日はいい天気ですね。 | `jf_alpha` | 3.050 s |
+| 你好，欢迎使用本地语音合成。 | `zf_001` | 3.675 s |
+
+Each policy receives identical token IDs and the same 256-float voice style for
+that language at speed 1.0. Successful outputs were finite and non-silent, with
+matching durations; this does not establish perceptual equivalence. Different
+sentences and voices mean the rows do not rank languages by intrinsic speed.
+
+CPU+ANE was approximately **10–13× slower** than hybrid on these inputs. The
+English generator alone measured a 498.24 ms median under CPU+ANE versus
+26.97 ms under hybrid. This is a routing comparison, not proof of actual ANE
+execution: `.cpuAndNeuralEngine` permits CPU fallback, and Core ML has no
+strict ANE-only policy.
+
+Both `.all` and `.cpuAndGPU` aborted during **Prosody on the second warmup**
+for every language, with `GPURNNOps.mm: JIT not supported` in Apple's
+MetalPerformanceShadersGraph. No valid warm median is reported for those cases.
+The current hybrid route completed this bounded check; it is not a claim of
+sustained stability on other machines or physical iOS devices.
+
+Source: SDK commit `ca0cbe77843d7049f0be28db57244e21fae46566` (v0.17.6), model
+release `6c0750dd02ef9d981fb82f147d784a3f171755ee`, base model assets
+`006395f65025af251858b1ab0a7178a6a1e73f9f`.
+[Raw measurements and protocol](Measurements/KokoroV3/comparison.json),
+[CSV summary](Measurements/KokoroV3/summary.csv),
+[per-call records and crash logs](Measurements/KokoroV3/).
+
+### Live demo: text to complete audio
+
+The app wraps public `synthesizeDetailed(text:voice:speed:)`, including text
+normalization and phonemization, after model loading and a discarded warmup.
+It excludes WAV encoding/playback. The following are **individual screenshot
+runs in “One at a time” mode**, not five-run medians
+([transcribed screenshot values](Measurements/KokoroV3/live-demo-screenshots.json)):
+
+| Language | Legacy | V3 | Legacy / V3 | V3 audio |
+| --- | ---: | ---: | ---: | ---: |
+| English | 149.8 ms | 79.8 ms | 1.88× | 3.35 s |
+| Japanese | 305.9 ms | 57.8 ms | 5.29× | 3.05 s |
+| Mandarin | 161.7 ms | 71.9 ms | 2.25× | 3.67 s |
+
+“Together” mode generates with both runtimes concurrently, so its timings also
+include shared-resource contention. Do not mix that mode with serial runs or
+attribute the gap between backend and app timing to UI rendering. The screenshot
+speedups vary between runs; neither 2.3× nor 5.3× is an established overall average.
+Earlier conversion-only measurements use different fixtures/runtime stages and
+are not interchangeable with these SDK results.
+
+See [Kokoro setup and limits](KokoroAne.md#ane-version-3) and
+[ANE placement and telemetry](../ANE_Profiler.md#kokoro-ane-v3).
+
+## Historical corpus benchmark setup
+
 > **Setup:** Apple M5 Pro, 24 GB, on AC — Kokoro ANE rows on macOS
 > 26.6, PocketTTS / Supertonic-3 rows on macOS 26.5 (25F71).
-> Kokoro ANE now runs on M5 out of the box — the **default** compute
-> routing is the M5-safe placement (tail iSTFT on GPU, RNN stages on
-> ANE; see the ᴷ footnote). Only the StyleTTS2 row is carried from the
+> These legacy Kokoro ANE results used the **default** compute
+> routing for these historical macOS 26.6 runs requested CPU+GPU for tail
+> iSTFT and CPU+ANE for RNN stages (see the ᴷ footnote). Only the StyleTTS2 row is carried from the
 > M2 reference (MacBook Air M2, 16 GB), pending a HF asset fix (see the
 > ˢ footnote below).
 > **Corpus:** [MiniMax Multilingual TTS Test Set][minimax] (100
@@ -14,7 +107,7 @@
 > **Status:** Kokoro ANE (English + Mandarin + Japanese via
 > `--phonemes`), PocketTTS (English), and Supertonic-3 (English) all
 > complete the full 100-phrase MiniMax run on **M5 Pro** (Kokoro on
-> its default M5-safe routing). Only **StyleTTS2** is **M2-only** here — its bucketed BERT
+> the routing described in footnote ᴷ). Only **StyleTTS2** is **M2-only** here — its bucketed BERT
 > assets ship without `model.mil`; that row carries its M2 numbers.
 >
 > [minimax]: https://huggingface.co/datasets/MiniMaxAI/TTS-Multilingual-Test-Set
@@ -35,8 +128,8 @@ feel:
    this slice `ttft_ms == synth_ms`. **PocketTTS** is wired through
    its streaming API (`synthesizeStreaming`), so its `ttft_ms` is
    honest first-frame latency.
-3. **Per-stage compute units** — Kokoro ANE is a pipeline of
-   7 graphs. Sometimes ANE is *slower per call* but more efficient.
+3. **Per-stage compute units** — legacy Kokoro ANE is a pipeline of
+   7 graphs; v3 adds static buckets and native DSP. Sometimes ANE is *slower per call* but more efficient.
    The "right" compute-unit choice differs per stage.
 4. **Memory footprint** — drives whether a backend is mobile-viable.
 5. **Quality** — RTFx alone tells you nothing about whether the model
@@ -173,8 +266,8 @@ prior **MacBook Air, Apple M2 (2022), 8-core CPU / 8-core GPU /
 16-core Neural Engine, 16 GB, macOS 26** (`Mac14,2`) reference — it
 does not run on the M5 host (missing `model.mil` in the shipped
 bucketed BERT graphs — see footnote ˢ). All M5 rows use `--compute-units
-default`; for Kokoro ANE that default is now the M5-safe routing (tail
-iSTFT on GPU, RNN stages on ANE — see footnote ᴷ). 100 phrases per
+default`; for these legacy Kokoro ANE measurements that requested CPU+GPU
+for Noise/Tail and CPU+ANE for the other stages (see footnote ᴷ). 100 phrases per
 language. Voices are backend defaults (`af_heart` for Kokoro ANE en,
 `zf_001` for Kokoro ANE zh, `alba` for PocketTTS,
 LibriTTS iteration_3 for StyleTTS2). English WER / CER via Parakeet
@@ -194,19 +287,14 @@ peak RSS, WER, CER) so there is a single source of truth.
 | StyleTTS2 (M2)ˢ | research   | en (LibriTTS iteration_3) | ~0.67 GB¶                  | 24 kHz      | 256 tokens / pass (≈30 s of audio max)                           | No        | 1574 / 3088 ms    | 1574 / 3088 ms    | 4.59×     | 522 MB   | 9.4%   | 4.1%   |
 | Supertonic-3 (int4) | Apache-2.0 | en (`M1`, 31-lang)        | int4 ~0.10 GB                   | 44.1 kHz    | 128 codepoints / pass (chunker splits ≥70 char Latin / 57 CJK)   | No        | **81 / 120 ms** | 81 / 120 ms     | **94×** | 197 MB   | 1.02%ᶜ | 0.31%ᶜ |
 
-ᴷ **Kokoro ANE on M5** runs on the **default** compute routing, which is
-now the M5-safe placement: every stage on `.cpuAndNeuralEngine` **except
-the tail (iSTFT) → `.cpuAndGPU`**. This is the only routing that runs on
-M5 / macOS 26.5 — the *previous* default (prosody/noise/tail on `.all`)
-crashed on the 2nd+ prediction in a process (`GPURNNOps … 'JIT not
-supported'` on the prosody RNN on the GPU), and `all-ane`/`cpu-only`
-crash in `libBNNS` (SIGSEGV) on the tail iSTFT. Keeping the RNN off the
-GPU and the iSTFT off BNNS dodges both (the tail was always meant to run
-fp32 on CPU/GPU — ANE rejects the exp/sin/iSTFT — so this is faithful,
-not a hack). The old `.all` default ran fine on M2 but
-its M2 perf under the new default is not re-verified here. The underlying
-Apple bug is tracked in [#667][i667]; this routing is
-`TtsComputeUnitPreset.default` / `.aneTailGpu`.
+ᴷ **Historical legacy routing on macOS 26.6:** `.aneTailGpu` requests
+`.cpuAndNeuralEngine` for Albert, PostAlbert, Alignment, Prosody and Vocoder,
+and `.cpuAndGPU` for Noise/Tail. Earlier M5/macOS 26.5 testing encountered
+GPU RNN `JIT not supported` assertions with Prosody on `.all`, and BNNS
+faults with tail iSTFT on CPU/ANE ([#667][i667]). The current legacy default
+is OS-dependent: on OS 27+, Noise/Tail request CPU-only. Neither these
+historical timings nor the short v3 checks establish long-session stability.
+See [current routing and platform advisories](KokoroAne.md).
 
 All three Kokoro ANE rows were **re-measured on macOS 26.6 after the
 KokoroNoise v2 fix** ([#700][i700] — atan2 phase reconstruction,

@@ -2,7 +2,7 @@
 
 ## ANE version 3
 
-Opt in with `version: .v3`. Existing callers continue to use `.legacy`.
+Available in **FluidAudio v0.17.6**. Opt in with `version: .v3`. Existing callers continue to use `.legacy`.
 ANE-v3 requires macOS 15 or iOS 18 and uses a hybrid pipeline: static
 Albert and masked decoder graphs on CPU/ANE, native Accelerate source/STFT
 processing, and a CPU/GPU generator adapted from
@@ -12,6 +12,25 @@ is not an ANE-only runtime. V3 currently accepts only the default compute
 policy (or `.aneTailGpu`). The v3 route is fixed and includes GPU execution,
 even when the legacy OS-dependent default would select CPU. Spanish and French
 remain supported by `.legacy`; requesting them with `.v3` fails before downloading.
+
+### Compute routing and measured latency
+
+| Stage | Requested policy |
+| --- | --- |
+| Albert, PostAlbert, Alignment, Prosody, masked decoder | `.cpuAndNeuralEngine` |
+| Fast generator; fallback Noise/Tail | `.cpuAndGPU` |
+| Fallback Vocoder | `.cpuAndNeuralEngine` |
+| Native source/STFT | CPU / Accelerate |
+
+Hybrid does not mean `.all`, and CPU+ANE still allows CPU fallback. Selected
+M5 Pro / macOS 27.0 runs measured 49.45 / 35.85 / 53.97 ms median for the English /
+Japanese / Mandarin demo inputs, excluding G2P and loading. CPU+ANE throughout
+was 10–13× slower; `.all` and CPU+GPU throughout aborted in the GPU RNN path.
+Those overrides were tested in a local harness, not exposed by the v3 public API.
+See [protocol and live-demo timing boundaries](Benchmarks.md#kokoro-ane-v3-selected-m5-pro-measurements)
+and [placement versus actual ANE activity](../ANE_Profiler.md#kokoro-ane-v3).
+
+### Usage and assets
 
 ```swift
 import FluidAudio
@@ -91,10 +110,11 @@ confirmed workaround. Physical-device validation remains outstanding for this op
 
 ## Legacy seven-stage runtime
 
-Splits the Kokoro 82M graph into 7 CoreML stages so the ANE-friendly layers
-(Albert / PostAlbert / Alignment / Vocoder) stay resident on the Neural Engine
-while Prosody / Noise / Tail run on CPU+GPU. Yields **3-11× RTFx** on Apple
-Silicon.
+Splits Kokoro 82M into seven Core ML stages. The legacy default requests
+CPU+ANE for Albert, PostAlbert, Alignment, Prosody and Vocoder. Noise/Tail request
+CPU+GPU on older OS versions and CPU-only on OS 27+. Core ML decides placement;
+these policies do not imply that every eligible stage runs on ANE. See the
+[historical benchmark results](Benchmarks.md#historical-corpus-benchmark-setup).
 
 Derived from [laishere/kokoro-coreml](https://github.com/laishere/kokoro-coreml),
 used with the author's permission. Conversion lives in
@@ -104,7 +124,7 @@ used with the author's permission. Conversion lives in
 
 | Aspect           | `KokoroAneManager`                              |
 |------------------|-------------------------------------------------|
-| Compute          | 4 stages on ANE, 3 on GPU                       |
+| Compute          | Per-stage policies; OS-dependent legacy routing, fixed hybrid v3 routing |
 | Voices           | Variant catalogs (54 en / 103 zh / 5 ja / 3 es / 1 fr) |
 | Input length     | ≤ 510 phoneme characters / utterance             |
 | Custom lexicon   | No                                              |

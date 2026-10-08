@@ -37,7 +37,9 @@
 
 ## Text-to-Speech (TTS)
 
-- [Kokoro ANE (7-stage)](TTS/KokoroAne.md)
+- [Kokoro ANE v3 and legacy runtime](TTS/KokoroAne.md)
+- [Kokoro v3 latency and compute-policy measurements](TTS/Benchmarks.md#kokoro-ane-v3-selected-m5-pro-measurements)
+- [Kokoro ANE placement and telemetry](ANE_Profiler.md#kokoro-ane-v3)
 - [PocketTTS](TTS/PocketTTS.md)
 - [StyleTTS2](TTS/StyleTTS2.md)
 - [SSML](TTS/SSML.md)
