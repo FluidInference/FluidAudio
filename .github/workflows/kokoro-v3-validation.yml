@@ -48,18 +48,41 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a') as output:
               output.write('KOKORO_SIMULATOR_ID=' + candidates[0] + '\n')
           PY
+      # The main test target depends on the macOS-only CLI. Build a focused
+      # package against the same SDK and original test sources for iOS.
+      - name: Prepare iOS test package
+        run: |
+          mkdir -p .kokoro-ios-validation/Tests/KokoroIOSValidationTests
+          cp Tests/FluidAudioTests/TTS/KokoroAne/{KokoroAneV3Tests,JapaneseCutletTests}.swift \
+            .kokoro-ios-validation/Tests/KokoroIOSValidationTests/
+          cat > .kokoro-ios-validation/Package.swift <<'SWIFT'
+          // swift-tools-version: 6.0
+          import PackageDescription
+          let package = Package(
+              name: "KokoroIOSValidation",
+              platforms: [.iOS(.v18)],
+              dependencies: [.package(name: "FluidAudio", path: "..")],
+              targets: [
+                  .testTarget(
+                      name: "KokoroIOSValidationTests",
+                      dependencies: [.product(name: "FluidAudio", package: "FluidAudio")]
+                  )
+              ]
+          )
+          SWIFT
       - name: Run iOS API and Japanese frontend unit tests
+        working-directory: .kokoro-ios-validation
         run: >-
-          xcodebuild -scheme FluidAudio-Package
+          xcodebuild -scheme KokoroIOSValidation-Package
           -destination "platform=iOS Simulator,id=$KOKORO_SIMULATOR_ID"
           -derivedDataPath .build-ios-simulator -resultBundlePath kokoro-ios.xcresult
-          -only-testing:FluidAudioTests/KokoroAneV3Tests
-          -only-testing:FluidAudioTests/JapaneseCutletTests
-          -skip-testing:FluidAudioTests/KokoroAneV3Tests/testRealSDKInputsAndFallbacks
+          -only-testing:KokoroIOSValidationTests/KokoroAneV3Tests
+          -only-testing:KokoroIOSValidationTests/JapaneseCutletTests
+          -skip-testing:KokoroIOSValidationTests/KokoroAneV3Tests/testRealSDKInputsAndFallbacks
           CODE_SIGNING_ALLOWED=NO test
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: kokoro-ios-test-results
-          path: kokoro-ios.xcresult
+          path: .kokoro-ios-validation/kokoro-ios.xcresult
           if-no-files-found: ignore
