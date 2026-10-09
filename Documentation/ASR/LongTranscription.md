@@ -378,35 +378,61 @@ shows a gap that is not in the audio (`actually` 27.20–27.44, `go?` 28.16,
 where the speech is continuous).
 
 `mergeUsingMatches` now takes a matched token's `timestamp` and `duration`
-from the right window once that copy is at least
-`seamTimingHeadGuardFrames` (6 frames, 480 ms) past the right window's start.
-The token's identity — piece, casing, confidence — still comes from the left
-window, which had real left context (see "Case-Folded Matching"). No audio is
-re-decoded: both copies already exist.
+from the right window when that copy is at least
+`seamTimingHeadGuardFrames` (6 frames, 480 ms) past the right window's
+*decode start* — the frame its decoder began at, warm-up prefix included,
+since that is where the head bias begins — or, inside the guard, when the
+right copy is farther from its window's head than the left copy is from its
+window's end. The second clause is what a silence-aligned seam with only the
+6-frame minimum overlap relies on: every right copy there is inside the
+guard, and the rule still picks the copy decoded farther from an edge. The
+token's identity — piece, casing, confidence — still comes from the left
+window, which had real left context (see "Case-Folded Matching"). No audio
+is re-decoded: both copies already exist.
+
+Unmatched tokens between two matches move with the match before them (the
+left-sourced ones by that match's delta) and are held between their two
+neighbours, so the seam stays monotonic on its own; without this the clamp
+in `enforceMonotonicTimestamps` would flatten such a token onto the previous
+match, leaving a zero-length word and a wrong `gapStart` for the repair pass.
+
+The rule runs on every path that merges windows: the TDT batch path, the
+dual-decode arbitration path (`--dual-decode-arbitration`), and the Unified
+offline batch path (`UnifiedConfig.seamTimingRealignment`). `mergeChunks`
+takes the seam's windows as a required argument, so a caller that does not
+realign says so with `nil` rather than by omission.
 
 | Field | Default | Notes |
 |---|---|---|
 | `ASRConfig.seamTimingRealignment` | `true` | CLI: `--no-seam-timing-realignment` reproduces the previous timings exactly. |
+| `UnifiedConfig.seamTimingRealignment` | `true` | Same rule on the Unified offline path; the bias there has not been measured separately. |
 
-Measured on seam-tail words, against the mid-window reference:
+Measured on this branch (v0.17.7 base) on seam-tail words, against the
+mid-window reference, on both long-form paths. "Interior" is every other
+word under the same rule and is the floor the seam words are being brought
+down to:
 
-| Recording | End off by > 160 ms, before | after | Interior words |
-|---|---|---|---|
-| English read speech (108 s) | 62 % | 4 % | 6 % |
-| English conference talk (400 s) | 36 % | 7 % | 3 % |
-| German interview (400 s) | 23 % | 6 % | 6 % |
+| Recording | Path | End off by > 160 ms, before | after | Interior words |
+|---|---|---|---|---|
+| English read speech (85 s, 6 seams) | v3 default (no mel, silence-aligned) | 50 % | 15 % | 3 % |
+| | `--mel-context` (fixed 2 s overlap) | 50 % | 5 % | 4 % |
+| English interview (304 s, 23 seams) | v3 default | 16 % | 10 % | 6 % |
+| | `--mel-context` | 33 % | 10 % | 5 % |
+
+Word starts move the same way (read speech, mel context: 18 % → 10 %;
+interview: 23 % → 6 %). The v3 default path starts from a smaller bias on
+conversational speech because its silence-aligned seams already fall at
+pauses, where the tail has less to get wrong.
 
 Limits:
 
 - The rule does not touch token identity, but later passes read timestamps
   (`enforceMonotonicTimestamps`, `collapseSeamWordDuplicates`, the repair
   pass), so text can change at a seam. In the recordings above it removed
-  one duplicated seam word (`came from from?`) and changed one mumbled
-  aside; the German text was identical.
-- Unmatched tokens between two matches, and the `mergeByMidpoint` fallback,
-  keep their existing behavior.
-- The dual-decode arbitration path merges without a window start and is
-  unchanged.
+  one duplicated seam word (`along along`) on the read speech; the
+  interview text was identical on both paths.
+- The `mergeByMidpoint` fallback (too few tokens in the overlap to match)
+  keeps its existing behavior.
 - Gaps that open *inside* a window are a different failure and are not
   addressed here.
 

@@ -91,6 +91,26 @@ public struct ASRConfig: Sendable {
     func resolvedMelChunkContext(for modelVersion: AsrModelVersion?) -> Bool {
         melChunkContextOverride ?? (modelVersion?.isV3Family != true)
     }
+
+    /// A copy with the decoder-shape fields replaced and every other setting
+    /// carried over. Adapting a config to a loaded model goes through here so
+    /// that a flag added to `ASRConfig` cannot be dropped by a rebuild that
+    /// lists the fields by hand.
+    func replacing(tdtConfig: TdtConfig? = nil, encoderHiddenSize: Int? = nil) -> ASRConfig {
+        ASRConfig(
+            sampleRate: sampleRate,
+            tdtConfig: tdtConfig ?? self.tdtConfig,
+            encoderHiddenSize: encoderHiddenSize ?? self.encoderHiddenSize,
+            parallelChunkConcurrency: parallelChunkConcurrency,
+            streamingEnabled: streamingEnabled,
+            streamingThreshold: streamingThreshold,
+            melChunkContext: melChunkContextOverride,
+            dualDecodeArbitration: dualDecodeArbitration,
+            seamGapRepair: seamGapRepair,
+            seamGapRepairMinGapSeconds: seamGapRepairMinGapSeconds,
+            seamTimingRealignment: seamTimingRealignment
+        )
+    }
 }
 
 // MARK: - Results

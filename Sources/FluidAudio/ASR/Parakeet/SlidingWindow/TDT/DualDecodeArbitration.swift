@@ -323,12 +323,33 @@ extension ChunkProcessor {
             let vocabulary = await manager.vocabulary
             let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary)
             let caseVariantIds = Self.caseVariantCanonicalIds(vocabulary: vocabulary)
-            for chunk in chunkOutputs.dropFirst() {
+            let seamTimingRealignment = await manager.seamTimingRealignment
+            // The window each output was decoded in, re-derived from the
+            // chosen path's decisions with the same warm-up rule the decode
+            // used. A probe slot past the chosen path's last decision was
+            // filled from path A and has no window of its own.
+            func window(_ chunkIndex: Int) -> WindowFrames? {
+                guard chunkIndex < chosenDecisions.count else { return nil }
+                let decision = chosenDecisions[chunkIndex]
+                let warmupSamples =
+                    chunkIndex > 0 && usePathB && decision.useWarmupPrefix
+                    ? min(config.pathBWarmupSamples, decision.start) : 0
+                return dualWindowLayout(
+                    chunkStart: decision.start, chunkSamples: chunkSamples,
+                    warmupSamples: warmupSamples, speechEndSamples: speechEnd
+                ).frames
+            }
+            for (index, chunk) in chunkOutputs.enumerated().dropFirst() {
+                var seam: SeamWindows?
+                if seamTimingRealignment, let left = window(index - 1), let right = window(index) {
+                    seam = SeamWindows(left: left, right: right)
+                }
                 mergedTokens = mergeChunks(
                     mergedTokens,
                     chunk,
                     spliceSafeTokenIds: spliceSafeTokenIds,
-                    caseVariantIds: caseVariantIds
+                    caseVariantIds: caseVariantIds,
+                    seam: seam
                 )
             }
             if mergedTokens.count > 1 {
@@ -355,18 +376,32 @@ extension ChunkProcessor {
         )
     }
 
-    /// Decode a single chunk under the given start + warmup parameters.
-    private func decodeOneChunk(
+    /// How a chunk's window is laid out under the given start + warm-up
+    /// parameters. Shared by `decodeOneChunk` and the seam timing rule in the
+    /// merge, so the merge reasons about the same window the decoder saw.
+    private struct DualWindowLayout {
+        let chunkStart: Int
+        let warmupSamples: Int
+        let isLastChunk: Bool
+        let chunkEnd: Int
+        let audioEnd: Int
+
+        var contextStart: Int { chunkStart - warmupSamples }
+        var chunkStartOffset: Int { warmupSamples > 0 ? contextStart : chunkStart }
+        var isEmpty: Bool { chunkEnd <= chunkStart || audioEnd <= chunkStart }
+        var frames: WindowFrames {
+            WindowFrames(
+                decodeStart: chunkStartOffset / ASRConstants.samplesPerEncoderFrame,
+                end: audioEnd / ASRConstants.samplesPerEncoderFrame)
+        }
+    }
+
+    private func dualWindowLayout(
         chunkStart: Int,
-        chunkIndex: Int,
         chunkSamples: Int,
         warmupSamples requestedWarmupSamples: Int,
-        speechEndSamples: Int,
-        using manager: AsrManager,
-        decoderLayers: Int,
-        maxModelSamples: Int,
-        language: Language?
-    ) async throws -> [TokenWindow] {
+        speechEndSamples: Int
+    ) -> DualWindowLayout {
         // A short final chunk fills its window backwards with real audio
         // instead of zero padding (issue #747); no-op for non-final chunks.
         let warmupSamples = Self.lastChunkWarmupSamples(
@@ -382,24 +417,38 @@ extension ChunkProcessor {
         let candidateEnd = chunkStart + visibleChunkSamples
         let isLastChunk = candidateEnd >= totalSamples
         let chunkEnd = isLastChunk ? totalSamples : candidateEnd
-
-        if chunkEnd <= chunkStart {
-            return []
-        }
         // The final window's audio stops at the last speech-bearing frame —
         // a window ending inside a dead-silence run decodes degenerately.
         let audioEnd = isLastChunk ? min(chunkEnd, speechEndSamples) : chunkEnd
-        if audioEnd <= chunkStart {
+        return DualWindowLayout(
+            chunkStart: chunkStart, warmupSamples: warmupSamples, isLastChunk: isLastChunk,
+            chunkEnd: chunkEnd, audioEnd: audioEnd)
+    }
+
+    /// Decode a single chunk under the given start + warmup parameters.
+    private func decodeOneChunk(
+        chunkStart: Int,
+        chunkIndex: Int,
+        chunkSamples: Int,
+        warmupSamples requestedWarmupSamples: Int,
+        speechEndSamples: Int,
+        using manager: AsrManager,
+        decoderLayers: Int,
+        maxModelSamples: Int,
+        language: Language?
+    ) async throws -> [TokenWindow] {
+        let layout = dualWindowLayout(
+            chunkStart: chunkStart, chunkSamples: chunkSamples,
+            warmupSamples: requestedWarmupSamples, speechEndSamples: speechEndSamples)
+        if layout.isEmpty {
             return []
         }
 
         let contextSamples = 0
-        let contextStart = chunkStart - warmupSamples
-        let chunkLengthWithContext = audioEnd - contextStart
-        let chunkSamplesArray = try readSamples(offset: contextStart, count: chunkLengthWithContext)
+        let chunkLengthWithContext = layout.audioEnd - layout.contextStart
+        let chunkSamplesArray = try readSamples(offset: layout.contextStart, count: chunkLengthWithContext)
         let emitTokensAfterFrame =
-            warmupSamples > 0 ? chunkStart / ASRConstants.samplesPerEncoderFrame : nil
-        let chunkStartOffset = warmupSamples > 0 ? contextStart : chunkStart
+            layout.warmupSamples > 0 ? chunkStart / ASRConstants.samplesPerEncoderFrame : nil
 
         var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
         decoderState.reset()
@@ -408,8 +457,8 @@ extension ChunkProcessor {
             try await Self.transcribeChunk(
                 samples: chunkSamplesArray,
                 contextSamples: contextSamples,
-                chunkStart: chunkStartOffset,
-                isLastChunk: isLastChunk,
+                chunkStart: layout.chunkStartOffset,
+                isLastChunk: layout.isLastChunk,
                 using: manager,
                 decoderState: &decoderState,
                 maxModelSamples: maxModelSamples,
