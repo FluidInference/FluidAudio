@@ -13,6 +13,116 @@ final class NemotronMultilingualPublicationTests: XCTestCase {
     private let later = 5
     private let boundary = 6
 
+    func testRepeatedSettledPublicationDeliversOnce() async throws {
+        let tokenizer = try makeTokenizer()
+        let manager = Manager()
+        let updates = OSAllocatedUnfairLock<[String]>(initialState: [])
+        await manager.setPartialCallback { text in updates.withLock { $0.append(text) } }
+        await manager.setPublicationState(
+            tokenizer: tokenizer, ids: [hello, period], timings: [timing(hello, 5), timing(period, 17)],
+            openSpanStart: 14)
+
+        await manager.publishCurrentState()
+        await manager.publishCurrentState()
+
+        XCTAssertEqual(updates.withLock { $0 }, ["Hallo"])
+    }
+
+    func testChangedSettledTextDeliversAnotherUpdate() async throws {
+        let tokenizer = try makeTokenizer()
+        let manager = Manager()
+        let updates = OSAllocatedUnfairLock<[String]>(initialState: [])
+        await manager.setPartialCallback { text in updates.withLock { $0.append(text) } }
+        await manager.setPublicationState(tokenizer: tokenizer, ids: [hello], timings: [timing(hello, 5)])
+        await manager.publishCurrentState()
+        await manager.setPublicationState(
+            tokenizer: tokenizer, ids: [hello, world], timings: [timing(hello, 5), timing(world, 14)])
+        await manager.publishCurrentState()
+        await manager.publishCurrentState()
+
+        XCTAssertEqual(updates.withLock { $0 }, ["Hallo", "Hallo Welt"])
+    }
+
+    func testEqualDecodedTextAfterNewTokensPreservesRescueDisabledBehavior() async throws {
+        let tokenizer = try makeTokenizer()
+        let manager = Manager()
+        let updates = OSAllocatedUnfairLock<[String]>(initialState: [])
+        await manager.setPartialCallback { text in updates.withLock { $0.append(text) } }
+        await manager.setPublicationState(tokenizer: tokenizer, ids: [hello], timings: [timing(hello, 5)])
+        await manager.publishCurrentState()
+        await manager.setPublicationState(
+            tokenizer: tokenizer, ids: [hello, langTag], timings: [timing(hello, 5)])
+        await manager.publishCurrentState()
+        await manager.setPublicationState(
+            tokenizer: tokenizer, ids: [hello, langTag, boundary], timings: [timing(hello, 5), timing(boundary, 6)])
+        await manager.publishCurrentState()
+
+        let rescueEnabled = Manager.blankRescueEnabled && Manager.rescueRmsThreshold > 0
+        XCTAssertEqual(updates.withLock { $0 }, rescueEnabled ? ["Hallo"] : ["Hallo", "Hallo", "Hallo"])
+    }
+
+    func testResetAllowsTheSameTextToDeliverAgain() async throws {
+        let tokenizer = try makeTokenizer()
+        let manager = Manager()
+        let updates = OSAllocatedUnfairLock<[String]>(initialState: [])
+        await manager.setPartialCallback { text in updates.withLock { $0.append(text) } }
+        await manager.setPublicationState(tokenizer: tokenizer, ids: [hello], timings: [timing(hello, 5)])
+        await manager.publishCurrentState()
+
+        await manager.reset()
+        await manager.setPublicationState(tokenizer: tokenizer, ids: [hello], timings: [timing(hello, 5)])
+        await manager.publishCurrentState()
+        await manager.publishCurrentState()
+
+        XCTAssertEqual(updates.withLock { $0 }, ["Hallo", "Hallo"])
+    }
+
+    func testResetStatesAllowsTheSameTextToDeliverAgain() async throws {
+        let tokenizer = try makeTokenizer()
+        let manager = Manager()
+        let updates = OSAllocatedUnfairLock<[String]>(initialState: [])
+        await manager.setPartialCallback { text in updates.withLock { $0.append(text) } }
+        await manager.setPublicationState(tokenizer: tokenizer, ids: [hello], timings: [timing(hello, 5)])
+        await manager.publishCurrentState()
+
+        try await manager.resetStates()
+        await manager.setPublicationState(tokenizer: tokenizer, ids: [hello], timings: [timing(hello, 5)])
+        await manager.publishCurrentState()
+        await manager.publishCurrentState()
+
+        XCTAssertEqual(updates.withLock { $0 }, ["Hallo", "Hallo"])
+    }
+
+    func testFinalFlushDeliversChangedTextOnlyOnce() async throws {
+        let tokenizer = try makeTokenizer()
+        let manager = Manager()
+        let updates = OSAllocatedUnfairLock<[String]>(initialState: [])
+        await manager.setPartialCallback { text in updates.withLock { $0.append(text) } }
+        await manager.setPublicationState(
+            tokenizer: tokenizer, ids: [hello, period], timings: [timing(hello, 5), timing(period, 17)],
+            openSpanStart: 14)
+        await manager.publishCurrentState()
+
+        try await manager.finalizeRescueSpanIfNeeded()
+        try await manager.finalizeRescueSpanIfNeeded()
+
+        XCTAssertEqual(updates.withLock { $0 }, ["Hallo", "Hallo."])
+    }
+
+    func testFinalFlushSkipsTextAlreadyDeliveredLive() async throws {
+        let tokenizer = try makeTokenizer()
+        let manager = Manager()
+        let updates = OSAllocatedUnfairLock<[String]>(initialState: [])
+        await manager.setPartialCallback { text in updates.withLock { $0.append(text) } }
+        await manager.setPublicationState(
+            tokenizer: tokenizer, ids: [hello, period], timings: [timing(hello, 5), timing(period, 17)])
+        await manager.publishCurrentState()
+
+        try await manager.finalizeRescueSpanIfNeeded()
+
+        XCTAssertEqual(updates.withLock { $0 }, ["Hallo."])
+    }
+
     func testRescueInsertionBeforeAccumulatedPunctuationPublishesOnlyExtensions() throws {
         let tokenizer = try makeTokenizer()
         let ids = [langTag, hello, period, later]
@@ -198,7 +308,7 @@ final class NemotronMultilingualPublicationTests: XCTestCase {
         await manager.publishCurrentState()
         await manager.publishCurrentState()
         XCTAssertEqual(originalUpdates.withLock { $0 }, [])
-        XCTAssertEqual(replacementUpdates.withLock { $0 }, ["Hallo.", "Hallo."])
+        XCTAssertEqual(replacementUpdates.withLock { $0 }, ["Hallo."])
     }
 
     func testNestedSuppressionKeepsTheCurrentCallbackUntilTheChunkSettles() async throws {
@@ -228,7 +338,7 @@ final class NemotronMultilingualPublicationTests: XCTestCase {
         let depth = await manager.partialPublicationSuppressionDepth
         XCTAssertEqual(depth, 0)
         XCTAssertEqual(originalUpdates.withLock { $0 }, [])
-        XCTAssertEqual(replacementUpdates.withLock { $0 }, ["Hallo.", "Hallo."])
+        XCTAssertEqual(replacementUpdates.withLock { $0 }, ["Hallo."])
     }
 
     private func timing(_ id: Int, _ frame: Int) -> TokenTiming {

@@ -88,18 +88,24 @@ extension StreamingNemotronMultilingualAsrManager {
     ) {
         guard partialPublicationSuppressionDepth == 0, !inBlankRescue else { return }
         guard let callback = callback, let tokenizer = tokenizer else { return }
-        guard !isFinal, Self.blankRescueEnabled, Self.rescueRmsThreshold > 0 else {
+        guard Self.blankRescueEnabled, Self.rescueRmsThreshold > 0 else {
             callback(tokenizer.decode(ids: accumulatedTokenIds).text)
             return
         }
-        let ids = Self.partialPublicationTokenIds(
-            liveIds: accumulatedTokenIds, liveTimings: accumulatedTokenTimings,
-            langTagTokenIds: config.langTagTokenIds,
-            openSpan: rescueSpanOpen
-                ? (rescueSpanStartFrame, rescueSpanLastSpeechFrame, rescueSpanPreRollFrames, rescueSpanOverflowed)
-                : nil,
-            nextSpanStartFrame: rescueFrameCursor - rescuePreRollTail.count / ASRConstants.samplesPerEncoderFrame)
-        callback(tokenizer.decode(ids: ids).text)
+        let ids =
+            isFinal
+            ? accumulatedTokenIds
+            : Self.partialPublicationTokenIds(
+                liveIds: accumulatedTokenIds, liveTimings: accumulatedTokenTimings,
+                langTagTokenIds: config.langTagTokenIds,
+                openSpan: rescueSpanOpen
+                    ? (rescueSpanStartFrame, rescueSpanLastSpeechFrame, rescueSpanPreRollFrames, rescueSpanOverflowed)
+                    : nil,
+                nextSpanStartFrame: rescueFrameCursor - rescuePreRollTail.count / ASRConstants.samplesPerEncoderFrame)
+        let text = tokenizer.decode(ids: ids).text
+        guard text != lastDeliveredPartialText else { return }
+        lastDeliveredPartialText = text
+        callback(text)
     }
 
     /// `processChunk` plus blank-span bookkeeping. All streaming call sites
