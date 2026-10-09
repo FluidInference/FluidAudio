@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Available TTS synthesis backends.
@@ -80,3 +81,4 @@ public enum TtsBackend: Sendable {
     /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
     case paradee
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -502,3 +503,4 @@ extension SplitMix64 {
         return Float((-2.0 * Foundation.log(u1)).squareRoot() * Foundation.cos(2.0 * .pi * u2))
     }
 }
+#endif

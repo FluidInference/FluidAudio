@@ -28,12 +28,22 @@ let package = Package(
                 "MachTaskSelfWrapper",
                 // The prebuilt xcframework has no visionOS slice.
                 .target(name: "NemoTextProcessing", condition: .when(platforms: [.macOS, .iOS, .macCatalyst])),
+                "LuxTtsG2pResources",
             ],
             path: "Sources/FluidAudio",
             exclude: ["ASR/Parakeet/Unified/benchmark.md"],
+            swiftSettings: [
+                // Package@swift-6.2.swift exposes these as opt-out traits (#990).
+                .define("TTS"),
+                .define("Diarizer"),
+            ]
+        ),
+        .target(
+            name: "LuxTtsG2pResources",
+            path: "Sources/LuxTtsG2pResources",
             resources: [
                 // Keep .process: .copy of a Resources-named directory breaks Apple code signing on iOS.
-                .process("TTS/LuxTts/G2p/Resources")
+                .process("Resources")
             ]
         ),
         // Byte-exact NeMo text normalization (FST engine, all 7 languages).

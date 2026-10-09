@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -264,3 +265,4 @@ final class KokoroAneV3Pipeline {
         return result
     }
 }
+#endif

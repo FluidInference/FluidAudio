@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Merge `儿` (er) suffixes into the preceding syllable so that
@@ -111,3 +112,4 @@ public enum MandarinErhua {
         "狗儿", "少儿",
     ]
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// English text frontend for the KokoroAne 7-stage chain.
@@ -440,3 +441,4 @@ struct KokoroAneEnglishPhonemizer: Sendable {
         return knownLeadingApostropheWords.contains(candidate)
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -89,3 +90,4 @@ extension PocketTtsSynthesizer {
         return session
     }
 }
+#endif

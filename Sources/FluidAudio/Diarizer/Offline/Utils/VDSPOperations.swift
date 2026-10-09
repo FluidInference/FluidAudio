@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 import Foundation
 
@@ -342,3 +343,4 @@ enum VDSPOperations {
         return result
     }
 }
+#endif

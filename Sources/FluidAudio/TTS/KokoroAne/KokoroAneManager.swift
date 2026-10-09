@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// High-level facade for the legacy Kokoro chain or opt-in ANE-v3 runtime
@@ -550,3 +551,4 @@ public actor KokoroAneManager {
             }
     }
 }
+#endif

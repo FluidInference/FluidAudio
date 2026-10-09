@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 
 /// Cross-window speaker-permutation alignment for offline Sortformer.
@@ -89,3 +90,4 @@ enum SortformerSpeakerStitcher {
         }
     }
 }
+#endif

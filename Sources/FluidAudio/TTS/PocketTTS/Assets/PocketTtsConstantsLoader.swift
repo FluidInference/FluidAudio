@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Pre-loaded binary constants for PocketTTS inference.
@@ -460,3 +461,4 @@ public enum PocketTtsConstantsLoader {
         }
     }
 }
+#endif

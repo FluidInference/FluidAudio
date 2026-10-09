@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -81,3 +82,4 @@ public enum Supertonic3MultiArray {
         return out
     }
 }
+#endif

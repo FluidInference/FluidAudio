@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Port of ZipVoice's English text normalization (EmiliaTokenizer path:
@@ -236,3 +237,4 @@ enum LuxTtsEnglishNormalizer {
         return mutable as String
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Text frontend for the Kokoro ANE French variant.
@@ -584,3 +585,4 @@ enum FrenchPhonology {
 
     static let pauseMarks: Set<String> = [",", ".", "!", "?", ";", ":", "—", "…", "(", ")", "«", "»", "\"", "“", "”"]
 }
+#endif

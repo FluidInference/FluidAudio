@@ -1,3 +1,4 @@
+#if TTS
 import Accelerate
 import Foundation
 
@@ -135,3 +136,4 @@ enum KokoroAneV3Error: Error {
     case missingOutput(String)
     case missingModel(String)
 }
+#endif

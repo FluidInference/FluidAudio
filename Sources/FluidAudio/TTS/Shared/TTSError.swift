@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 public enum TTSError: LocalizedError {
@@ -19,3 +20,4 @@ public enum TTSError: LocalizedError {
         }
     }
 }
+#endif

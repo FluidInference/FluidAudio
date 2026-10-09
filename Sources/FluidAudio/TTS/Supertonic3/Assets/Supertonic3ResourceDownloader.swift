@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Downloads the Supertonic-3 CoreML assets from HuggingFace.
@@ -105,3 +106,4 @@ public enum Supertonic3ResourceDownloader {
         return root
     }
 }
+#endif

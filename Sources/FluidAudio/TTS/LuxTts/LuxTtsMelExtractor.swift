@@ -1,3 +1,4 @@
+#if TTS
 import Accelerate
 import Foundation
 
@@ -186,3 +187,4 @@ public final class LuxTtsMelExtractor {
         return flat
     }
 }
+#endif

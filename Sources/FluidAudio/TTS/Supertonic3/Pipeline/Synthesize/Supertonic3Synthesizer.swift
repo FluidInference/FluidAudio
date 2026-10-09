@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -305,3 +306,4 @@ struct Supertonic3Synthesizer {
         return try Supertonic3MultiArray.makeFloat32(values, shape: shape)
     }
 }
+#endif

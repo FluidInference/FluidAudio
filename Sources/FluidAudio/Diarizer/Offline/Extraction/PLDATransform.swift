@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 import CoreML
 import Foundation
@@ -196,3 +197,4 @@ public struct PLDATransform {
         _ = try await pldaRhoModel.prediction(from: provider, options: options)
     }
 }
+#endif

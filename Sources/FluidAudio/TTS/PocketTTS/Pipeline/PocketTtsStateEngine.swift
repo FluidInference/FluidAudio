@@ -1,3 +1,4 @@
+#if TTS
 import Accelerate
 @preconcurrency import CoreML
 import Foundation
@@ -397,3 +398,4 @@ actor PocketTtsStateEngine {
         return Array(UnsafeBufferPointer(start: ptr, count: count))
     }
 }
+#endif

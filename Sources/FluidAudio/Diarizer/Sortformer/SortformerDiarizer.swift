@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 import CoreML
 import Foundation
@@ -978,3 +979,4 @@ public final class SortformerDiarizer: Diarizer {
         return (mel, chunkLength)
     }
 }
+#endif

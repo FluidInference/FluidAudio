@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// IPA phoneme → token id mapping shipped as `vocab.json` alongside the
@@ -61,3 +62,4 @@ public struct KokoroAneVocab: Sendable {
         return ids
     }
 }
+#endif

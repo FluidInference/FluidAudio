@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Per-stage wall-clock timings (milliseconds) for one synthesis call.
@@ -157,3 +158,4 @@ public enum KokoroAneStage: String, CaseIterable, Sendable {
         }
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Minimal protobuf parser for SentencePiece `.model` files.
@@ -150,3 +151,4 @@ enum SentencePieceProto {
         return value
     }
 }
+#endif

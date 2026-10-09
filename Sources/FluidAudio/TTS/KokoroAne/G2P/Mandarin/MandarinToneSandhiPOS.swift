@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// POS-aware Mandarin tone sandhi.
@@ -187,3 +188,4 @@ public enum MandarinToneSandhiPOS {
         }
     }
 }
+#endif

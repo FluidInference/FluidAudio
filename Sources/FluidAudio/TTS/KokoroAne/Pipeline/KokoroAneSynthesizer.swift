@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -236,3 +237,4 @@ public struct KokoroAneSynthesizer {
         return try KokoroAneArrays.float32Array(shape: arr.shape.map(\.intValue), from: arr)
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -335,3 +336,4 @@ extension MLComputeUnits {
         }
     }
 }
+#endif

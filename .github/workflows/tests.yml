@@ -56,8 +56,9 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.3.app
           swift --version
 
+      # The CLI and tests need the TTS and Diarizer traits (#990); keep those on.
       - name: Build with the trait disabled
-        run: swift build --disable-default-traits --product fluidaudiocli
+        run: swift build --traits TTS,Diarizer --product fluidaudiocli
 
       - name: Assert no engine symbols linked
         run: |
@@ -66,8 +67,34 @@ jobs:
           test "$count" -eq 0
 
       - name: Run tests with the trait disabled
-        run: swift test --disable-default-traits --filter 'TextNormalizerUnavailableTests|NemoTextNormalizerUnavailableTests|TextNormalizerTests|NemoTextNormalizerTests'
+        run: swift test --traits TTS,Diarizer --filter 'TextNormalizerUnavailableTests|NemoTextNormalizerUnavailableTests|TextNormalizerTests|NemoTextNormalizerTests'
         timeout-minutes: 20
+
+  build-library-trait-subsets:
+    name: Build library with TTS / Diarizer traits disabled (macOS)
+    runs-on: macos-15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      # #990: ASR-only consumers resolve with `traits: []` (or `["Diarizer"]`) to drop
+      # the TTS and diarization subsystems. Only the library target has to build that way.
+      - name: Select Xcode 26
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.3.app
+          swift --version
+
+      - name: Build with no traits
+        run: swift build --disable-default-traits --target FluidAudio
+
+      - name: Assert no TTS resource bundle
+        run: test ! -e .build/debug/FluidAudio_LuxTtsG2pResources.bundle
+
+      - name: Build with TTS only
+        run: swift build --traits TTS --target FluidAudio
+
+      - name: Build with Diarizer only
+        run: swift build --traits Diarizer --target FluidAudio
 
   build-macos-x86_64:
     name: Build Swift Package (macOS x86_64 cross-compile)
