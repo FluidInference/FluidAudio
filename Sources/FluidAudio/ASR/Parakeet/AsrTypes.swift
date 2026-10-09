@@ -53,6 +53,12 @@ public struct ASRConfig: Sendable {
     /// probe when `seamGapRepair` is enabled.
     public let seamGapRepairMinGapSeconds: Double
 
+    /// Take seam-token timing from the window that decoded the token away
+    /// from its own edge (default `true`) — see "Seam Timing"
+    /// (Documentation/ASR/LongTranscription.md). Text is unaffected by the
+    /// rule itself; set `false` to reproduce pre-change timings.
+    public let seamTimingRealignment: Bool
+
     public static let `default` = ASRConfig()
 
     public init(
@@ -65,7 +71,8 @@ public struct ASRConfig: Sendable {
         melChunkContext: Bool? = nil,
         dualDecodeArbitration: Bool = false,
         seamGapRepair: Bool = true,
-        seamGapRepairMinGapSeconds: Double = 1.5
+        seamGapRepairMinGapSeconds: Double = 1.5,
+        seamTimingRealignment: Bool = true
     ) {
         self.sampleRate = sampleRate
         self.tdtConfig = tdtConfig
@@ -77,11 +84,32 @@ public struct ASRConfig: Sendable {
         self.dualDecodeArbitration = dualDecodeArbitration
         self.seamGapRepair = seamGapRepair
         self.seamGapRepairMinGapSeconds = max(0.5, seamGapRepairMinGapSeconds)
+        self.seamTimingRealignment = seamTimingRealignment
     }
 
     /// Resolve the mel-context tri-state against the loaded model version.
     func resolvedMelChunkContext(for modelVersion: AsrModelVersion?) -> Bool {
         melChunkContextOverride ?? (modelVersion?.isV3Family != true)
+    }
+
+    /// A copy with the decoder-shape fields replaced and every other setting
+    /// carried over. Adapting a config to a loaded model goes through here so
+    /// that a flag added to `ASRConfig` cannot be dropped by a rebuild that
+    /// lists the fields by hand.
+    func replacing(tdtConfig: TdtConfig? = nil, encoderHiddenSize: Int? = nil) -> ASRConfig {
+        ASRConfig(
+            sampleRate: sampleRate,
+            tdtConfig: tdtConfig ?? self.tdtConfig,
+            encoderHiddenSize: encoderHiddenSize ?? self.encoderHiddenSize,
+            parallelChunkConcurrency: parallelChunkConcurrency,
+            streamingEnabled: streamingEnabled,
+            streamingThreshold: streamingThreshold,
+            melChunkContext: melChunkContextOverride,
+            dualDecodeArbitration: dualDecodeArbitration,
+            seamGapRepair: seamGapRepair,
+            seamGapRepairMinGapSeconds: seamGapRepairMinGapSeconds,
+            seamTimingRealignment: seamTimingRealignment
+        )
     }
 }
 

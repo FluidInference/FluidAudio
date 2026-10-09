@@ -360,11 +360,17 @@ public actor UnifiedAsrManager {
         // cost ~1 WER point on the 15 s offline encoder (Earnings-22 long-form)
         // with no artifact benefit, so the seam artifacts (#706) are handled
         // purely by the merge: case-folded matching + word-level collapse below.
+        var previousWindow: ChunkProcessor.WindowFrames?
         for chunkStart in layout.chunkStarts(totalSamples: samples.count) {
             let chunkEnd = min(chunkStart + layout.chunkSamples, samples.count)
             let windowTokens = try await transcribeWindow(
                 samples: samples, chunkStart: chunkStart, chunkEnd: chunkEnd
             )
+            // No warm-up prefix here: the window decodes from its own start.
+            let window = ChunkProcessor.WindowFrames(
+                decodeStart: chunkStart / config.frameSamples, end: chunkEnd / config.frameSamples)
+            let seam = config.seamTimingRealignment
+                ? previousWindow.map { ChunkProcessor.SeamWindows(left: $0, right: window) } : nil
             merged =
                 merged.isEmpty
                 ? windowTokens
@@ -372,8 +378,10 @@ public actor UnifiedAsrManager {
                     merged,
                     windowTokens,
                     spliceSafeTokenIds: spliceSafeTokenIds,
-                    caseVariantIds: caseVariantIds
+                    caseVariantIds: caseVariantIds,
+                    seam: seam
                 )
+            previousWindow = window
         }
 
         merged.sort { $0.timestamp < $1.timestamp }

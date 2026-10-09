@@ -52,6 +52,11 @@ public actor AsrManager {
         config.seamGapRepair
     }
 
+    /// Seam timing flag exposed to `ChunkProcessor`.
+    internal var seamTimingRealignment: Bool {
+        config.seamTimingRealignment
+    }
+
     /// Minimum inter-token gap that triggers a seam-gap repair probe.
     internal var seamGapRepairMinGapSeconds: Double {
         config.seamGapRepairMinGapSeconds
@@ -260,31 +265,13 @@ public actor AsrManager {
                 consecutiveBlankLimit: config.tdtConfig.consecutiveBlankLimit
             )
 
-            workingConfig = ASRConfig(
-                sampleRate: workingConfig.sampleRate,
-                tdtConfig: adaptedTdtConfig,
-                encoderHiddenSize: workingConfig.encoderHiddenSize,
-                parallelChunkConcurrency: workingConfig.parallelChunkConcurrency,
-                streamingEnabled: workingConfig.streamingEnabled,
-                streamingThreshold: workingConfig.streamingThreshold,
-                melChunkContext: workingConfig.melChunkContextOverride,
-                dualDecodeArbitration: workingConfig.dualDecodeArbitration
-            )
+            workingConfig = workingConfig.replacing(tdtConfig: adaptedTdtConfig)
         }
 
         // Step 2: Adapt encoderHiddenSize if needed (e.g. default 1024 but tdtCtc110m needs 512)
         let adaptedConfig: ASRConfig
         if workingConfig.encoderHiddenSize != models.version.encoderHiddenSize {
-            adaptedConfig = ASRConfig(
-                sampleRate: workingConfig.sampleRate,
-                tdtConfig: workingConfig.tdtConfig,
-                encoderHiddenSize: models.version.encoderHiddenSize,
-                parallelChunkConcurrency: workingConfig.parallelChunkConcurrency,
-                streamingEnabled: workingConfig.streamingEnabled,
-                streamingThreshold: workingConfig.streamingThreshold,
-                melChunkContext: workingConfig.melChunkContextOverride,
-                dualDecodeArbitration: workingConfig.dualDecodeArbitration
-            )
+            adaptedConfig = workingConfig.replacing(encoderHiddenSize: models.version.encoderHiddenSize)
         } else {
             adaptedConfig = workingConfig
         }

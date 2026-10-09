@@ -27,6 +27,30 @@ struct ChunkProcessor {
     // - 2.0s overlap (frame-aligned) to give the decoder slack when merging windows
     let overlapSeconds: Double = 2.0
 
+    /// Frames a token must sit past the right window's decode start before
+    /// its timing is trusted outright over the left window's copy (6 frames
+    /// = 480 ms). Emission times are stable from about 0.5 s into a window
+    /// and run early in its last ~1.4 s — see "Seam Timing" in
+    /// Documentation/ASR/LongTranscription.md. Inside the guard the copy
+    /// farther from its own window's edge wins, so a seam with only the
+    /// minimum overlap still gets the better of the two.
+    static let seamTimingHeadGuardFrames: Int = 6
+
+    /// A decoded window's extent in global encoder frames: where its decoder
+    /// started (warm-up prefix included — that is where the head bias
+    /// begins, not the first emitted frame) and where the audio it saw ended.
+    struct WindowFrames: Equatable {
+        let decodeStart: Int
+        let end: Int
+    }
+
+    /// The two windows either side of a seam, for the seam timing rule in
+    /// `mergeUsingMatches`. `nil` at a call site means the rule is off.
+    struct SeamWindows: Equatable {
+        let left: WindowFrames
+        let right: WindowFrames
+    }
+
     /// 80ms prepend from the previous chunk so the encoder's convolutions
     /// have left context (blank-first-frames fix, PR #264). Opt out via
     /// `ASRConfig.melChunkContext` for v3 multilingual drift (issue #594) —
@@ -435,9 +459,12 @@ struct ChunkProcessor {
         left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)],
         right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)],
         spliceSafeTokenIds: Set<Int>? = nil,
-        caseVariantIds: [Int: Int]? = nil
+        caseVariantIds: [Int: Int]? = nil,
+        seam: SeamWindows? = nil
     ) -> [(token: Int, timestamp: Int, confidence: Float, duration: Int)] {
-        mergeChunks(left, right, spliceSafeTokenIds: spliceSafeTokenIds, caseVariantIds: caseVariantIds)
+        mergeChunks(
+            left, right, spliceSafeTokenIds: spliceSafeTokenIds, caseVariantIds: caseVariantIds,
+            seam: seam)
     }
     #endif
 
@@ -496,6 +523,10 @@ struct ChunkProcessor {
         )
 
         var chunkOutputs: [[TokenWindow]?] = []
+        // Each chunk's window in global frames, kept in step with
+        // `chunkOutputs` for the seam timing rule in the merge.
+        var chunkWindows: [WindowFrames] = []
+        let seamTimingRealignment = await manager.seamTimingRealignment
         var availableWorkers = Array(workers.indices)
         var inFlight = 0
         var chunkDecision = chunkStarts.first ?? ChunkStartDecision(start: 0, useWarmupPrefix: false)
@@ -576,6 +607,10 @@ struct ChunkProcessor {
                 let index = chunkIndex
                 let chunkStartOffset = warmupSamples > 0 ? contextStart : chunkStart
                 chunkOutputs.append(nil)
+                chunkWindows.append(
+                    WindowFrames(
+                        decodeStart: chunkStartOffset / ASRConstants.samplesPerEncoderFrame,
+                        end: audioEnd / ASRConstants.samplesPerEncoderFrame))
 
                 group.addTask {
                     var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
@@ -646,6 +681,8 @@ struct ChunkProcessor {
             }
         }
 
+        // Every slot is filled once the group has drained, so the outputs
+        // and `chunkWindows` share their indices.
         let orderedChunkOutputs = chunkOutputs.compactMap { $0 }
 
         guard var mergedTokens = orderedChunkOutputs.first else {
@@ -663,12 +700,14 @@ struct ChunkProcessor {
             let vocabulary = await manager.vocabulary
             let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary)
             let caseVariantIds = Self.caseVariantCanonicalIds(vocabulary: vocabulary)
-            for chunk in orderedChunkOutputs.dropFirst() {
+            for (index, chunk) in orderedChunkOutputs.enumerated().dropFirst() {
                 mergedTokens = mergeChunks(
                     mergedTokens,
                     chunk,
                     spliceSafeTokenIds: spliceSafeTokenIds,
-                    caseVariantIds: caseVariantIds
+                    caseVariantIds: caseVariantIds,
+                    seam: seamTimingRealignment
+                        ? SeamWindows(left: chunkWindows[index - 1], right: chunkWindows[index]) : nil
                 )
             }
             // The pairwise merges above already yield tokens in linear (text)
@@ -949,11 +988,14 @@ struct ChunkProcessor {
         }
     }
 
+    /// `seam` has no default: a caller that does not realign seam timing
+    /// says so with `nil` rather than opting out by omission.
     func mergeChunks(
         _ left: [TokenWindow],
         _ right: [TokenWindow],
         spliceSafeTokenIds: Set<Int>? = nil,
-        caseVariantIds: [Int: Int]? = nil
+        caseVariantIds: [Int: Int]? = nil,
+        seam: SeamWindows?
     ) -> [TokenWindow] {
         if left.isEmpty { return right }
         if right.isEmpty { return left }
@@ -1019,7 +1061,8 @@ struct ChunkProcessor {
                 overlapRight: overlapRight,
                 left: left,
                 right: right,
-                spliceSafeTokenIds: spliceSafeTokenIds
+                spliceSafeTokenIds: spliceSafeTokenIds,
+                seam: seam
             )
         }
 
@@ -1046,7 +1089,8 @@ struct ChunkProcessor {
             overlapRight: overlapRight,
             left: left,
             right: right,
-            spliceSafeTokenIds: spliceSafeTokenIds
+            spliceSafeTokenIds: spliceSafeTokenIds,
+            seam: seam
         )
     }
 
@@ -1079,10 +1123,32 @@ struct ChunkProcessor {
         overlapRight: [IndexedToken],
         left: [TokenWindow],
         right: [TokenWindow],
-        spliceSafeTokenIds: Set<Int>?
+        spliceSafeTokenIds: Set<Int>?,
+        seam: SeamWindows?
     ) -> [TokenWindow] {
         let leftIndices = matches.map { overlapLeft[$0.0].index }
         let rightIndices = matches.map { overlapRight[$0.1].index }
+
+        // Both windows decoded each matched token. The left copy sits in the
+        // tail of its window, where emission times run early; once the right
+        // copy is clear of its own window's head its timing is the reliable
+        // one, and inside the head the copy farther from its window's edge
+        // is the better bet. Identity (piece, casing, confidence) stays with
+        // the left window, which had real left context — see "Seam Timing"
+        // in Documentation/ASR/LongTranscription.md. Resolved up front so the
+        // unmatched tokens between two matches can be moved with them.
+        let resolved: [TokenWindow] = (0..<matches.count).map { idx in
+            var merged = left[leftIndices[idx]]
+            guard let seam else { return merged }
+            let rightCopy = right[rightIndices[idx]]
+            let framesIntoRightHead = rightCopy.timestamp - seam.right.decodeStart
+            let framesFromLeftTail = seam.left.end - merged.timestamp
+            if framesIntoRightHead >= Self.seamTimingHeadGuardFrames || framesIntoRightHead > framesFromLeftTail {
+                merged.timestamp = rightCopy.timestamp
+                merged.duration = rightCopy.duration
+            }
+            return merged
+        }
 
         var result: [TokenWindow] = []
 
@@ -1093,8 +1159,7 @@ struct ChunkProcessor {
         for idx in 0..<matches.count {
             let leftIndex = leftIndices[idx]
             let rightIndex = rightIndices[idx]
-
-            result.append(left[leftIndex])
+            result.append(resolved[idx])
 
             guard idx < matches.count - 1 else { continue }
 
@@ -1104,11 +1169,21 @@ struct ChunkProcessor {
             let gapLeft = nextLeftIndex > leftIndex + 1 ? Array(left[(leftIndex + 1)..<nextLeftIndex]) : []
             let gapRight = nextRightIndex > rightIndex + 1 ? Array(right[(rightIndex + 1)..<nextRightIndex]) : []
 
-            if gapRight.count > gapLeft.count {
-                result.append(contentsOf: gapRight)
-            } else {
-                result.append(contentsOf: gapLeft)
+            var gap = gapRight.count > gapLeft.count ? gapRight : gapLeft
+            if seam != nil {
+                // The matches either side may have moved to the right
+                // window's clock. Left-sourced gap tokens move with the
+                // match before them, and every gap token is held between
+                // its neighbours so the seam stays monotonic without the
+                // later clamp flattening a word to zero length.
+                let shift = gapRight.count > gapLeft.count ? 0 : resolved[idx].timestamp - left[leftIndex].timestamp
+                let lower = resolved[idx].timestamp
+                let upper = resolved[idx + 1].timestamp
+                for gapIndex in gap.indices {
+                    gap[gapIndex].timestamp = min(max(gap[gapIndex].timestamp + shift, lower), upper)
+                }
             }
+            result.append(contentsOf: gap)
         }
 
         if let lastRight = rightIndices.last, lastRight + 1 < right.count {

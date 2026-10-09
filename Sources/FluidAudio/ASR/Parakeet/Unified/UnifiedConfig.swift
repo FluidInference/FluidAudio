@@ -40,6 +40,12 @@ public struct UnifiedConfig: Sendable {
     public let blankIdx: Int
     public let maxSymbolsPerFrame: Int
 
+    /// Offline batch path: take a seam token's timing from the window that
+    /// decoded it away from its own edge (default `true`), as
+    /// `ASRConfig.seamTimingRealignment` does for the TDT path — see "Seam
+    /// Timing" in Documentation/ASR/LongTranscription.md.
+    public let seamTimingRealignment: Bool
+
     /// Default streaming export: [70, 13, 13] = 5.6 s left, 1.04 s chunk,
     /// 1.04 s right (2.08 s theoretical latency — the model card's best-WER
     /// streaming mode). The offline batch path is unaffected by these values.
@@ -53,7 +59,8 @@ public struct UnifiedConfig: Sendable {
         decoderLayers: Int = 2,
         decoderHidden: Int = 640,
         blankIdx: Int = 1024,
-        maxSymbolsPerFrame: Int = 10
+        maxSymbolsPerFrame: Int = 10,
+        seamTimingRealignment: Bool = true
     ) {
         self.leftFrames = leftFrames
         self.chunkFrames = chunkFrames
@@ -65,6 +72,7 @@ public struct UnifiedConfig: Sendable {
         self.decoderHidden = decoderHidden
         self.blankIdx = blankIdx
         self.maxSymbolsPerFrame = maxSymbolsPerFrame
+        self.seamTimingRealignment = seamTimingRealignment
     }
 
     // MARK: Streaming-window derived sizes
