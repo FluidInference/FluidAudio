@@ -136,6 +136,9 @@ For multi-voice / SSML / long-form, use `PocketTtsSynthesizer` or
 
 ## Variants
 
+For English pronunciation lookup, fallback behavior and a bounded word-level
+comparison, see [Kokoro English dictionary and G2P comparison](KokoroEnglishG2P.md).
+
 The 7-stage chain is language-agnostic by construction (input ids, voice
 slices, and per-stage I/O contracts are identical across variants). Only the
 embedding vocab, HF subdirectory, voice-file layout, default voice, and the
