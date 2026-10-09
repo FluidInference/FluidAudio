@@ -1,0 +1,502 @@
+{
+  "scope": "40 selected English words; dictionary-only vs forced BART Core ML output; not the current full frontend or an accuracy benchmark",
+  "source_commit": "c9cf87a6e458cf0afb34aabdfa2b1faede1f7360",
+  "source_note": "The working checkout had unrelated edits. G2PModel.swift, KokoroAneEnglishPhonemizer.swift and LexiconAssetCache.swift matched this commit. G2PModel.swift also matches main at 0b0fa2ad710843d3f40af885caf9a86d1fa49c26; the English frontend has since gained initialism, compound and possessive handling.",
+  "host": {
+    "chip": "Apple M5 Pro",
+    "os": "macOS-27.0-arm64-arm-64bit",
+    "build": "Swift 6.2.3 debug",
+    "compute_units": "cpuOnly"
+  },
+  "reference": {
+    "reference_url": "https://raw.githubusercontent.com/cmusphinx/cmudict/74790861f652b15e4ac49015a90074ad62a27690/cmudict.dict",
+    "reference_revision": "74790861f652b15e4ac49015a90074ad62a27690",
+    "reference_sha256": "81917843c7f44ce2b094ac63873c2c7a4cf802040792c455ba3ca406891c3d22",
+    "reference_policy": "Manual inspection of pinned CMU ARPABET alternatives; no automatic phoneme accuracy scoring. Raw dictionary/BART agreement uses exact strings, including stress.",
+    "license": "CMUDict-LICENSE.txt"
+  },
+  "sha256": {
+    "G2PModel.swift": "988c4ec3e2aac2d9a1580c2ab88b15e87c696ed8c458a7df64bbbfcaaa803ee2",
+    "KokoroAneEnglishPhonemizer.swift": "c5499b83a81dca6241ed5c52b2401e9a811b13657ec78ec791cb8b88ac6b6d85",
+    "us_lexicon_cache.json": "6b36ba313202227d6914ad32cd684a0304bd2757e9ec4158ea7bc36ec40e224e",
+    "g2p_vocab.json": "295ed64b86c2820cd665b0602ae50c6947c0e82ac643082873e0be87dca282ce",
+    "LexiconAssetCache.swift": "649283e835dcaf5ddfa1e5d9a113e75fdb1db58cd5d4a1cf60e8de150427a79d",
+    "ANE/vocab.json": "8d65b0188b77eafc60751dac42bbac7ab5f5685074af44db91d1877b42dc1d7c"
+  },
+  "model_file_sha256": {
+    "G2PEncoder.mlmodelc/analytics/coremldata.bin": "cf7fbd7e7a65529b2d2bf3941e458a0ab6dff7a298bf48e205a1727c81c26a99",
+    "G2PEncoder.mlmodelc/coremldata.bin": "0f14d46ca9fd06c68b4717294575b2b99449e67d40b7a2c56f926bf05cd90b11",
+    "G2PEncoder.mlmodelc/metadata.json": "c8e0cfd7f494ac1b3662ff8f1914b2b45f79ffb2791724cdc0576981996732e1",
+    "G2PEncoder.mlmodelc/model.mil": "8c617e569f37286b056dad800d862dc145be9a95fa9ed43857bb646ba199d7da",
+    "G2PEncoder.mlmodelc/weights/weight.bin": "6926bcd2827d21fec82839487b987e06f85fd8a6a5bb896bc4f6062461d014ec",
+    "G2PDecoder.mlmodelc/analytics/coremldata.bin": "dbf1767747fdc188222d467a45b04608b396c76c71db3abb18a5fb3680ef9827",
+    "G2PDecoder.mlmodelc/coremldata.bin": "607e960f19b4d9a30317a5a11869fcce84b300a909fcab2cc756c0d98e2dacd9",
+    "G2PDecoder.mlmodelc/metadata.json": "e54e98484fd60d26f22fd3c4e7fe87b0d92a5d2de1f958cc3c4bb36d4ae06a44",
+    "G2PDecoder.mlmodelc/model.mil": "fe647c598e0d9454d360b8ee49a59ae57ca147fc5330863ba84ccb90dce482ad",
+    "G2PDecoder.mlmodelc/weights/weight.bin": "cbaeb4e743359f607ab161af0c6d8a817462fdaec622ee788ef8ef952c5f8214"
+  },
+  "summary": {
+    "words": 40,
+    "dictionary_covered": 34,
+    "dictionary_missing": [
+      "API",
+      "CPU",
+      "GPU",
+      "GitHub",
+      "Neuralink",
+      "Kokoro"
+    ],
+    "bart_nonempty": 40,
+    "bart_errors": [],
+    "raw_identical_on_dictionary_covered": 25,
+    "metric_scope": "Coverage and literal output agreement, not accuracy or held-out generalization",
+    "with_cmu_reference": 35,
+    "no_cmu_reference": [
+      "quantization",
+      "spectrogram",
+      "GPU",
+      "Neuralink",
+      "Kokoro"
+    ]
+  },
+  "cases": [
+    {
+      "word": "phone",
+      "category": "common",
+      "normalizedInput": "phone",
+      "dictionary": "fˈOn",
+      "bart": "fˈOn",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "F OW1 N"
+      ]
+    },
+    {
+      "word": "hello",
+      "category": "common",
+      "normalizedInput": "hello",
+      "dictionary": "həlˈO",
+      "bart": "hˈɛlO",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "HH AH0 L OW1",
+        "HH EH0 L OW1"
+      ]
+    },
+    {
+      "word": "world",
+      "category": "common",
+      "normalizedInput": "world",
+      "dictionary": "wˈɜɹld",
+      "bart": "wˈɜɹld",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "W ER1 L D"
+      ]
+    },
+    {
+      "word": "people",
+      "category": "common",
+      "normalizedInput": "people",
+      "dictionary": "pˈipᵊl",
+      "bart": "pˈipᵊl",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "P IY1 P AH0 L"
+      ]
+    },
+    {
+      "word": "water",
+      "category": "common",
+      "normalizedInput": "water",
+      "dictionary": "wˈɔɾəɹ",
+      "bart": "wˈɔɾəɹ",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "W AO1 T ER0"
+      ]
+    },
+    {
+      "word": "computer",
+      "category": "common",
+      "normalizedInput": "computer",
+      "dictionary": "kəmpjˈuɾəɹ",
+      "bart": "kəmpjˈuɾəɹ",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "K AH0 M P Y UW1 T ER0"
+      ]
+    },
+    {
+      "word": "window",
+      "category": "common",
+      "normalizedInput": "window",
+      "dictionary": "wˈɪndO",
+      "bart": "wˈɪndO",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "W IH1 N D OW0"
+      ]
+    },
+    {
+      "word": "voice",
+      "category": "common",
+      "normalizedInput": "voice",
+      "dictionary": "vˈYs",
+      "bart": "vˈYs",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "V OY1 S"
+      ]
+    },
+    {
+      "word": "speech",
+      "category": "common",
+      "normalizedInput": "speech",
+      "dictionary": "spˈiʧ",
+      "bart": "spˈiʧ",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "S P IY1 CH"
+      ]
+    },
+    {
+      "word": "language",
+      "category": "common",
+      "normalizedInput": "language",
+      "dictionary": "lˈæŋɡwɪʤ",
+      "bart": "lˈæŋɡwɪʤ",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "L AE1 NG G W AH0 JH",
+        "L AE1 NG G W IH0 JH"
+      ]
+    },
+    {
+      "word": "colonel",
+      "category": "irregular",
+      "normalizedInput": "colonel",
+      "dictionary": "kˈɜɹnᵊl",
+      "bart": "kˈɑlənᵊl",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "K ER1 N AH0 L"
+      ]
+    },
+    {
+      "word": "yacht",
+      "category": "irregular",
+      "normalizedInput": "yacht",
+      "dictionary": "jˈɑt",
+      "bart": "jˈɑt",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "Y AA1 T"
+      ]
+    },
+    {
+      "word": "choir",
+      "category": "irregular",
+      "normalizedInput": "choir",
+      "dictionary": "kwˈIəɹ",
+      "bart": "kwˈIəɹ",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "K W AY1 ER0"
+      ]
+    },
+    {
+      "word": "queue",
+      "category": "irregular",
+      "normalizedInput": "queue",
+      "dictionary": "kjˈu",
+      "bart": "kjˈu",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "K Y UW1"
+      ]
+    },
+    {
+      "word": "island",
+      "category": "irregular",
+      "normalizedInput": "island",
+      "dictionary": "ˈIlənd",
+      "bart": "ˈIlənd",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "AY1 L AH0 N D"
+      ]
+    },
+    {
+      "word": "debt",
+      "category": "irregular",
+      "normalizedInput": "debt",
+      "dictionary": "dˈɛt",
+      "bart": "dˈɛt",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "D EH1 T"
+      ]
+    },
+    {
+      "word": "subtle",
+      "category": "irregular",
+      "normalizedInput": "subtle",
+      "dictionary": "sˈʌɾᵊl",
+      "bart": "sˈʌɾᵊl",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "S AH1 T AH0 L"
+      ]
+    },
+    {
+      "word": "receipt",
+      "category": "irregular",
+      "normalizedInput": "receipt",
+      "dictionary": "ɹəsˈit",
+      "bart": "ɹəsˈit",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "R IH0 S IY1 T",
+        "R IY0 S IY1 T"
+      ]
+    },
+    {
+      "word": "Wednesday",
+      "category": "irregular",
+      "normalizedInput": "wednesday",
+      "dictionary": "wˈɛnzdˌA",
+      "bart": "wˈɛdnzdˌA",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "W EH1 N Z D IY0",
+        "W EH1 N Z D EY2"
+      ]
+    },
+    {
+      "word": "enough",
+      "category": "irregular",
+      "normalizedInput": "enough",
+      "dictionary": "ɪnˈʌf",
+      "bart": "ɪnˈʌf",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "IH0 N AH1 F",
+        "IY0 N AH1 F"
+      ]
+    },
+    {
+      "word": "neural",
+      "category": "technical",
+      "normalizedInput": "neural",
+      "dictionary": "nˈʊɹᵊl",
+      "bart": "nˈʊɹəl",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "N UH1 R AH0 L",
+        "N Y UH1 R AH0 L"
+      ]
+    },
+    {
+      "word": "network",
+      "category": "technical",
+      "normalizedInput": "network",
+      "dictionary": "nˈɛtwˌɜɹk",
+      "bart": "nˈɛtwˌɜɹk",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "N EH1 T W ER2 K"
+      ]
+    },
+    {
+      "word": "algorithm",
+      "category": "technical",
+      "normalizedInput": "algorithm",
+      "dictionary": "ˈælɡəɹˌɪðəm",
+      "bart": "ˈælɡəɹˌɪðəm",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "AE1 L G ER0 IH2 DH AH0 M"
+      ]
+    },
+    {
+      "word": "inference",
+      "category": "technical",
+      "normalizedInput": "inference",
+      "dictionary": "ˈɪnfəɹəns",
+      "bart": "ɪnfˈɪɹəns",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "IH1 N F ER0 AH0 N S"
+      ]
+    },
+    {
+      "word": "quantization",
+      "category": "technical",
+      "normalizedInput": "quantization",
+      "dictionary": "kwˌɑntəzˈAʃən",
+      "bart": "kwˌɑntəzˈAʃən",
+      "error": null,
+      "cmu_arpabet_variants": []
+    },
+    {
+      "word": "spectrogram",
+      "category": "technical",
+      "normalizedInput": "spectrogram",
+      "dictionary": "spˈɛktɹəɡɹˌæm",
+      "bart": "spˈɛktɹəɡɹˌæm",
+      "error": null,
+      "cmu_arpabet_variants": []
+    },
+    {
+      "word": "phoneme",
+      "category": "technical",
+      "normalizedInput": "phoneme",
+      "dictionary": "fˈOnˌim",
+      "bart": "fˈOnˌim",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "F OW1 N IY0 M"
+      ]
+    },
+    {
+      "word": "decoder",
+      "category": "technical",
+      "normalizedInput": "decoder",
+      "dictionary": "dˌikˈOdəɹ",
+      "bart": "dᵻkˈOdəɹ",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "D IH0 K OW1 D ER0"
+      ]
+    },
+    {
+      "word": "latency",
+      "category": "technical",
+      "normalizedInput": "latency",
+      "dictionary": "lˈAtᵊnsi",
+      "bart": "lˈAtᵊnsi",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "L EY1 T AH0 N S IY0"
+      ]
+    },
+    {
+      "word": "synthesis",
+      "category": "technical",
+      "normalizedInput": "synthesis",
+      "dictionary": "sˈɪnθəsɪs",
+      "bart": "sˈɪnθəsɪs",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "S IH1 N TH AH0 S AH0 S"
+      ]
+    },
+    {
+      "word": "AI",
+      "category": "names_acronyms",
+      "normalizedInput": "ai",
+      "dictionary": "ˈAˌI",
+      "bart": "ˈI",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "AY1",
+        "EY1 AY1"
+      ]
+    },
+    {
+      "word": "API",
+      "category": "names_acronyms",
+      "normalizedInput": "api",
+      "dictionary": null,
+      "bart": "ˈæpi",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "EY2 P IY2 AY1"
+      ]
+    },
+    {
+      "word": "CPU",
+      "category": "names_acronyms",
+      "normalizedInput": "cpu",
+      "dictionary": null,
+      "bart": "spjˈu",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "S IY2 P IY2 Y UW1"
+      ]
+    },
+    {
+      "word": "GPU",
+      "category": "names_acronyms",
+      "normalizedInput": "gpu",
+      "dictionary": null,
+      "bart": "ʤˈipˌu",
+      "error": null,
+      "cmu_arpabet_variants": []
+    },
+    {
+      "word": "NASA",
+      "category": "names_acronyms",
+      "normalizedInput": "nasa",
+      "dictionary": "nˈæsə",
+      "bart": "nˈɑsə",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "N AE1 S AH0"
+      ]
+    },
+    {
+      "word": "GitHub",
+      "category": "names_acronyms",
+      "normalizedInput": "github",
+      "dictionary": null,
+      "bart": "ɡˈɪθʌb",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "G IH1 T HH AH0 B"
+      ]
+    },
+    {
+      "word": "Neuralink",
+      "category": "names_acronyms",
+      "normalizedInput": "neuralink",
+      "dictionary": null,
+      "bart": "nˈʊɹəlˌɪŋk",
+      "error": null,
+      "cmu_arpabet_variants": []
+    },
+    {
+      "word": "Kokoro",
+      "category": "names_acronyms",
+      "normalizedInput": "kokoro",
+      "dictionary": null,
+      "bart": "kəkˈɔɹO",
+      "error": null,
+      "cmu_arpabet_variants": []
+    },
+    {
+      "word": "Toronto",
+      "category": "names_acronyms",
+      "normalizedInput": "toronto",
+      "dictionary": "təɹˈɑntO",
+      "bart": "təɹˈɑntO",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "T ER0 AA1 N T OW0",
+        "T AO0 R AA1 N T OW0"
+      ]
+    },
+    {
+      "word": "Alex",
+      "category": "names_acronyms",
+      "normalizedInput": "alex",
+      "dictionary": "ˈælɪks",
+      "bart": "ˈælˌɛks",
+      "error": null,
+      "cmu_arpabet_variants": [
+        "AE1 L AH0 K S"
+      ]
+    }
+  ]
+}

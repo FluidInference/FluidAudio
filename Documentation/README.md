@@ -38,6 +38,7 @@
 ## Text-to-Speech (TTS)
 
 - [Kokoro ANE v3 and legacy runtime](TTS/KokoroAne.md)
+- [Kokoro English dictionary and G2P comparison](TTS/KokoroEnglishG2P.md)
 - [Kokoro v3 latency and compute-policy measurements](TTS/Benchmarks.md#kokoro-ane-v3-selected-m5-pro-measurements)
 - [Kokoro ANE placement and telemetry](ANE_Profiler.md#kokoro-ane-v3)
 - [PocketTTS](TTS/PocketTTS.md)
