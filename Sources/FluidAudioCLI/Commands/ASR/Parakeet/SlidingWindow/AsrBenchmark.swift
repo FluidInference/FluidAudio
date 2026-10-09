@@ -653,7 +653,7 @@ extension ASRBenchmark {
         var useStreamingEou = false
         var longAudioOnly = false
         var modelVersion: AsrModelVersion = .v3  // Default to v3
-        var melChunkContext: Bool?  // nil = auto (disabled on v3); see ASRConfig.melChunkContext
+        var melChunkContext: Bool?  // nil = enabled; see ASRConfig.melChunkContextOverride
         var encoderComputeUnits: MLComputeUnits?  // nil = library default (ANE); see --encoder-compute-units
 
         // Check for help flag first
@@ -1079,8 +1079,8 @@ extension ASRBenchmark {
                 --long-audio-only          Only process files with 4-20 second duration
                 --dump-features            Dump CoreML mel features to JSON (requires --streaming-eou + --single-file)
                 --no-mel-context           Disable 80ms mel-context prepend for long-form batch ASR
-                                           (default: disabled on v3, enabled otherwise)
-                --mel-context              Force-enable the mel-context prepend (v3 opt-in)
+                                           (opt-in silence-aligned starts on v3; may affect conversational speech)
+                --mel-context              Enable the mel-context prepend (default for all models)
                 --encoder-compute-units <u> Encoder placement: ane (default), gpu (~+8% RTFx on Apple Silicon, WER-neutral), cpu, all
                 --help, -h                Show this help message
 
