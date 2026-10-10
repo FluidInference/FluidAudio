@@ -87,6 +87,41 @@ enum ZeroVoteReembedder {
     /// - Returns: The winning cluster plus all per-centroid cosines, or `nil` when the
     ///   embedding is empty/non-finite or the centroids are empty/dimension-mismatched
     ///   (callers should fall back to the existing tie-break behavior).
+    /// Clusters selected on speech frames within `lookaroundSeconds` on either side
+    /// of `run`: the speakers the run is embedded between.
+    static func incumbentClusters(
+        around run: Range<Int>,
+        perFrameClusters: [[Int]],
+        frameDuration: Double,
+        lookaroundSeconds: Double
+    ) -> Set<Int> {
+        guard frameDuration > 0 else { return [] }
+        let span = Int((lookaroundSeconds / frameDuration).rounded(.up))
+        var found = Set<Int>()
+        let before = max(0, run.lowerBound - span)..<run.lowerBound
+        let after = run.upperBound..<min(perFrameClusters.count, run.upperBound + span)
+        for frame in before { found.formUnion(perFrameClusters[frame]) }
+        for frame in after { found.formUnion(perFrameClusters[frame]) }
+        return found
+    }
+
+    /// Closest centroid, except that a cluster in `excluding` only wins when its
+    /// cosine beats the best non-excluded cluster by at least `incumbentMargin`.
+    /// With every cluster excluded (or none), this is plain closest-centroid.
+    static func assignment(
+        embedding: [Double],
+        centroids: [[Double]],
+        excluding: Set<Int>,
+        incumbentMargin: Double
+    ) -> Assignment? {
+        guard let plain = assignment(embedding: embedding, centroids: centroids) else { return nil }
+        guard excluding.contains(plain.cluster) else { return plain }
+        let alternatives = plain.cosines.enumerated().filter { !excluding.contains($0.offset) }
+        guard let best = alternatives.max(by: { $0.element < $1.element }) else { return plain }
+        if plain.cosines[plain.cluster] - best.element >= incumbentMargin { return plain }
+        return Assignment(cluster: best.offset, cosines: plain.cosines)
+    }
+
     static func assignment(
         embedding: [Double],
         centroids: [[Double]]
