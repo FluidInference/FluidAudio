@@ -134,6 +134,37 @@ used with the author's permission. Conversion lives in
 For multi-voice / SSML / long-form, use `PocketTtsSynthesizer` or
 `StyleTTS2Manager` instead.
 
+### Legacy hardware compatibility
+
+A validated minimum chip has not been established for the legacy seven-stage
+runtime. In [#979](https://github.com/FluidInference/FluidAudio/issues/979),
+A14 is the reporter's intended application floor, not an SDK support guarantee;
+physical A14+ comparison runs on iOS 18 remain outstanding.
+
+The report covers an iPhone XR (A12, 3 GB RAM) on iOS 18.7.10, with FluidAudio
+revision `20d4f0b` and model revision `006395f6`. With Noise/Tail forced to CPU
+via `aneTailCpu` and Vocoder requesting CPU+ANE, the process was repeatedly
+jetsam-killed at the per-process memory limit while loading Vocoder. The reported
+roughly 1,750 MB available before loading is not a measured Vocoder allocation
+or a universal memory requirement. Moving Vocoder to CPU allowed all stages to
+load at a reported 259 MB peak footprint, but synthesis then hit a Noise
+stack-guard fault (see [Known OS issues](#known-os-issues)); loading alone did
+not establish a working synthesis configuration.
+
+Forcing `aneTailCpu` differs from the iOS 18 library default, which requests
+CPU+GPU for Noise/Tail. For this **legacy iOS 18** case, the maintainer proposed
+overriding only Vocoder, retaining those CPU+GPU initializer defaults:
+
+```swift
+let manager = KokoroAneManager(
+    computeUnits: KokoroAneComputeUnits(vocoder: .cpuOnly)
+)
+```
+
+This is an unverified diagnostic experiment, not a confirmed workaround or an
+OS 27 routing recommendation. These legacy observations do not validate v3;
+simulator results cannot establish physical-device ANE/GPU compatibility.
+
 ## Variants
 
 For English pronunciation lookup, fallback behavior and a bounded word-level
@@ -569,6 +600,15 @@ History: #328 (26.4 beta), #587 (iOS 26.4.2), #661 (cross-manager E5RT),
 #667 (M5/macOS 26.5), #817 (time/environment-gated evidence), #843/#849
 (OS 27 Metal abort, CPU-tail default), #844 (iOS 26.6), #889 (iOS 27 BNNS
 segfault on the CPU-tail route).
+
+Separately, [#979](https://github.com/FluidInference/FluidAudio/issues/979)
+reports a `___chkstk_darwin` stack-guard fault in libBNNS during Noise synthesis
+on the legacy iPhone XR / iOS 18.7.10 configuration described
+[above](#legacy-hardware-compatibility). The maintainer's diagnosis is worker-stack
+exhaustion, distinct from the input-overread and segfault entries above; their
+fixes do not establish a fix for this report. The proposed CPU-only Vocoder with
+CPU+GPU Noise/Tail configuration remains an unverified experiment, pending the
+crash report and physical A14+ iOS 18 comparison runs.
 
 ## Source
 
