@@ -4,6 +4,24 @@ import XCTest
 
 final class OfflineConfigTests: XCTestCase {
 
+    func testSegmentationBatchSizeDefaultsTo32() throws {
+        XCTAssertEqual(OfflineDiarizerConfig.Segmentation.community.batchSize, 32)
+        XCTAssertEqual(OfflineDiarizerConfig.default.segmentation.batchSize, 32)
+        try OfflineDiarizerConfig.default.validate()
+    }
+
+    func testSegmentationBatchSizeValidation() throws {
+        var config = OfflineDiarizerConfig.default
+        for valid in [1, 8, 32] {
+            config.segmentation.batchSize = valid
+            XCTAssertNoThrow(try config.validate(), "batchSize \(valid)")
+        }
+        for invalid in [0, -1, 33] {
+            config.segmentation.batchSize = invalid
+            XCTAssertThrowsError(try config.validate(), "batchSize \(invalid)")
+        }
+    }
+
     func testClusteringDefaultsHaveNilSpeakerConstraints() {
         let clustering = OfflineDiarizerConfig.Clustering.community
         XCTAssertNil(clustering.minSpeakers)
