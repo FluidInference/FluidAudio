@@ -25,4 +25,19 @@ final class EmbedSpanWindowTests: XCTestCase {
         XCTAssertFalse(window.contains(0))
         XCTAssertEqual(Array(window[144_000...]), span)
     }
+
+    func testSpanWithinOneWindowIsOnePiece() {
+        XCTAssertEqual(OfflineEmbeddingExtractor.spanPieces(100..<260, windowLength: 160), [100..<260])
+    }
+
+    func testLongSpanIsCutIntoEqualPiecesOfAtMostOneWindow() {
+        let pieces = OfflineEmbeddingExtractor.spanPieces(0..<25, windowLength: 10)
+
+        XCTAssertEqual(pieces, [0..<8, 8..<16, 16..<25])
+        XCTAssertTrue(pieces.allSatisfy { $0.count <= 10 })
+    }
+
+    func testEmptySpanHasNoPieces() {
+        XCTAssertEqual(OfflineEmbeddingExtractor.spanPieces(5..<5, windowLength: 10), [])
+    }
 }
