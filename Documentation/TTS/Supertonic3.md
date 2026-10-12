@@ -271,7 +271,10 @@ synthesizer picks the smallest bucket that fits.
 
 ## License
 
-- **Supertonic-3 model weights:** Apache 2.0, inherited from
-  [supertone-inc/supertonic](https://github.com/supertone-inc/supertonic)
-  upstream.
+- **Supertonic-3 model weights:** BigScience Open RAIL-M, inherited from
+  [Supertone/supertonic-3](https://huggingface.co/Supertone/supertonic-3).
+  The Core ML files are a conversion/quantization of that release, so apps
+  that redistribute them must carry the license's use restrictions and a copy
+  of the license (§4). The `supertone-inc/supertonic` GitHub repo's MIT license
+  covers only Supertone's sample code, not the weights.
 - **FluidAudio SDK:** Apache 2.0.
