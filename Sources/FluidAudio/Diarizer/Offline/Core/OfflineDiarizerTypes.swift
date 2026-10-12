@@ -42,6 +42,10 @@ public struct OfflineDiarizerConfig: Sendable {
         public var stepRatio: Double
         public var speechOnsetThreshold: Float
         public var speechOffsetThreshold: Float
+        /// Windows per segmentation model call (1...32). Peak memory grows with it: a 10 s window adds
+        /// about 13 MB, so 32 peaks near 400 MB while 8 stays near 100 MB. Smaller batches don't change
+        /// the output, and 8 runs at about the same speed per window as 32.
+        public var batchSize: Int
 
         public static let community = Segmentation(
             windowDurationSeconds: 10.0,
@@ -51,7 +55,8 @@ public struct OfflineDiarizerConfig: Sendable {
             // This with 1.0 min speech duration gives us ~1.4% worse DER but 2x the speed.
             stepRatio: 0.2,
             speechOnsetThreshold: 0.5,
-            speechOffsetThreshold: 0.5
+            speechOffsetThreshold: 0.5,
+            batchSize: 32
         )
 
         public init(
@@ -61,7 +66,8 @@ public struct OfflineDiarizerConfig: Sendable {
             minDurationOff: Double,
             stepRatio: Double,
             speechOnsetThreshold: Float,
-            speechOffsetThreshold: Float
+            speechOffsetThreshold: Float,
+            batchSize: Int = 32
         ) {
             self.windowDurationSeconds = windowDurationSeconds
             self.sampleRate = sampleRate
@@ -70,6 +76,7 @@ public struct OfflineDiarizerConfig: Sendable {
             self.stepRatio = stepRatio
             self.speechOnsetThreshold = speechOnsetThreshold
             self.speechOffsetThreshold = speechOffsetThreshold
+            self.batchSize = batchSize
         }
     }
 
@@ -382,6 +389,12 @@ public struct OfflineDiarizerConfig: Sendable {
         guard segmentation.stepRatio > 0, segmentation.stepRatio <= 1 else {
             throw OfflineDiarizationError.invalidConfiguration(
                 "segmentation.stepRatio must be within (0, 1], got \(segmentation.stepRatio)"
+            )
+        }
+
+        guard (1...32).contains(segmentation.batchSize) else {
+            throw OfflineDiarizationError.invalidBatchSize(
+                "segmentation.batchSize must be within 1...32 (the segmentation model's batch range), got \(segmentation.batchSize)"
             )
         }
 
