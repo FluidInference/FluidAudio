@@ -83,7 +83,7 @@ struct OfflineSegmentationProcessor {
         let emptyClassIndex = 0
         let onsetThreshold = config.speechOnsetThreshold
 
-        let batchCapacity = 32
+        let batchCapacity = config.segmentation.batchSize
         var globalChunkIndex = 0
 
         let clock = ContinuousClock()
