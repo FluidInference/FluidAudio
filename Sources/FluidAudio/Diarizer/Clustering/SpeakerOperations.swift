@@ -503,77 +503,82 @@ public enum SpeakerUtilities {
     /// Build one embedding per speaker from clean speech only, for enrolling speakers from a finished
     /// diarization (for example with `SpeakerManager.initializeKnownSpeakers`).
     ///
-    /// Averaging every segment lets crosstalk and short segments pull a speaker's embedding toward
+    /// Averaging everything a speaker said lets crosstalk and short turns pull the embedding toward
     /// another voice, so a profile built that way can match the wrong person in the next session.
-    /// This keeps a segment only if it is at least `minSegmentDuration` long and overlaps no other
-    /// speaker's segment by more than `maxOverlap` seconds. Each segment's weight is its duration.
-    /// When a speaker has 3 or more such segments, a segment whose cosine distance to the mean of the
-    /// speaker's other segments exceeds `maxOutlierDistance` is dropped (if at least 2 remain).
-    /// Speakers with less than `minTotalDuration` seconds of clean speech get no embedding.
+    /// This works on `result.chunkEmbeddings`, the one independent embedding per (chunk, local
+    /// speaker), so run the diarizer with `exposeChunkEmbeddings = true` (`DiarizerConfig` or
+    /// `OfflineDiarizerConfig`). Segment embeddings can't be used: segments in a chunk share its
+    /// embedding, and offline segments carry their cluster centroid.
+    ///
+    /// Each chunk embedding is weighted by its clean speech: the time inside the chunk's span where
+    /// `result.segments` show that speaker and nobody else. A chunk with less than
+    /// `minChunkCleanSpeech` seconds is skipped. When a speaker has 3 or more chunks, a chunk whose
+    /// cosine distance to the plain mean of the speaker's other chunks exceeds `maxOutlierDistance`
+    /// is dropped (if at least 2 remain); the outlier check is unweighted so one long odd chunk can't
+    /// outvote the rest. Speakers with less than `minTotalCleanSpeech` seconds left get no embedding.
     ///
     /// - Parameters:
-    ///   - segments: Diarized segments with embeddings, from `DiarizationResult.segments`
-    ///   - minSegmentDuration: Shortest segment to use, in seconds
-    ///   - maxOverlap: Most overlap with another speaker's segment a segment may have, in seconds
-    ///   - minTotalDuration: Least clean speech a speaker needs for an embedding, in seconds
-    ///   - maxOutlierDistance: Largest cosine distance from the speaker's other segments to keep a segment
-    /// - Returns: Speaker ID to L2-normalized embedding; speakers without enough clean speech are omitted
+    ///   - result: A diarization run with `chunkEmbeddings` populated
+    ///   - minChunkCleanSpeech: Least clean speech a chunk needs to count, in seconds
+    ///   - minTotalCleanSpeech: Least clean speech a speaker needs for an embedding, in seconds
+    ///   - maxOutlierDistance: Largest cosine distance from the speaker's other chunks to keep a chunk
+    /// - Returns: Speaker ID to L2-normalized embedding; speakers without enough clean speech are omitted,
+    ///   and the result is empty when `result.chunkEmbeddings` is nil
     public static func cleanEmbeddingsBySpeaker(
-        _ segments: [TimedSpeakerSegment],
-        minSegmentDuration: Float = 1.5,
-        maxOverlap: Float = 0.25,
-        minTotalDuration: Float = 4.0,
+        _ result: DiarizationResult,
+        minChunkCleanSpeech: Double = 1.5,
+        minTotalCleanSpeech: Double = 4.0,
         maxOutlierDistance: Float = 0.7
     ) -> [String: [Float]] {
-        let usable = segments.filter { segment in
-            guard segment.durationSeconds >= minSegmentDuration,
-                !segment.embedding.isEmpty,
-                validateEmbedding(segment.embedding)
-            else {
-                return false
-            }
-            return !segments.contains { other in
-                other.speakerId != segment.speakerId
-                    && min(other.endTimeSeconds, segment.endTimeSeconds)
-                        - max(other.startTimeSeconds, segment.startTimeSeconds) > maxOverlap
-            }
+        guard let chunks = result.chunkEmbeddings else {
+            logger.warning("cleanEmbeddingsBySpeaker needs chunk embeddings; set exposeChunkEmbeddings = true")
+            return [:]
+        }
+        var turns: [String: [(start: Double, end: Double)]] = [:]
+        for segment in result.segments {
+            turns[segment.speakerId, default: []].append(
+                (Double(segment.startTimeSeconds), Double(segment.endTimeSeconds)))
         }
 
-        var result: [String: [Float]] = [:]
-        for (speakerId, speakerSegments) in Dictionary(grouping: usable, by: \.speakerId) {
-            guard let dimension = speakerSegments.first?.embedding.count,
-                speakerSegments.allSatisfy({ $0.embedding.count == dimension })
+        var bySpeaker: [String: [(embedding: [Float], cleanSpeech: Double)]] = [:]
+        for chunk in chunks where !chunk.speakerId.isEmpty && validateEmbedding(chunk.embedding256) {
+            let span = (start: chunk.startTimeSeconds, end: chunk.endTimeSeconds)
+            let own = clipped(turns[chunk.speakerId] ?? [], to: span)
+            let others = clipped(
+                turns.filter { $0.key != chunk.speakerId }.flatMap(\.value), to: span)
+            let cleanSpeech = measure(own) - overlap(own, others)
+            guard cleanSpeech >= minChunkCleanSpeech else { continue }
+            bySpeaker[chunk.speakerId, default: []].append(
+                (VDSPOperations.l2Normalize(chunk.embedding256), cleanSpeech))
+        }
+
+        var embeddings: [String: [Float]] = [:]
+        for (speakerId, entries) in bySpeaker {
+            guard let dimension = entries.first?.embedding.count,
+                entries.allSatisfy({ $0.embedding.count == dimension })
             else {
                 logger.warning("Mixed embedding sizes for speaker \(speakerId); skipping")
                 continue
             }
-            let embeddings = speakerSegments.map { VDSPOperations.l2Normalize($0.embedding) }
-            let weights = speakerSegments.map(\.durationSeconds)
-            let sum = weightedSum(embeddings, weights: weights, dimension: dimension)
-
-            var kept = Array(embeddings.indices)
-            if embeddings.count >= 3 {
-                // Compare each segment with the mean of the others, so an outlier can't hide by
-                // pulling the mean toward itself.
+            var kept = Array(entries.indices)
+            if entries.count >= 3 {
+                let sum = weightedSum(entries.map(\.embedding), weights: entries.map { _ in 1 }, dimension: dimension)
                 let close = kept.filter { i in
-                    var rest = sum
-                    for d in 0..<dimension {
-                        rest[d] -= weights[i] * embeddings[i][d]
-                    }
-                    return cosineDistance(embeddings[i], rest) <= maxOutlierDistance
+                    let rest = zip(sum, entries[i].embedding).map { $0 - $1 }
+                    return cosineDistance(entries[i].embedding, rest) <= maxOutlierDistance
                 }
                 if close.count >= 2 {
                     kept = close
                 }
             }
-
-            let cleanDuration = kept.reduce(Float(0)) { $0 + weights[$1] }
-            guard cleanDuration >= minTotalDuration else { continue }
+            let cleanSpeech = kept.reduce(0) { $0 + entries[$1].cleanSpeech }
+            guard cleanSpeech >= minTotalCleanSpeech else { continue }
             let mean = weightedSum(
-                kept.map { embeddings[$0] }, weights: kept.map { weights[$0] }, dimension: dimension)
-            result[speakerId] = VDSPOperations.l2Normalize(mean)
+                kept.map { entries[$0].embedding }, weights: kept.map { Float(entries[$0].cleanSpeech) },
+                dimension: dimension)
+            embeddings[speakerId] = VDSPOperations.l2Normalize(mean)
         }
-        return result
+        return embeddings
     }
 
     private static func weightedSum(_ embeddings: [[Float]], weights: [Float], dimension: Int) -> [Float] {
@@ -584,6 +589,39 @@ public enum SpeakerUtilities {
             }
         }
         return sum
+    }
+
+    /// Intervals cut to `span`, sorted and merged so their lengths can be summed.
+    private static func clipped(
+        _ intervals: [(start: Double, end: Double)], to span: (start: Double, end: Double)
+    ) -> [(start: Double, end: Double)] {
+        let cut = intervals.map { (max($0.start, span.start), min($0.end, span.end)) }
+            .filter { $0.0 < $0.1 }
+            .sorted { $0.0 < $1.0 }
+        var merged: [(start: Double, end: Double)] = []
+        for (start, end) in cut {
+            if let last = merged.last, start <= last.end {
+                merged[merged.count - 1].end = max(last.end, end)
+            } else {
+                merged.append((start, end))
+            }
+        }
+        return merged
+    }
+
+    private static func measure(_ intervals: [(start: Double, end: Double)]) -> Double {
+        intervals.reduce(0) { $0 + $1.end - $1.start }
+    }
+
+    /// Total length shared by two merged interval lists.
+    private static func overlap(_ a: [(start: Double, end: Double)], _ b: [(start: Double, end: Double)]) -> Double {
+        var total = 0.0
+        for x in a {
+            for y in b {
+                total += max(0, min(x.end, y.end) - max(x.start, y.start))
+            }
+        }
+        return total
     }
 }
 

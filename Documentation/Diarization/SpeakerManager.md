@@ -498,11 +498,16 @@ if let avgEmbedding = SpeakerUtilities.averageEmbeddings(embeddingArray) {
 ```
 
 ### cleanEmbeddingsBySpeaker
-Build one embedding per speaker from clean speech only, to enroll speakers from a finished diarization. Averaging every segment lets crosstalk pull a speaker's embedding toward another voice. This skips segments under 1.5 s or overlapping another speaker by more than 0.25 s, weights by duration, drops a segment that sounds unlike the speaker's others, and omits speakers with under 4 s of clean speech.
+Build one embedding per speaker from clean speech only, to enroll speakers from a finished diarization. Averaging everything a speaker said lets crosstalk pull the embedding toward another voice. This reads `chunkEmbeddings` (one independent embedding per chunk and local speaker; segment embeddings repeat the chunk's vector or the cluster centroid, so they can't be filtered), weights each chunk by the speaker's clean speech inside it (their turns minus other speakers' turns), skips chunks with under 1.5 s of it, drops a chunk that sounds unlike the speaker's others, and omits speakers with under 4 s in total.
 
 ```swift
+var config = DiarizerConfig.default
+config.exposeChunkEmbeddings = true  // required; OfflineDiarizerConfig has the same flag
+let diarizer = DiarizerManager(config: config)
+diarizer.initialize(models: models)
+
 let result = try diarizer.performCompleteDiarization(samples)
-let embeddings = SpeakerUtilities.cleanEmbeddingsBySpeaker(result.segments)
+let embeddings = SpeakerUtilities.cleanEmbeddingsBySpeaker(result)
 let known = embeddings.map { id, embedding in
     Speaker(id: id, name: names[id], currentEmbedding: embedding, isPermanent: true)
 }
