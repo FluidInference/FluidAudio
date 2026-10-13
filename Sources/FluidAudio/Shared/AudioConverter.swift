@@ -138,38 +138,37 @@ final public class AudioConverter: Sendable {
 
     // MARK: - Private Helpers
 
-    /// Resample using AVAudioConverter with raw float arrays
+    /// Resample using AVAudioConverter with raw float arrays.
+    ///
+    /// The samples are fed to the converter in slices rather than as one
+    /// buffer: an `AVAudioPCMBuffer` counts its bytes in a `UInt32`, so a single
+    /// buffer for a whole recording cannot exceed 4 GiB — 6 h 12 min of mono
+    /// at 48 kHz, 6 h 46 min at 44.1 kHz — and the allocation fails past that.
+    /// One converter instance carries its filter state across the slices, so
+    /// the output is the same as a single-buffer conversion.
     private func resampleWithAVAudio(
         _ samples: [Float], from inputRate: Double, to outputRate: Double
     ) throws -> [Float] {
-        // Create input format and buffer
+        try resampleWithAVAudio(samples, from: inputRate, to: outputRate, sliceFrames: Self.resampleSliceFrames)
+    }
+
+    /// Frames per slice handed to the converter: 1 Mi frames is 4 MiB of
+    /// input, well under the limit and large enough that the converter's
+    /// per-call overhead does not show.
+    static let resampleSliceFrames = 1 << 20
+
+    /// `sliceFrames` is a parameter so a test can prove slicing does not change
+    /// the result; production callers take the default.
+    func resampleWithAVAudio(
+        _ samples: [Float], from inputRate: Double, to outputRate: Double, sliceFrames: Int
+    ) throws -> [Float] {
         guard
             let inputFormat = AVAudioFormat(
                 commonFormat: .pcmFormatFloat32,
                 sampleRate: inputRate,
                 channels: 1,
                 interleaved: false
-            )
-        else {
-            throw AudioConverterError.failedToCreateSourceFormat
-        }
-
-        guard
-            let inputBuffer = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: AVAudioFrameCount(samples.count))
-        else {
-            throw AudioConverterError.failedToCreateBuffer
-        }
-        inputBuffer.frameLength = AVAudioFrameCount(samples.count)
-
-        // Copy samples into buffer
-        if let channelData = inputBuffer.floatChannelData {
-            samples.withUnsafeBufferPointer { src in
-                memcpy(channelData[0], src.baseAddress!, samples.count * MemoryLayout<Float>.stride)
-            }
-        }
-
-        // Create output format
-        guard
+            ),
             let outputFormat = AVAudioFormat(
                 commonFormat: .pcmFormatFloat32,
                 sampleRate: outputRate,
@@ -179,8 +178,59 @@ final public class AudioConverter: Sendable {
         else {
             throw AudioConverterError.failedToCreateSourceFormat
         }
+        guard let converter = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+            throw AudioConverterError.failedToCreateConverter
+        }
+        configure(converter: converter)
 
-        return try convertBuffer(inputBuffer, to: outputFormat)
+        let slice = max(1, min(sliceFrames, max(samples.count, 1)))
+        guard let inputBuffer = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: AVAudioFrameCount(slice)) else {
+            throw AudioConverterError.failedToCreateBuffer
+        }
+        let ratio = outputRate / inputRate
+        let outputCapacity = AVAudioFrameCount((Double(slice) * ratio).rounded(.up)) + 4096
+        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputCapacity) else {
+            throw AudioConverterError.failedToCreateBuffer
+        }
+
+        var aggregated: [Float] = []
+        aggregated.reserveCapacity(Int((Double(samples.count) * ratio).rounded(.up)) + 4096)
+
+        // The converter pulls input synchronously inside convert(...); the
+        // cursor is the only state shared with the block.
+        let cursor = OSAllocatedUnfairLock(initialState: 0)
+        nonisolated(unsafe) let input = inputBuffer
+        let inputBlock: AVAudioConverterInputBlock = { _, status in
+            let start = cursor.withLock { $0 }
+            guard start < samples.count, let channel = input.floatChannelData else {
+                status.pointee = .endOfStream
+                return nil
+            }
+            let count = min(slice, samples.count - start)
+            samples.withUnsafeBufferPointer { src in
+                memcpy(channel[0], src.baseAddress! + start, count * MemoryLayout<Float>.stride)
+            }
+            input.frameLength = AVAudioFrameCount(count)
+            cursor.withLock { $0 = start + count }
+            status.pointee = .haveData
+            return input
+        }
+
+        var error: NSError?
+        while true {
+            outputBuffer.frameLength = 0
+            let status = converter.convert(to: outputBuffer, error: &error, withInputFrom: inputBlock)
+            guard status != .error else { throw AudioConverterError.conversionFailed(error) }
+            if outputBuffer.frameLength > 0 { aggregated.append(contentsOf: extractFloatArray(from: outputBuffer)) }
+            if status == .endOfStream { break }
+        }
+
+        if debug {
+            logger.debug(
+                "Audio resample: \(samples.count) samples → \(aggregated.count) samples, ratio: \(Double(aggregated.count)/Double(max(samples.count, 1)))"
+            )
+        }
+        return aggregated
     }
 
     /// Extract mono Float32 samples from a buffer (mixing channels if needed)
