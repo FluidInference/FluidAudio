@@ -739,7 +739,7 @@ struct ChunkProcessor {
 
             mergedTokens = try await repairSeamGaps(
                 in: mergedTokens,
-                using: workers[0],
+                using: workers,
                 decoderLayers: decoderLayers,
                 maxModelSamples: maxModelSamples,
                 minGapSeconds: minGapSeconds,
@@ -1462,13 +1462,25 @@ struct ChunkProcessor {
     }
     #endif
 
+    /// One gap probe of the repair pass: the gap, its word neighbours, and the
+    /// audio of each window placement, in the order they are tried.
+    private struct SeamGapProbe: Sendable {
+        let gapStartFrame: Int
+        let gapEndFrame: Int
+        let leadNeighbor: TokenWindow
+        let tailNeighbor: TokenWindow
+        let placements: [(start: Int, audio: [Float], isLastChunk: Bool)]
+    }
+
     /// Re-decode inter-token gaps that plausibly contain dropped speech with
     /// a fresh seam-free window and splice in only in-gap tokens (issue
     /// #758). Genuine silence splices nothing. See "Post-Merge Repair Pass"
-    /// in Documentation/ASR/LongTranscription.md.
+    /// in Documentation/ASR/LongTranscription.md. The probes of a pass are
+    /// independent (they read the pre-pass tokens), so they run across the
+    /// worker pool and are applied in gap order.
     private func repairSeamGaps(
         in tokens: [TokenWindow],
-        using manager: AsrManager,
+        using workers: [AsrManager],
         decoderLayers: Int,
         maxModelSamples: Int,
         minGapSeconds: Double,
@@ -1493,7 +1505,7 @@ struct ChunkProcessor {
         // Iterate so a partial recovery's residual gap (start has moved)
         // gets its own probe; yielded-nothing gaps are memoized and skipped.
         for _ in 0..<3 {
-            var inserts: [TokenWindow] = []
+            var passProbes: [SeamGapProbe] = []
 
             for index in 0..<(working.count - 1) {
                 guard probes < maxSeamGapRepairs else { break }
@@ -1521,61 +1533,63 @@ struct ChunkProcessor {
                 // can re-blank), gap-centred fallback — see "Placement
                 // matters" in LongTranscription.md.
                 let gapCenterSample = (gapStartSample + gapEndSample) / 2
-                let placements = [gapStartSample, gapCenterSample - windowSamples / 2]
-                var recovered: [TokenWindow] = []
-
-                for placement in placements {
+                var placements: [(start: Int, audio: [Float], isLastChunk: Bool)] = []
+                for placement in [gapStartSample, gapCenterSample - windowSamples / 2] {
                     var windowStart = max(0, min(placement, totalSamples - windowSamples))
                     windowStart = windowStart / frameSamples * frameSamples
                     let windowEnd = min(windowStart + windowSamples, totalSamples)
                     guard windowEnd > windowStart else { continue }
-
-                    var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
-                    decoderState.reset()
                     let windowAudio = try readSamples(offset: windowStart, count: windowEnd - windowStart)
-                    let (windowTokens, windowTimestamps, windowConfidences, windowDurations) =
-                        try await Self.transcribeChunk(
-                            samples: windowAudio,
-                            contextSamples: 0,
-                            chunkStart: windowStart,
-                            isLastChunk: windowEnd >= totalSamples,
-                            using: manager,
-                            decoderState: &decoderState,
-                            maxModelSamples: maxModelSamples,
-                            language: language
-                        )
+                    placements.append((windowStart, windowAudio, windowEnd >= totalSamples))
+                }
 
-                    guard windowTokens.count == windowTimestamps.count,
-                        windowTokens.count == windowConfidences.count
-                    else { continue }
-                    let durations =
-                        windowDurations.count == windowTokens.count
-                        ? windowDurations : Array(repeating: 0, count: windowTokens.count)
-
-                    let candidate = Self.spliceCandidate(
-                        windowTokens: windowTokens,
-                        windowTimestamps: windowTimestamps,
-                        windowConfidences: windowConfidences,
-                        windowDurations: durations,
+                passProbes.append(
+                    SeamGapProbe(
                         gapStartFrame: gapStartFrame,
                         gapEndFrame: gapEndFrame,
                         leadNeighbor: Self.wordNeighbor(in: working, from: index, step: -1, vocabulary: vocabulary),
-                        tailNeighbor: Self.wordNeighbor(in: working, from: index + 1, step: 1, vocabulary: vocabulary),
-                        spliceSafeTokenIds: spliceSafeTokenIds,
-                        vocabulary: vocabulary
-                    )
+                        tailNeighbor: Self.wordNeighbor(
+                            in: working, from: index + 1, step: 1, vocabulary: vocabulary),
+                        placements: placements
+                    ))
+            }
 
-                    if !candidate.isEmpty {
-                        recovered = candidate
-                        break
+            guard !passProbes.isEmpty else { break }
+
+            var recoveredByProbe = [[TokenWindow]](repeating: [], count: passProbes.count)
+            try await withThrowingTaskGroup(of: (Int, Int, [TokenWindow]).self) { group in
+                var availableWorkers = Array(workers.indices)
+                for (probeIndex, probe) in passProbes.enumerated() {
+                    if availableWorkers.isEmpty, let (finished, workerIndex, recovered) = try await group.next() {
+                        recoveredByProbe[finished] = recovered
+                        availableWorkers.append(workerIndex)
+                    }
+                    let workerIndex = availableWorkers.removeFirst()
+                    let worker = workers[workerIndex]
+                    group.addTask {
+                        let recovered = try await Self.recoverSeamGap(
+                            probe,
+                            using: worker,
+                            decoderLayers: decoderLayers,
+                            maxModelSamples: maxModelSamples,
+                            spliceSafeTokenIds: spliceSafeTokenIds,
+                            vocabulary: vocabulary,
+                            language: language
+                        )
+                        return (probeIndex, workerIndex, recovered)
                     }
                 }
+                for try await (finished, _, recovered) in group {
+                    recoveredByProbe[finished] = recovered
+                }
+            }
 
-                guard !recovered.isEmpty else { continue }
+            var inserts: [TokenWindow] = []
+            for (probe, recovered) in zip(passProbes, recoveredByProbe) where !recovered.isEmpty {
                 logger.info(
                     "Seam-gap repair: recovered \(recovered.count) tokens in "
-                        + String(format: "%.2fs", Double(gapStartFrame) * frameDuration) + "–"
-                        + String(format: "%.2fs", Double(gapEndFrame) * frameDuration) + " gap"
+                        + String(format: "%.2fs", Double(probe.gapStartFrame) * frameDuration) + "–"
+                        + String(format: "%.2fs", Double(probe.gapEndFrame) * frameDuration) + " gap"
                 )
                 inserts.append(contentsOf: recovered)
             }
@@ -1586,6 +1600,56 @@ struct ChunkProcessor {
         }
 
         return working
+    }
+
+    /// Decode one probe's placements in order and return the first non-empty
+    /// splice candidate (empty when every placement yields nothing).
+    private static func recoverSeamGap(
+        _ probe: SeamGapProbe,
+        using manager: AsrManager,
+        decoderLayers: Int,
+        maxModelSamples: Int,
+        spliceSafeTokenIds: Set<Int>?,
+        vocabulary: [Int: String],
+        language: Language?
+    ) async throws -> [TokenWindow] {
+        for placement in probe.placements {
+            var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
+            decoderState.reset()
+            let (windowTokens, windowTimestamps, windowConfidences, windowDurations) =
+                try await transcribeChunk(
+                    samples: placement.audio,
+                    contextSamples: 0,
+                    chunkStart: placement.start,
+                    isLastChunk: placement.isLastChunk,
+                    using: manager,
+                    decoderState: &decoderState,
+                    maxModelSamples: maxModelSamples,
+                    language: language
+                )
+
+            guard windowTokens.count == windowTimestamps.count,
+                windowTokens.count == windowConfidences.count
+            else { continue }
+            let durations =
+                windowDurations.count == windowTokens.count
+                ? windowDurations : Array(repeating: 0, count: windowTokens.count)
+
+            let candidate = spliceCandidate(
+                windowTokens: windowTokens,
+                windowTimestamps: windowTimestamps,
+                windowConfidences: windowConfidences,
+                windowDurations: durations,
+                gapStartFrame: probe.gapStartFrame,
+                gapEndFrame: probe.gapEndFrame,
+                leadNeighbor: probe.leadNeighbor,
+                tailNeighbor: probe.tailNeighbor,
+                spliceSafeTokenIds: spliceSafeTokenIds,
+                vocabulary: vocabulary
+            )
+            if !candidate.isEmpty { return candidate }
+        }
+        return []
     }
 
     /// Cumulative duration of speech-like audio (per-frame RMS above the
