@@ -2,159 +2,224 @@ import XCTest
 
 @testable import FluidAudio
 
-/// Tests for `SpeakerUtilities.cleanEmbeddingsBySpeaker`
+/// Tests for `SpeakerUtilities.cleanEmbeddingsBySpeaker`. Real-audio checks are in
+/// `CleanSpeakerEmbeddingsAMITests`.
 final class CleanSpeakerEmbeddingsTests: XCTestCase {
 
-    private func embedding(pattern: Int) -> [Float] {
-        (0..<256).map { sin(Float($0 + pattern * 100) * 0.1) }
+    /// A 256-dim vector from a few components, so similarities are exact.
+    private func vec(_ parts: [Int: Float]) -> [Float] {
+        var v = [Float](repeating: 0, count: 256)
+        for (i, x) in parts { v[i] = x }
+        return v
     }
 
-    /// `base` with a little of `other` mixed in: the same voice in a different chunk.
-    private func variant(of base: Int, toward other: Int, by amount: Float) -> [Float] {
-        let a = VDSPOperations.l2Normalize(embedding(pattern: base))
-        let b = VDSPOperations.l2Normalize(embedding(pattern: other))
-        return zip(a, b).map { $0 * (1 - amount) + $1 * amount }
-    }
+    // Voices: a and b are different people; a1, a2 are a in other chunks; b1 is b.
+    private lazy var a = vec([0: 1])
+    private lazy var a1 = vec([0: 0.95, 1: 0.2, 2: 0.1])
+    private lazy var a2 = vec([0: 0.9, 1: 0.1, 3: 0.2])
+    private lazy var b = vec([1: 1])
+    private lazy var b1 = vec([0: 0.1, 1: 0.95, 3: 0.1])
+    private lazy var c = vec([2: 1])
 
     private func segment(_ speaker: String, _ start: Float, _ end: Float) -> TimedSpeakerSegment {
         TimedSpeakerSegment(
             speakerId: speaker, embedding: [], startTimeSeconds: start, endTimeSeconds: end, qualityScore: 1)
     }
 
-    private func chunk(
-        _ speaker: String, _ index: Int, _ start: Double, _ end: Double, _ embedding: [Float]
-    )
-        -> ChunkEmbedding
-    {
+    private func chunk(_ speaker: String, _ start: Double, _ end: Double, _ embedding: [Float]) -> ChunkEmbedding {
         ChunkEmbedding(
-            speakerId: speaker, chunkIndex: index, speakerIndex: 0, startTimeSeconds: start, endTimeSeconds: end,
-            embedding256: embedding)
+            speakerId: speaker, chunkIndex: Int(start), speakerIndex: 0, startTimeSeconds: start,
+            endTimeSeconds: end, embedding256: embedding)
     }
 
-    private func distance(_ result: [String: [Float]], _ speaker: String, _ pattern: Int) -> Float {
-        SpeakerUtilities.cosineDistance(result[speaker] ?? [], embedding(pattern: pattern))
+    /// One chunk per segment, each the only speech in its span.
+    private func result(_ speaker: String, _ chunks: [(Double, Double, [Float])]) -> DiarizationResult {
+        DiarizationResult(
+            segments: chunks.map { segment(speaker, Float($0.0), Float($0.1)) },
+            chunkEmbeddings: chunks.map { chunk(speaker, $0.0, $0.1, $0.2) })
     }
+
+    private func clean(_ result: DiarizationResult) -> [String: [Float]] {
+        SpeakerUtilities.cleanEmbeddingsBySpeaker(result)
+    }
+
+    private func similarity(_ x: [Float]?, _ y: [Float]) -> Float {
+        guard let x else { return -2 }
+        return 1 - SpeakerUtilities.cosineDistance(x, y)
+    }
+
+    // MARK: - Input
 
     func testNeedsChunkEmbeddings() {
-        let result = DiarizationResult(segments: [segment("A", 0, 10)])
-        XCTAssertTrue(SpeakerUtilities.cleanEmbeddingsBySpeaker(result).isEmpty)
+        XCTAssertTrue(clean(DiarizationResult(segments: [segment("A", 0, 10)])).isEmpty)
+        XCTAssertTrue(clean(DiarizationResult(segments: [], chunkEmbeddings: [])).isEmpty)
     }
 
     func testUsesChunkEmbeddingsNotSegmentEmbeddings() {
         let segments = [
-            TimedSpeakerSegment(
-                speakerId: "A", embedding: embedding(pattern: 3), startTimeSeconds: 0, endTimeSeconds: 10,
-                qualityScore: 1)
+            TimedSpeakerSegment(speakerId: "A", embedding: b, startTimeSeconds: 0, endTimeSeconds: 10, qualityScore: 1)
         ]
-        let result = DiarizationResult(
-            segments: segments, chunkEmbeddings: [chunk("A", 0, 0, 10, embedding(pattern: 1))])
-        XCTAssertEqual(distance(SpeakerUtilities.cleanEmbeddingsBySpeaker(result), "A", 1), 0, accuracy: 1e-4)
+        let result = DiarizationResult(segments: segments, chunkEmbeddings: [chunk("A", 0, 10, a)])
+        XCTAssertGreaterThan(similarity(clean(result)["A"], a), 0.9999)
     }
 
-    func testSkipsChunksWithoutEnoughCleanSpeech() {
-        // Chunk 1: A speaks 12-18 but B talks over 13-18, leaving 1 s of clean speech for A.
-        let blended = zip(embedding(pattern: 1), embedding(pattern: 2)).map { $0 + $1 }
+    func testSkipsUnassignedAndInvalidChunks() {
+        var nan = a
+        nan[5] = .nan
         let result = DiarizationResult(
-            segments: [segment("A", 0, 6), segment("A", 12, 18), segment("B", 13, 18)],
+            segments: [segment("A", 0, 30)],
             chunkEmbeddings: [
-                chunk("A", 0, 0, 6, embedding(pattern: 1)),
-                chunk("A", 1, 12, 18, blended),
+                chunk("", 0, 10, b),
+                chunk("A", 0, 10, a),
+                chunk("A", 10, 20, nan),
+                chunk("A", 20, 30, vec([:])),
             ])
-        let embeddings = SpeakerUtilities.cleanEmbeddingsBySpeaker(result)
-        XCTAssertEqual(distance(embeddings, "A", 1), 0, accuracy: 1e-4)
+        let embeddings = clean(result)
+        XCTAssertEqual(Array(embeddings.keys), ["A"])
+        XCTAssertGreaterThan(similarity(embeddings["A"], a), 0.9999)
     }
 
-    func testCleanSpeechCountsOnlyTheSpeakersOwnTurnsInsideTheSpan() {
-        // The span covers 0-10, but A only speaks 0-3 in it: 3 s, under the 4 s minimum.
+    func testSkipsSpeakerWithMixedEmbeddingSizes() {
         let result = DiarizationResult(
-            segments: [segment("A", 0, 3), segment("B", 3, 10)],
-            chunkEmbeddings: [chunk("A", 0, 0, 10, embedding(pattern: 1))])
-        XCTAssertNil(SpeakerUtilities.cleanEmbeddingsBySpeaker(result)["A"])
+            segments: [segment("A", 0, 20)],
+            chunkEmbeddings: [chunk("A", 0, 10, a), chunk("A", 10, 20, [1, 0, 0])])
+        XCTAssertNil(clean(result)["A"])
     }
 
-    func testDropsOddChunkOut() {
-        XCTAssertGreaterThan(
-            SpeakerUtilities.cosineDistance(embedding(pattern: 1), embedding(pattern: 2)), 0.7,
-            "fixture: pattern 2 must read as another voice")
+    // MARK: - Clean speech per chunk
+
+    func testOtherSpeakersTimeIsSubtracted() {
+        // A talks 0-10, B talks over 1-9.5: A has 1.5 s clean in this chunk.
         let result = DiarizationResult(
-            segments: [segment("A", 0, 3), segment("A", 10, 13), segment("A", 20, 23), segment("A", 30, 33)],
-            chunkEmbeddings: [
-                chunk("A", 0, 0, 3, variant(of: 1, toward: 4, by: 0.1)),
-                chunk("A", 1, 10, 13, variant(of: 1, toward: 5, by: 0.1)),
-                chunk("A", 2, 20, 23, embedding(pattern: 1)),
-                chunk("A", 3, 30, 33, embedding(pattern: 2)),
-            ])
-        let embeddings = SpeakerUtilities.cleanEmbeddingsBySpeaker(result)
-        XCTAssertLessThan(distance(embeddings, "A", 1), 0.05)
+            segments: [segment("A", 0, 10), segment("B", 1, 9.5), segment("A", 20, 25)],
+            chunkEmbeddings: [chunk("A", 0, 10, b), chunk("A", 20, 25, a)])
+        // Both count (1.5 s meets the minimum); the 1.5 s chunk weighs 1.5 against 5.
+        let mixed = clean(result)["A"]
+        XCTAssertNil(mixed, "two chunks that disagree")
+        let shorter = DiarizationResult(
+            segments: [segment("A", 0, 10), segment("B", 1, 9.6), segment("A", 20, 25)],
+            chunkEmbeddings: [chunk("A", 0, 10, b), chunk("A", 20, 25, a)])
+        XCTAssertGreaterThan(similarity(clean(shorter)["A"], a), 0.9999, "1.4 s clean: below the minimum, skipped")
     }
 
-    func testLongOddChunkCantOutvoteShortOnes() {
-        // Two 2.5 s chunks of A's voice and one 10 s chunk of another voice: a duration-weighted
-        // outlier check would keep the long chunk and drop the short ones.
+    func testOnlyTheSpeakersOwnTurnsInsideTheSpanCount() {
         let result = DiarizationResult(
-            segments: [segment("A", 0, 2.5), segment("A", 10, 12.5), segment("A", 20, 30)],
-            chunkEmbeddings: [
-                chunk("A", 0, 0, 2.5, embedding(pattern: 1)),
-                chunk("A", 1, 10, 12.5, variant(of: 1, toward: 5, by: 0.1)),
-                chunk("A", 2, 20, 30, embedding(pattern: 4)),
-            ])
-        XCTAssertGreaterThan(
-            SpeakerUtilities.cosineDistance(embedding(pattern: 1), embedding(pattern: 4)), 0.7,
-            "fixture: pattern 4 must read as another voice")
-        let embeddings = SpeakerUtilities.cleanEmbeddingsBySpeaker(result)
-        XCTAssertLessThan(distance(embeddings, "A", 1), 0.05)
+            segments: [segment("A", 0, 3), segment("B", 3, 10), segment("A", 12, 20)],
+            chunkEmbeddings: [chunk("A", 0, 10, a)])
+        XCTAssertNil(clean(result)["A"], "3 s of A inside 0-10 s: under the 4 s total")
     }
 
-    func testKeepsAllChunksWhenNoneStandsOut() {
-        let vectors = [variant(of: 1, toward: 4, by: 0.1), variant(of: 1, toward: 5, by: 0.1), embedding(pattern: 1)]
+    func testOwnOverlappingTurnsCountOnce() {
         let result = DiarizationResult(
-            segments: [segment("A", 0, 3), segment("A", 10, 13), segment("A", 20, 23)],
-            chunkEmbeddings: vectors.enumerated().map { i, v in
-                chunk("A", i, Double(i * 10), Double(i * 10 + 3), v)
-            })
+            segments: [segment("A", 0, 3), segment("A", 2, 4.5)],
+            chunkEmbeddings: [chunk("A", 0, 10, a)])
+        XCTAssertGreaterThan(similarity(clean(result)["A"], a), 0.9999, "4.5 s, not 5.5 s, but over 4 s")
+        let short = DiarizationResult(
+            segments: [segment("A", 0, 3), segment("A", 1, 3.9)],
+            chunkEmbeddings: [chunk("A", 0, 10, a)])
+        XCTAssertNil(clean(short)["A"], "3.9 s once merged")
+    }
+
+    func testChunkMinimumBoundary() {
+        let atMinimum = DiarizationResult(
+            segments: [segment("A", 0, 1.5), segment("A", 10, 14)],
+            chunkEmbeddings: [chunk("A", 0, 1.5, a1), chunk("A", 10, 14, a)])
+        XCTAssertGreaterThan(SpeakerUtilities.cleanEmbeddingsBySpeaker(atMinimum, minTotalCleanSpeech: 5).count, 0)
+        let below = DiarizationResult(
+            segments: [segment("A", 0, 1.4), segment("A", 10, 14)],
+            chunkEmbeddings: [chunk("A", 0, 1.4, a1), chunk("A", 10, 14, a)])
+        XCTAssertTrue(SpeakerUtilities.cleanEmbeddingsBySpeaker(below, minTotalCleanSpeech: 5).isEmpty)
+    }
+
+    // MARK: - Agreement
+
+    func testOneChunkIsEnoughWithEnoughSpeech() {
+        XCTAssertNotNil(clean(result("A", [(0, 4, a)]))["A"], "exactly the 4 s minimum")
+        XCTAssertNil(clean(result("A", [(0, 3.9, a)]))["A"])
+    }
+
+    func testTwoChunksMustAgree() {
+        XCTAssertNotNil(clean(result("A", [(0, 3, a), (5, 8, a1)]))["A"])
+        XCTAssertNil(clean(result("A", [(0, 3, a), (5, 8, b)]))["A"], "can't tell which is the speaker's voice")
+    }
+
+    func testOddChunkOutIsDropped() {
+        let embedding = clean(result("A", [(0, 3, a), (4, 7, a1), (8, 11, a2), (12, 14, b)]))["A"]
+        XCTAssertGreaterThan(similarity(embedding, a), 0.95)
+        XCTAssertLessThan(similarity(embedding, b), 0.25)
+    }
+
+    func testLongOddChunkCantStandForTheSpeaker() {
+        // Picking the medoid by seconds would make b the voice and drop a's chunks.
+        let embedding = clean(result("A", [(0, 5, a), (10, 15, a1), (20, 23, a2), (30, 38, b)]))["A"]
+        XCTAssertGreaterThan(similarity(embedding, a), 0.95)
+        XCTAssertLessThan(similarity(embedding, b), 0.25)
+    }
+
+    func testSpeakerMostlyInAnotherVoiceGetsNone() {
+        XCTAssertNil(clean(result("A", [(0, 2.5, a), (10, 12.5, a1), (20, 30, b)]))["A"])
+    }
+
+    func testEvenTwoVoiceClusterGetsNone() {
+        XCTAssertNil(clean(result("A", [(0, 4, a), (5, 9, a1), (10, 14, b), (15, 19, b1)]))["A"])
+    }
+
+    func testMajorityVoiceWinsWithoutPullFromTheMinority() {
+        let merged = clean(result("A", [(0, 4, a), (5, 9, a1), (10, 14, a2), (15, 18, b), (20, 21.5, b1)]))["A"]
+        let pure = clean(result("A", [(0, 4, a), (5, 9, a1), (10, 14, a2)]))["A"]
+        XCTAssertNotNil(merged)
+        XCTAssertEqual(merged, pure, "the minority's chunks don't move it at all")
+    }
+
+    func testConsensusBoundary() {
+        let r = result("A", [(0, 3, a), (4, 7, a1), (8, 10, b), (11, 13, c)])  // kept 6 s of 10 s
+        XCTAssertNotNil(SpeakerUtilities.cleanEmbeddingsBySpeaker(r, minConsensus: 0.6)["A"])
+        XCTAssertNil(SpeakerUtilities.cleanEmbeddingsBySpeaker(r, minConsensus: 0.61)["A"])
+    }
+
+    func testKeptSpeechMustReachTheMinimum() {
+        let r = result("A", [(0, 1.5, a), (2, 3.5, a1), (4, 7, b)])
+        XCTAssertNil(
+            SpeakerUtilities.cleanEmbeddingsBySpeaker(r, minConsensus: 0)["A"],
+            "6 s of clean speech, only 3 s in the speaker's voice")
+    }
+
+    func testDistanceThresholdIsRespected() {
+        let near = vec([0: 0.6, 1: 0.8])  // distance 0.4 from a
+        let r = result("A", [(0, 3, a), (4, 7, near), (8, 11, a)])
+        let loose = SpeakerUtilities.cleanEmbeddingsBySpeaker(r, maxDistanceToMedoid: 0.45)["A"]
+        let strict = SpeakerUtilities.cleanEmbeddingsBySpeaker(r, maxDistanceToMedoid: 0.35)["A"]
+        XCTAssertGreaterThan(similarity(loose, near), similarity(strict, near))
+        XCTAssertGreaterThan(similarity(strict, a), 0.9999, "near left out")
+    }
+
+    // MARK: - Output
+
+    func testWeightedByCleanSpeech() {
+        let embedding = clean(result("A", [(0, 8, a), (10, 12, a1)]))["A"]
+        XCTAssertGreaterThan(similarity(embedding, a), similarity(embedding, a1))
         let expected = VDSPOperations.l2Normalize(
-            vectors.map { VDSPOperations.l2Normalize($0) }.reduce([Float](repeating: 0, count: 256)) {
-                zip($0, $1).map { $0 + $1 }
-            })
-        let embeddings = SpeakerUtilities.cleanEmbeddingsBySpeaker(result)
-        XCTAssertEqual(SpeakerUtilities.cosineDistance(embeddings["A"] ?? [], expected), 0, accuracy: 1e-4)
+            zip(VDSPOperations.l2Normalize(a), VDSPOperations.l2Normalize(a1)).map { 8 * $0 + 2 * $1 })
+        XCTAssertGreaterThan(similarity(embedding, expected), 0.9999)
     }
 
-    func testWeightsByCleanSpeech() {
-        let result = DiarizationResult(
-            segments: [segment("A", 0, 8), segment("A", 10, 12)],
-            chunkEmbeddings: [
-                chunk("A", 0, 0, 8, embedding(pattern: 1)),
-                chunk("A", 1, 10, 12, embedding(pattern: 2)),
-            ])
-        let embeddings = SpeakerUtilities.cleanEmbeddingsBySpeaker(result)
-        XCTAssertLessThan(distance(embeddings, "A", 1), distance(embeddings, "A", 2))
+    func testResultIsNormalized() {
+        let embedding = clean(result("A", [(0, 6, a.map { $0 * 7 })]))["A"] ?? []
+        XCTAssertEqual(embedding.reduce(0) { $0 + $1 * $1 }.squareRoot(), 1, accuracy: 1e-4)
     }
 
-    func testOmitsSpeakersWithTooLittleCleanSpeech() {
-        let result = DiarizationResult(
-            segments: [segment("A", 0, 2), segment("A", 3, 5), segment("B", 6, 12)],
-            chunkEmbeddings: [
-                chunk("A", 0, 0, 2, embedding(pattern: 1)),
-                chunk("A", 1, 3, 5, embedding(pattern: 1)),
-                chunk("B", 1, 6, 12, embedding(pattern: 2)),
-            ])
-        let embeddings = SpeakerUtilities.cleanEmbeddingsBySpeaker(result, minTotalCleanSpeech: 5)
-        XCTAssertNil(embeddings["A"])
-        XCTAssertNotNil(embeddings["B"])
-    }
-
-    func testSkipsUnassignedChunksAndNormalizes() {
-        let result = DiarizationResult(
-            segments: [segment("A", 0, 6)],
-            chunkEmbeddings: [
-                chunk("", 0, 0, 6, embedding(pattern: 2)),
-                chunk("A", 0, 0, 6, embedding(pattern: 1).map { $0 * 5 }),
-            ])
-        let embeddings = SpeakerUtilities.cleanEmbeddingsBySpeaker(result)
-        XCTAssertEqual(embeddings.count, 1)
-        let norm = (embeddings["A"] ?? []).reduce(Float(0)) { $0 + $1 * $1 }.squareRoot()
-        XCTAssertEqual(norm, 1, accuracy: 1e-4)
-        XCTAssertEqual(distance(embeddings, "A", 1), 0, accuracy: 1e-4)
+    func testSpeakersAreIndependentAndOrderDoesNotMatter() {
+        let chunks = [
+            chunk("A", 0, 3, a), chunk("B", 3, 6, b), chunk("A", 6, 9, a1), chunk("B", 9, 12, b1),
+            chunk("A", 12, 14, a2),
+        ]
+        let segments = chunks.map { segment($0.speakerId, Float($0.startTimeSeconds), Float($0.endTimeSeconds)) }
+        let forward = clean(DiarizationResult(segments: segments, chunkEmbeddings: chunks))
+        let reversed = clean(DiarizationResult(segments: segments.reversed(), chunkEmbeddings: chunks.reversed()))
+        XCTAssertGreaterThan(similarity(forward["A"], a), 0.95)
+        XCTAssertGreaterThan(similarity(forward["B"], b), 0.95)
+        for id in ["A", "B"] {
+            XCTAssertGreaterThan(similarity(forward[id], reversed[id] ?? []), 0.99999)
+        }
     }
 }
