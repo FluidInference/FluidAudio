@@ -128,6 +128,36 @@ public actor AsrManager {
         }
     }
 
+    /// One window of a long-form transcription as it finishes decoding, for
+    /// hosts that show text while the file is still being read. Windows can
+    /// finish out of order (they decode on several workers); `index` orders
+    /// them. The text is the window's own decode, before the seam merge and
+    /// repair pass that produce the final `ASRResult`.
+    public struct WindowProgress: Sendable {
+        public let index: Int
+        public let windowCount: Int
+        public let startSeconds: TimeInterval
+        public let endSeconds: TimeInterval
+        public let text: String
+    }
+
+    private var windowHandler: (@Sendable (WindowProgress) -> Void)?
+
+    /// Receive every finished window of a long-form transcription (see
+    /// `WindowProgress`). Single-window audio reports nothing here.
+    public func setWindowHandler(_ handler: (@Sendable (WindowProgress) -> Void)?) {
+        windowHandler = handler
+    }
+
+    internal func reportWindow(index: Int, windowCount: Int, startFrame: Int, endFrame: Int, tokenIds: [Int]) {
+        guard let windowHandler else { return }
+        let frame = ASRConstants.secondsPerEncoderFrame
+        windowHandler(
+            WindowProgress(
+                index: index, windowCount: windowCount, startSeconds: Double(startFrame) * frame,
+                endSeconds: Double(endFrame) * frame, text: convertTokensToText(tokenIds)))
+    }
+
     internal func makeWorkerClone() -> AsrManager? {
         guard let models = asrModels else { return nil }
         return AsrManager(config: config, models: models)

@@ -652,6 +652,11 @@ struct ChunkProcessor {
             chunkOutputs[finished.index] = finished.tokens
             availableWorkers.append(finished.workerIndex)
             inFlight -= 1
+            let window = chunkWindows[finished.index]
+            await manager.reportWindow(
+                index: finished.index, windowCount: chunkStarts.count,
+                startFrame: window.decodeStart, endFrame: window.end,
+                tokenIds: finished.tokens.map(\.token))
         }
 
         try await withThrowingTaskGroup(of: TaskResult.self) { group in

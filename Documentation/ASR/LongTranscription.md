@@ -807,6 +807,14 @@ buffers, so for the most memory-constrained environments setting
 `parallelChunkConcurrency = 1` and leaving streaming enabled is the lowest
 high-water-mark configuration.
 
+A 16-bit mono wav already at 16 kHz is mapped in place (`PcmWavLayout` +
+`DiskBackedAudioSampleSource.pcm16`): no conversion pass and no temporary
+float copy, so a 24-hour file opens in the time it takes to map it. Measured
+on the 24-hour Earnings-22 file with Phonon-2: 142.1 s → 133.8 s
+(608× → 646×), identical transcript, peak RSS 5.8 GB → 3.0 GB (the mapped
+wav itself). Every other format still streams through `AVAudioConverter`
+into a temporary float32 file.
+
 ## Validation Strategy
 
 A long-transcription change should be checked with a fixed matrix, not only with
