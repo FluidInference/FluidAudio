@@ -643,6 +643,16 @@ struct ChunkProcessor {
         // The final window must end at the last speech-bearing frame, not
         // EOF — see `speechEndSamples()`.
         let speechEnd = endAligned ? try speechEndSamples() : totalSamples
+        // The windows the host will see: the loop below ends at the first
+        // window whose full length reaches the end of the recording (it is
+        // end-aligned instead), or at a start past the last speech-bearing
+        // frame, so starts planned after that never decode.
+        var reportedWindowCount = 0
+        for decision in chunkStarts {
+            guard decision.start < speechEnd else { break }
+            reportedWindowCount += 1
+            if decision.start + chunkSamples >= totalSamples { break }
+        }
 
         func collectNextResult(
             _ group: inout ThrowingTaskGroup<TaskResult, Error>
@@ -654,7 +664,7 @@ struct ChunkProcessor {
             inFlight -= 1
             let window = chunkWindows[finished.index]
             await manager.reportWindow(
-                index: finished.index, windowCount: chunkStarts.count,
+                index: finished.index, windowCount: reportedWindowCount,
                 startFrame: window.decodeStart, endFrame: window.end,
                 tokenIds: finished.tokens.map(\.token))
         }
