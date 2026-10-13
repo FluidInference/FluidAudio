@@ -127,6 +127,40 @@ The search keeps at least 6 encoder frames (480 ms) of overlap with the
 previous chunk so the overlap merger always has at least a handful of
 candidate tokens to align on.
 
+### Pause-Cut Windows (encoder ladder)
+
+With a **multifunction encoder** (`AsrModels.encoderLadder`, functions
+`enc_<ms>ms` for 5.04 / 10.16 / 15 s — Phonon-2 ships one) a window shorter
+than 15 s costs less Neural Engine time, so the chunker switches to a
+third strategy ahead of the two above: the window *ends* at the pause the
+next window starts from, with no overlap at that seam.
+
+- **Late-pause rule** (`latestPauseCut`). Frame energies are computed once
+  for the whole recording (`frameEnergySums`). Within a window's last 5 s
+  the rule takes the **latest run of at least 3 consecutive quiet frames**
+  (240 ms) and cuts at its midpoint; quiet is the reference engines' gate,
+  RMS below `0.18 ×` the window's peak frame RMS (floor 0.004), which admits
+  breath pauses rather than only dead silence. The decision is marked
+  `pauseCut`, and `process` trims the previous window's `audioEnd` to it.
+  Without a qualifying run the window falls back to the overlap rules above
+  and keeps its full length.
+- **Why latest, not quietest.** Neural Engine time is quantized in 64-frame
+  tiles of the encoder's time axis (10 s = 126 frames costs 12 ms, 11–15 s
+  all cost ~19 ms on an M5 Pro), so the gain comes from *fewer* windows,
+  not shorter ones: packing cuts toward 15 s turned a 3600 s file from 278
+  overlapping windows into ~265 pause-cut ones. A 2-frame run cut later
+  still but cost 0.3 WER points (more mid-phrase cuts) and probed more
+  gaps; a 5 %-of-median energy gate only matched deep silence and cut
+  *earlier* (308 windows).
+- **Accuracy.** Cutting at a pause removes the seam merge there entirely;
+  on the 1-hour Earnings-22 file WER improved 17.20 → 16.68 % with the
+  ladder path (both probe sizes below beat the overlap path). Reducing the
+  overlap *without* pause alignment is the opposite trade (1.0 s → 18.9 %,
+  0.5 s → 22.6 %) and is not done.
+- The strategy is gated on `AsrManager.hasEncoderLadder`: a single-shape
+  encoder would pay a full 15 s pass for a shortened window and only lose
+  the overlap, so it keeps the two-tier search unchanged.
+
 ## Warmup Prefix vs Mel Context
 
 Non-first chunks always include some samples from before the visible window,
@@ -661,6 +695,18 @@ window:
   needs headroom beyond that — hence 32.
 - Genuine silence yields no in-gap tokens by construction and is left
   untouched.
+- **Probes run across the worker pool.** The probes of a round are
+  independent (each reads the round's starting token stream), so they are
+  collected first and decoded on every worker (`recoverSeamGap`), then
+  applied in gap order. On a 1-hour file this took the pass from 1.9 s to
+  0.75 s with a byte-identical transcript.
+- **Probe window with an encoder ladder.** When the model has one, the probe
+  runs on the ladder's *smallest* function (5.04 s for Phonon-2) rather
+  than a full 15 s window: the splice keeps in-gap tokens only and a
+  residual gap gets its own probe in the next round, so the short window
+  recovers as much at a third of the encoder time (1-hour file: 5.53 s vs
+  5.79 s, WER 16.68 vs 16.59 %). A window sized to each gap plus 2 s of
+  context was tried and lost on both counts (5.75 s, 16.90 %).
 
 ### Adaptive Speech-Energy Gate
 

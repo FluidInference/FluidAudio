@@ -20,6 +20,10 @@ struct ChunkProcessor {
     struct ChunkStartDecision {
         let start: Int
         let useWarmupPrefix: Bool
+        /// The start sits in a pause (near-silence boundary), so the window
+        /// before it can end here instead of running its full length when
+        /// shorter windows are cheaper (`AsrManager.hasEncoderLadder`).
+        var pauseCut: Bool = false
     }
 
     // Stateless chunking aligned with CoreML reference:
@@ -188,7 +192,8 @@ struct ChunkProcessor {
         warmupPrefixSamples: Int,
         chunkSamples: Int,
         strideSamples: Int,
-        preferSilenceAlignment: Bool
+        preferSilenceAlignment: Bool,
+        preferLatePause: Bool = false
     ) throws -> [ChunkStartDecision] {
         guard preferSilenceAlignment || warmupPrefixSamples > 0 else {
             return regularChunkStarts(strideSamples: strideSamples)
@@ -196,7 +201,8 @@ struct ChunkProcessor {
         return try silenceAlignedChunkStarts(
             chunkSamples: chunkSamples,
             strideSamples: strideSamples,
-            canUseWarmupPrefix: warmupPrefixSamples > 0
+            canUseWarmupPrefix: warmupPrefixSamples > 0,
+            preferLatePause: preferLatePause
         )
     }
 
@@ -210,10 +216,92 @@ struct ChunkProcessor {
         return starts
     }
 
+    /// Earliest cut of the late-pause rule, before the window's end (10 s of a
+    /// 15 s window): a pause-cut window is encoded at its own length, so the
+    /// later the cut the fewer windows the recording takes.
+    static let latePauseBandSeconds: Double = 5.0
+
+    /// The window's latest pause: the midpoint of the last run of at least
+    /// `latePauseMinimumFrames` consecutive quiet frames inside the band's
+    /// final `latePauseBandSeconds`. Quiet is the reference engines' gate,
+    /// RMS below 0.18 × the window's peak frame RMS (and a −48 dBFS floor),
+    /// which admits breath pauses, not only dead silence. `nil` when the band
+    /// has no such run; the caller then falls back to the overlap rule.
+    static let latePauseMinimumFrames = 3
+    static let latePauseGateRatio: Float = 0.18
+    static let latePauseFloorRMS: Float = 0.004
+
+    /// Sum of squares of every 80 ms encoder frame of the recording, one
+    /// pass over the audio. `boundaryEnergyScore(centeredAt: f × frame,
+    /// halfWindowSamples: frame)` is the mean of frames f-1 and f.
+    func frameEnergySums() throws -> [Float] {
+        let frameSamples = ASRConstants.samplesPerEncoderFrame
+        let frameCount = (totalSamples + frameSamples - 1) / frameSamples
+        var sums = [Float](repeating: 0, count: frameCount)
+        let blockFrames = 256
+        var frame = 0
+        while frame < frameCount {
+            let frames = min(blockFrames, frameCount - frame)
+            let offset = frame * frameSamples
+            let samples = try readSamples(offset: offset, count: min(frames * frameSamples, totalSamples - offset))
+            samples.withUnsafeBufferPointer { buffer in
+                for index in 0..<frames {
+                    let start = index * frameSamples
+                    let end = min(start + frameSamples, buffer.count)
+                    var sum: Float = 0
+                    for sample in buffer[start..<end] { sum += sample * sample }
+                    sums[frame + index] = sum
+                }
+            }
+            frame += frames
+        }
+        return sums
+    }
+
+    func latestPauseCut(previousStart: Int, chunkSamples: Int, frameEnergySums sums: [Float]) -> Int? {
+        let frameSamples = ASRConstants.samplesPerEncoderFrame
+        let windowEnd = min(previousStart + chunkSamples, totalSamples) - frameSamples
+        let bandStart = max(
+            previousStart + frameSamples,
+            previousStart + chunkSamples - Int(Self.latePauseBandSeconds * Double(ASRConstants.sampleRate)))
+        guard windowEnd > bandStart else { return nil }
+        // Frame energies over the whole window set the gate; only the band is cut.
+        // The score at a frame boundary is the mean energy of the two frames around it.
+        var energies: [(start: Int, energy: Float)] = []
+        var frame = (previousStart + frameSamples) / frameSamples
+        while frame * frameSamples <= windowEnd, frame < sums.count {
+            energies.append((frame * frameSamples, (sums[frame - 1] + sums[frame]) / Float(2 * frameSamples)))
+            frame += 1
+        }
+        guard let peak = energies.map(\.energy).max(), peak > 0 else { return nil }
+        let gateRMS = max(Self.latePauseFloorRMS, Self.latePauseGateRatio * peak.squareRoot())
+        let gate = gateRMS * gateRMS
+        let band = energies.filter { $0.start >= bandStart }
+        guard band.count >= Self.latePauseMinimumFrames else { return nil }
+        // Walk back from the end of the band to the last quiet run.
+        var runEnd = band.count - 1
+        while runEnd >= 0 {
+            guard band[runEnd].energy <= gate else {
+                runEnd -= 1
+                continue
+            }
+            var runStart = runEnd
+            while runStart > 0, band[runStart - 1].energy <= gate {
+                runStart -= 1
+            }
+            if runEnd - runStart + 1 >= Self.latePauseMinimumFrames {
+                return band[(runStart + runEnd) / 2].start
+            }
+            runEnd = runStart - 1
+        }
+        return nil
+    }
+
     func silenceAlignedChunkStarts(
         chunkSamples: Int,
         strideSamples: Int,
-        canUseWarmupPrefix: Bool
+        canUseWarmupPrefix: Bool,
+        preferLatePause: Bool = false
     ) throws -> [ChunkStartDecision] {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
         let silenceSearchRadiusFrames = max(1, Int((4.0 * Double(ASRConstants.sampleRate)) / Double(frameSamples)))
@@ -225,7 +313,17 @@ struct ChunkProcessor {
         var previousStart = 0
         var target = strideSamples
 
+        let frameEnergySums = preferLatePause ? try frameEnergySums() : []
         while target < totalSamples {
+            if preferLatePause,
+                let cut = latestPauseCut(
+                    previousStart: previousStart, chunkSamples: chunkSamples, frameEnergySums: frameEnergySums)
+            {
+                starts.append(ChunkStartDecision(start: cut, useWarmupPrefix: false, pauseCut: true))
+                previousStart = cut
+                target = cut + strideSamples
+                continue
+            }
             let targetFrame = target / frameSamples
             let latestCoveredStart = previousStart + chunkSamples - minimumOverlapSamples
             let targetStart = min(max(targetFrame * frameSamples, previousStart + frameSamples), latestCoveredStart)
@@ -241,6 +339,7 @@ struct ChunkProcessor {
 
             var bestStart: Int
             var useWarmupPrefix = false
+            var pauseCut = false
             if foundNearSilence {
                 let shouldWarmup =
                     canUseWarmupPrefix ? (try shouldUseWarmupPrefix(at: silenceCandidate.start)) : false
@@ -262,6 +361,7 @@ struct ChunkProcessor {
                 } else {
                     bestStart = silenceCandidate.start
                     useWarmupPrefix = shouldWarmup
+                    pauseCut = true
                 }
             } else {
                 let valleyCandidate = try bestBoundaryCandidate(
@@ -276,12 +376,14 @@ struct ChunkProcessor {
 
             if bestStart <= previousStart {
                 bestStart = min(previousStart + strideSamples, totalSamples)
+                pauseCut = false
             }
 
             starts.append(
                 ChunkStartDecision(
                     start: bestStart,
-                    useWarmupPrefix: useWarmupPrefix
+                    useWarmupPrefix: useWarmupPrefix,
+                    pauseCut: pauseCut
                 )
             )
             previousStart = bestStart
@@ -515,11 +617,16 @@ struct ChunkProcessor {
         let warmupPrefixSamples = layout.warmupPrefixSamples
         let chunkSamples = layout.chunkSamples
         let strideSamples = layout.strideSamples
+        // With a ladder encoder a window that ends at the pause the next one
+        // starts from costs only the audio it holds, and the pause makes the
+        // overlap unnecessary at that seam.
+        let pauseCutWindows = await manager.hasEncoderLadder
         let chunkStarts = try self.chunkStarts(
             warmupPrefixSamples: warmupPrefixSamples,
             chunkSamples: chunkSamples,
             strideSamples: strideSamples,
-            preferSilenceAlignment: !melChunkContext && modelVersion?.isV3Family == true
+            preferSilenceAlignment: !melChunkContext && modelVersion?.isV3Family == true,
+            preferLatePause: pauseCutWindows
         )
 
         var chunkOutputs: [[TokenWindow]?] = []
@@ -579,7 +686,12 @@ struct ChunkProcessor {
                 // The final window's audio stops at the last speech-bearing
                 // frame — a window ending inside a dead-silence run decodes
                 // degenerately. A pure-silence tail has nothing to decode.
-                let audioEnd = isLastChunk && endAligned ? min(chunkEnd, speechEnd) : chunkEnd
+                var audioEnd = isLastChunk && endAligned ? min(chunkEnd, speechEnd) : chunkEnd
+                if pauseCutWindows, !isLastChunk, chunkIndex + 1 < chunkStarts.count,
+                    chunkStarts[chunkIndex + 1].pauseCut
+                {
+                    audioEnd = min(audioEnd, chunkStarts[chunkIndex + 1].start)
+                }
                 if audioEnd <= chunkStart {
                     break
                 }
@@ -742,6 +854,7 @@ struct ChunkProcessor {
                 using: workers,
                 decoderLayers: decoderLayers,
                 maxModelSamples: maxModelSamples,
+                ladderSeconds: await manager.encoderLadderSeconds,
                 minGapSeconds: minGapSeconds,
                 speechRmsThreshold: speechRmsThreshold,
                 spliceSafeTokenIds: spliceSafeTokenIds,
@@ -1483,6 +1596,7 @@ struct ChunkProcessor {
         using workers: [AsrManager],
         decoderLayers: Int,
         maxModelSamples: Int,
+        ladderSeconds: [Double],
         minGapSeconds: Double,
         speechRmsThreshold: Float,
         spliceSafeTokenIds: Set<Int>?,
@@ -1493,10 +1607,15 @@ struct ChunkProcessor {
         let frameDuration = ASRConstants.secondsPerEncoderFrame
         let minGapFrames = max(2, Int(minGapSeconds / frameDuration))
         // Same frame-aligned usable window size the chunker uses (no context
-        // reservation — the repair window is decoded standalone).
+        // reservation — the repair window is decoded standalone). With a
+        // ladder encoder the probe runs on its smallest function: the splice
+        // keeps in-gap tokens only and a residual gap gets its own probe in
+        // the next round, so the short window recovers as much for a third
+        // of the encoder time.
+        let probeSamples = ladderSeconds.first.map { min(Int($0 * Double(ASRConstants.sampleRate)), maxModelSamples) }
         let windowSamples = max(
             frameSamples,
-            (maxModelSamples - ASRConstants.melHopSize) / frameSamples * frameSamples
+            ((probeSamples ?? maxModelSamples) - ASRConstants.melHopSize) / frameSamples * frameSamples
         )
 
         var working = tokens

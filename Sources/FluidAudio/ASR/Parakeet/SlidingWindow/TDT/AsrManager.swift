@@ -11,6 +11,8 @@ public actor AsrManager {
 
     internal var preprocessorModel: MLModel?
     internal var encoderModel: MLModel?
+    /// Shorter-window encoder functions (see `AsrModels.encoderLadder`).
+    internal var encoderLadder: [EncoderLadderFunction] = []
     internal var decoderModel: MLModel?
     internal var jointModel: MLModel?
 
@@ -27,6 +29,18 @@ public actor AsrManager {
 
     internal var modelVersion: AsrModelVersion? {
         asrModels?.version
+    }
+
+    /// Whether windows shorter than 15 s cost less encoder time (a
+    /// multifunction encoder is loaded), which makes cutting a window at a
+    /// pause worth the lost overlap.
+    internal var hasEncoderLadder: Bool {
+        !encoderLadder.isEmpty
+    }
+
+    /// Window lengths of the encoder ladder, ascending (empty without one).
+    internal var encoderLadderSeconds: [Double] {
+        encoderLadder.map(\.seconds)
     }
 
     internal var parallelChunkConcurrency: Int {
@@ -86,6 +100,7 @@ public actor AsrManager {
             self.asrModels = models
             self.preprocessorModel = models.preprocessor
             self.encoderModel = models.encoder
+            self.encoderLadder = models.encoderLadder
             self.decoderModel = models.decoder
             self.jointModel = models.joint
             self.vocabulary = models.vocabulary
@@ -147,6 +162,7 @@ public actor AsrManager {
         self.asrModels = models
         self.preprocessorModel = models.preprocessor
         self.encoderModel = models.encoder
+        self.encoderLadder = models.encoderLadder
         self.decoderModel = models.decoder
         self.jointModel = models.joint
         self.vocabulary = models.vocabulary
@@ -227,6 +243,7 @@ public actor AsrManager {
         asrModels = nil
         preprocessorModel = nil
         encoderModel = nil
+        encoderLadder = []
         decoderModel = nil
         jointModel = nil
         Task { await sharedMLArrayCache.clear() }
