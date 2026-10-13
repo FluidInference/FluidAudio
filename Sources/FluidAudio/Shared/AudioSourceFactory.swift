@@ -15,6 +15,19 @@ public struct AudioSourceFactory {
         do {
             let startTime = Date()
 
+            // A 16-bit mono wav already at the target rate is read in place —
+            // no conversion pass, no temporary copy — so a day of audio opens
+            // in the time it takes to map the file.
+            if url.pathExtension.lowercased() == "wav" {
+                let mapped = try Data(contentsOf: url, options: [.mappedIfSafe])
+                if let layout = PcmWavLayout.parse(mapped, sampleRate: targetSampleRate) {
+                    logger.debug("Mapped PCM wav in place: \(layout.sampleCount) samples")
+                    let source = DiskBackedAudioSampleSource(
+                        pcm16MappedWav: mapped, dataOffset: layout.dataOffset, sampleCount: layout.sampleCount)
+                    return (source, Date().timeIntervalSince(startTime))
+                }
+            }
+
             let audioFile = try AVAudioFile(forReading: url)
             let inputFormat = audioFile.processingFormat
             let targetFormat = AVAudioFormat(
