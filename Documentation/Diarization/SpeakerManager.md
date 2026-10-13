@@ -497,6 +497,18 @@ if let avgEmbedding = SpeakerUtilities.averageEmbeddings(embeddingArray) {
 }
 ```
 
+### cleanEmbeddingsBySpeaker
+Build one embedding per speaker from clean speech only, to enroll speakers from a finished diarization. Averaging every segment lets crosstalk pull a speaker's embedding toward another voice. This skips segments under 1.5 s or overlapping another speaker by more than 0.25 s, weights by duration, drops a segment that sounds unlike the speaker's others, and omits speakers with under 4 s of clean speech.
+
+```swift
+let result = try diarizer.performCompleteDiarization(samples)
+let embeddings = SpeakerUtilities.cleanEmbeddingsBySpeaker(result.segments)
+let known = embeddings.map { id, embedding in
+    Speaker(id: id, name: names[id], currentEmbedding: embedding, isPermanent: true)
+}
+speakerManager.initializeKnownSpeakers(known)
+```
+
 ## Threading and Concurrency
 
 `SpeakerManager` is thread-safe:

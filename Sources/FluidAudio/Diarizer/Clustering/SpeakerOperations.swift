@@ -497,6 +497,94 @@ public enum SpeakerUtilities {
 
         return VDSPOperations.l2Normalize(average)
     }
+
+    // MARK: - Clean Speaker Embeddings
+
+    /// Build one embedding per speaker from clean speech only, for enrolling speakers from a finished
+    /// diarization (for example with `SpeakerManager.initializeKnownSpeakers`).
+    ///
+    /// Averaging every segment lets crosstalk and short segments pull a speaker's embedding toward
+    /// another voice, so a profile built that way can match the wrong person in the next session.
+    /// This keeps a segment only if it is at least `minSegmentDuration` long and overlaps no other
+    /// speaker's segment by more than `maxOverlap` seconds. Each segment's weight is its duration.
+    /// When a speaker has 3 or more such segments, a segment whose cosine distance to the mean of the
+    /// speaker's other segments exceeds `maxOutlierDistance` is dropped (if at least 2 remain).
+    /// Speakers with less than `minTotalDuration` seconds of clean speech get no embedding.
+    ///
+    /// - Parameters:
+    ///   - segments: Diarized segments with embeddings, from `DiarizationResult.segments`
+    ///   - minSegmentDuration: Shortest segment to use, in seconds
+    ///   - maxOverlap: Most overlap with another speaker's segment a segment may have, in seconds
+    ///   - minTotalDuration: Least clean speech a speaker needs for an embedding, in seconds
+    ///   - maxOutlierDistance: Largest cosine distance from the speaker's other segments to keep a segment
+    /// - Returns: Speaker ID to L2-normalized embedding; speakers without enough clean speech are omitted
+    public static func cleanEmbeddingsBySpeaker(
+        _ segments: [TimedSpeakerSegment],
+        minSegmentDuration: Float = 1.5,
+        maxOverlap: Float = 0.25,
+        minTotalDuration: Float = 4.0,
+        maxOutlierDistance: Float = 0.7
+    ) -> [String: [Float]] {
+        let usable = segments.filter { segment in
+            guard segment.durationSeconds >= minSegmentDuration,
+                !segment.embedding.isEmpty,
+                validateEmbedding(segment.embedding)
+            else {
+                return false
+            }
+            return !segments.contains { other in
+                other.speakerId != segment.speakerId
+                    && min(other.endTimeSeconds, segment.endTimeSeconds)
+                        - max(other.startTimeSeconds, segment.startTimeSeconds) > maxOverlap
+            }
+        }
+
+        var result: [String: [Float]] = [:]
+        for (speakerId, speakerSegments) in Dictionary(grouping: usable, by: \.speakerId) {
+            guard let dimension = speakerSegments.first?.embedding.count,
+                speakerSegments.allSatisfy({ $0.embedding.count == dimension })
+            else {
+                logger.warning("Mixed embedding sizes for speaker \(speakerId); skipping")
+                continue
+            }
+            let embeddings = speakerSegments.map { VDSPOperations.l2Normalize($0.embedding) }
+            let weights = speakerSegments.map(\.durationSeconds)
+            let sum = weightedSum(embeddings, weights: weights, dimension: dimension)
+
+            var kept = Array(embeddings.indices)
+            if embeddings.count >= 3 {
+                // Compare each segment with the mean of the others, so an outlier can't hide by
+                // pulling the mean toward itself.
+                let close = kept.filter { i in
+                    var rest = sum
+                    for d in 0..<dimension {
+                        rest[d] -= weights[i] * embeddings[i][d]
+                    }
+                    return cosineDistance(embeddings[i], rest) <= maxOutlierDistance
+                }
+                if close.count >= 2 {
+                    kept = close
+                }
+            }
+
+            let cleanDuration = kept.reduce(Float(0)) { $0 + weights[$1] }
+            guard cleanDuration >= minTotalDuration else { continue }
+            let mean = weightedSum(
+                kept.map { embeddings[$0] }, weights: kept.map { weights[$0] }, dimension: dimension)
+            result[speakerId] = VDSPOperations.l2Normalize(mean)
+        }
+        return result
+    }
+
+    private static func weightedSum(_ embeddings: [[Float]], weights: [Float], dimension: Int) -> [Float] {
+        var sum = [Float](repeating: 0, count: dimension)
+        for (embedding, weight) in zip(embeddings, weights) {
+            for d in 0..<dimension {
+                sum[d] += weight * embedding[d]
+            }
+        }
+        return sum
+    }
 }
 
 /// These functions provide additional capabilities beyond core diarization
