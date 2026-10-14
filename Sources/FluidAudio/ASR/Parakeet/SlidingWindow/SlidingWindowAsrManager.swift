@@ -55,12 +55,12 @@ public actor SlidingWindowAsrManager {
     // One publication boundary for the real inference path and model-free
     // contract characterization. Failed publication permanently closes lineage.
     func publishTokenUpdate(tokens: [TokenTiming], previous: Int, retained: Int, stable: Int,
-                            window: Range<Int>, center: Range<Int>) throws {
+                            window: Range<Int>, center: Range<Int>, isConfirmed: Bool = false) throws {
         guard let continuation = tokenContinuation else { return }
         do {
             continuation.yield(try tokenCursor.next(
                 tokens: tokens, previous: previous, retained: retained, stable: stable,
-                window: window, center: center))
+                window: window, center: center, isConfirmed: isConfirmed))
         } catch {
             failTokenStream(error)
             throw error
@@ -673,7 +673,7 @@ public actor SlidingWindowAsrManager {
                     tokens: rawTimings, previous: previousTokenCount,
                     retained: retainedTokenCount, stable: stable,
                     window: windowStartSample..<end,
-                    center: nextWindowCenterStart..<centerEnd)
+                    center: nextWindowCenterStart..<centerEnd, isConfirmed: shouldConfirm)
             }
             updateContinuation?.yield(update)
 

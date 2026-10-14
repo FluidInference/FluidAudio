@@ -11,11 +11,13 @@ final class TokenContractTests: XCTestCase {
         var cursor = SlidingWindowTokenCursor()
         let first = try cursor.next(
             tokens: [token("▁We"), token("▁an", 0.2)],
-            previous: 0, retained: 0, stable: 1, window: 0..<22400, center: 0..<16000)
+            previous: 0, retained: 0, stable: 1, window: 0..<22400, center: 0..<16000, isConfirmed: true)
         let second = try cursor.next(
             tokens: [token("▁analyzing", 0.24), token("▁now.", 0.6)],
             previous: 2, retained: 1, stable: 2, window: 0..<38400, center: 16000..<32000)
         XCTAssertEqual(first.revision.ordinal, 1)
+        XCTAssertTrue(first.isConfirmed)
+        XCTAssertFalse(second.isConfirmed)
         XCTAssertEqual(second.revision.previousTokenCount, 2)
         XCTAssertEqual(second.revision.retainedTokenCount, 1)
         XCTAssertEqual(second.revision.jobID, first.revision.jobID)

@@ -32,10 +32,13 @@ public struct SlidingWindowTokenRevision: Sendable {
 public struct SlidingWindowTokenUpdate: Sendable {
     public let tokens: [TokenTiming]
     public let revision: SlidingWindowTokenRevision
+    /// Legacy display-confidence flag, not token immutability authority.
+    public let isConfirmed: Bool
 
-    public init(tokens: [TokenTiming], revision: SlidingWindowTokenRevision) {
+    public init(tokens: [TokenTiming], revision: SlidingWindowTokenRevision, isConfirmed: Bool = false) {
         self.tokens = tokens
         self.revision = revision
+        self.isConfirmed = isConfirmed
     }
 }
 
@@ -55,7 +58,7 @@ struct SlidingWindowTokenCursor {
 
     mutating func next(
         tokens: [TokenTiming], previous: Int, retained: Int, stable: Int,
-        window: Range<Int>, center: Range<Int>, terminal: Bool = false
+        window: Range<Int>, center: Range<Int>, terminal: Bool = false, isConfirmed: Bool = false
     ) throws
         -> SlidingWindowTokenUpdate
     {
@@ -85,7 +88,7 @@ struct SlidingWindowTokenCursor {
         self.window = window
         self.center = center
         isTerminal = terminal
-        return SlidingWindowTokenUpdate(tokens: tokens, revision: revision)
+        return SlidingWindowTokenUpdate(tokens: tokens, revision: revision, isConfirmed: isConfirmed)
     }
 
     mutating func finish() throws -> SlidingWindowTokenUpdate {
