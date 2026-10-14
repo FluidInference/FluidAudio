@@ -43,7 +43,7 @@ public struct SlidingWindowTokenUpdate: Sendable {
 }
 
 public enum SlidingWindowTokenStreamError: Error, Sendable {
-    case multipleSubscribers, invalidNativeUpdate, invalidLineage
+    case multipleSubscribers, unavailableJob, invalidNativeUpdate, invalidLineage
 }
 
 /// Shared by real publication and contract tests; no text/timestamp deduplication.

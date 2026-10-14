@@ -23,6 +23,8 @@ public actor SlidingWindowAsrManager {
     private var tokenContinuation: AsyncThrowingStream<SlidingWindowTokenUpdate, Error>.Continuation?
     private var tokenSubscriberID: UUID?
     private var tokenCursor = SlidingWindowTokenCursor()
+    private var tokenSubscriptionClosed = false
+    private var hasAcceptedAudio = false
 
     /// One subscriber per manager/job. Subscribe before feeding audio. Failures
     /// terminate this stream rather than silently resuming across lost windows.
@@ -30,6 +32,10 @@ public actor SlidingWindowAsrManager {
         AsyncThrowingStream { continuation in
             guard tokenSubscriberID == nil else {
                 continuation.finish(throwing: SlidingWindowTokenStreamError.multipleSubscribers)
+                return
+            }
+            guard !tokenSubscriptionClosed, !hasAcceptedAudio else {
+                continuation.finish(throwing: SlidingWindowTokenStreamError.unavailableJob)
                 return
             }
             let id = UUID()
@@ -44,10 +50,12 @@ public actor SlidingWindowAsrManager {
     private func clearTokenSubscriber(_ id: UUID) {
         guard tokenSubscriberID == id else { return }
         tokenContinuation = nil
+        tokenSubscriptionClosed = true
         // Do not let a late subscriber reopen lineage without its prefix.
     }
 
     private func failTokenStream(_ error: Error) {
+        tokenSubscriptionClosed = true
         tokenContinuation?.finish(throwing: error)
         tokenContinuation = nil
     }
@@ -267,6 +275,7 @@ public actor SlidingWindowAsrManager {
     /// Stream audio data for transcription
     /// - Parameter buffer: Audio buffer in any format (will be converted to 16kHz mono)
     public func streamAudio(_ buffer: AVAudioPCMBuffer) {
+        hasAcceptedAudio = true
         inputBuilder.yield(buffer)
     }
 
@@ -347,6 +356,7 @@ public actor SlidingWindowAsrManager {
                 throw error
             }
         }
+        tokenSubscriptionClosed = true
         logger.info("Final transcription: \(finalText.count) characters")
         return finalText
     }
@@ -354,8 +364,8 @@ public actor SlidingWindowAsrManager {
     /// Reset the transcriber for a new session
     public func reset() async throws {
         failTokenStream(CancellationError())
-        tokenSubscriberID = nil
-        tokenCursor = SlidingWindowTokenCursor()
+        // Strict streams are single-use: legacy reset must not reopen lineage
+        // while a previous window is still suspended inside inference.
         volatileTranscript = ""
         confirmedTranscript = ""
         processedChunks = 0

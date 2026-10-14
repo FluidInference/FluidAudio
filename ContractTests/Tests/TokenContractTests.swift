@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import XCTest
 @testable import FluidAudio
@@ -142,6 +143,48 @@ final class TokenContractTests: XCTestCase {
         XCTAssertEqual(events.count, 1)
         XCTAssertEqual(events.first?.revision.stableTokenCount, 0)
         XCTAssertEqual(events.first?.revision.isTerminal, true)
+    }
+
+    func testLegacyResetCannotReopenStrictJob() async throws {
+        let manager = SlidingWindowAsrManager()
+        let first = await manager.tokenUpdates
+        try await manager.reset()
+        let second = await manager.tokenUpdates
+        do {
+            for try await _ in first { XCTFail("reset cannot commit") }
+            XCTFail("reset must cancel")
+        } catch is CancellationError {}
+        do {
+            for try await _ in second { XCTFail("reset cannot reopen lineage") }
+            XCTFail("second job must fail")
+        } catch SlidingWindowTokenStreamError.multipleSubscribers {}
+    }
+
+    func testLateSubscriberCannotClaimAlreadyAcceptedAudio() async throws {
+        let manager = SlidingWindowAsrManager()
+        let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: 16_000, channels: 1))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1))
+        buffer.frameLength = 1
+        buffer.floatChannelData?[0][0] = 0
+        await manager.streamAudio(buffer)
+        let stream = await manager.tokenUpdates
+        do {
+            for try await _ in stream { XCTFail("late subscription cannot receive a prefix") }
+            XCTFail("must reject")
+        } catch SlidingWindowTokenStreamError.unavailableJob {}
+        await manager.cancel()
+    }
+
+    func testCancelledOrFinishedLegacyJobCannotAcquireStrictSubscriber() async throws {
+        for cancelled in [true, false] {
+            let manager = SlidingWindowAsrManager()
+            if cancelled { await manager.cancel() } else { _ = try await manager.finish() }
+            let stream = await manager.tokenUpdates
+            do {
+                for try await _ in stream { XCTFail("closed job cannot reopen") }
+                XCTFail("must reject")
+            } catch SlidingWindowTokenStreamError.unavailableJob {}
+        }
     }
 
 }

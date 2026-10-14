@@ -24,7 +24,9 @@ remaining suffix and closes the stream. EOF alone is not permission to commit.
 `cancel()` throws cancellation on this stream without publishing a terminal.
 Conversion, inference or publication failure closes the strict stream with an
 error; subsequent legacy recovery cannot resume its lineage. A second or late
-subscriber cannot steal or reconstruct the missing prefix.
+subscriber cannot steal or reconstruct the missing prefix. Strict streams are
+single-use: legacy reset does not reopen them, and a job that already accepted
+audio, finished or cancelled cannot acquire a new strict subscriber.
 
 The standalone contract suite avoids unrelated CLI/TTS dependencies:
 
