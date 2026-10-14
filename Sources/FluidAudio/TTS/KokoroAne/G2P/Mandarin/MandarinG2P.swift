@@ -98,7 +98,7 @@ public struct MandarinG2P: Sendable {
 
         // Polyphone disambiguation: when a g2pW model is wired and the
         // segmenter flagged candidate Hanzi, run the classifier and
-        // splice in `.bopomofoOverride` cases. The classifier sees the
+        // splice in `.disambiguated` cases. The classifier sees the
         // full normalized sentence so it can pick by context.
         if let g2pw, !result.polyphoneTargets.isEmpty {
             do {
@@ -108,8 +108,14 @@ public struct MandarinG2P: Sendable {
                 )
                 for target in result.polyphoneTargets {
                     guard let bopomofo = picks[target.charPos] else { continue }
-                    let digit = MandarinPolyphoneCatalog.toneDigitForm(bopomofo)
-                    segments[target.segmentIdx] = .bopomofoOverride(digit)
+                    guard let syllable = MandarinBopomofoMap.decode(bopomofo: bopomofo) else {
+                        Self.logger.warning(
+                            "g2pW label '\(bopomofo)' for '\(normalizedChars[target.charPos])' "
+                                + "is not a known syllable — keeping dict pick")
+                        continue
+                    }
+                    segments[target.segmentIdx] = .disambiguated(
+                        syllable, hanzi: normalizedChars[target.charPos])
                 }
             } catch {
                 Self.logger.warning(
@@ -182,13 +188,16 @@ public struct MandarinG2P: Sendable {
                 // silently drop the rest.
                 flushPending()
                 output.append(s)
-            case .bopomofoOverride(let s):
-                // g2pW already encoded the bopomofo + tone — emit
-                // verbatim and break the sandhi window so the next
-                // syllable starts fresh. (Cross-syllable sandhi
-                // through a g2pW pick is a documented limitation.)
-                flushPending()
-                output.append(s)
+            case .disambiguated(var syllable, let hanzi):
+                // A g2pW pick joins the buffer like a dict reading so
+                // sandhi, erhua and the vocab encoding treat it the same.
+                if syllable.base == "er",
+                    MandarinErhua.isSuffix(word: [hanzi], preceding: pendingHanzi)
+                {
+                    syllable.isErhuaSuffix = true
+                }
+                pendingSyllables.append(syllable)
+                pendingHanzi.append(hanzi)
             }
         }
         flushPending()
@@ -234,9 +243,10 @@ public struct MandarinG2P: Sendable {
         case punctuation(String)  // ASCII punctuation passthrough.
         case literal(String)  // Anything else (ASCII letters, digits,
         // already-phonemised bopomofo, etc.)
-        /// Pre-encoded bopomofo + tone digit from a polyphone
-        /// disambiguator. Bypasses normalization and sandhi.
-        case bopomofoOverride(String)
+        /// Single-char reading chosen by the polyphone disambiguator,
+        /// already in `(base, tone)` form. `hanzi` is the source char so
+        /// the erhua pass keeps its context.
+        case disambiguated(MandarinPinyinNormalizer.Syllable, hanzi: Character)
     }
 
     /// Segmentation result: the segment list plus a side-channel of
