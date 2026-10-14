@@ -144,7 +144,7 @@ extension StreamingNemotronMultilingualAsrManager {
             promptIdArray[0] = NSNumber(value: currentPromptIdValue())
 
             let encoderOutput: MLFeatureProvider
-            if #available(macOS 15, iOS 18, *), let state = encoderState as? MLState {
+            if #available(macOS 15, iOS 18, tvOS 18, *), let state = encoderState as? MLState {
                 let statefulInput = try MLDictionaryFeatureProvider(dictionary: [
                     "mel": MLFeatureValue(multiArray: inputMel),
                     "mel_length": MLFeatureValue(multiArray: melLen),
@@ -207,7 +207,7 @@ extension StreamingNemotronMultilingualAsrManager {
         // Stateful (MLState) encoder path is excluded from triple-stage —
         // MLState's session ownership doesn't cross task boundaries cleanly.
         let mlStateActive: Bool
-        if #available(macOS 15, iOS 18, *) {
+        if #available(macOS 15, iOS 18, tvOS 18, *) {
             mlStateActive = (encoderState as? MLState) != nil
         } else {
             mlStateActive = false

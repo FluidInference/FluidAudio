@@ -112,7 +112,7 @@ extension StreamingNemotronMultilingualAsrManager {
             configuration: mlConfiguration
         )
         let encoderIsStateful: Bool
-        if #available(macOS 15, iOS 18, *) {
+        if #available(macOS 15, iOS 18, tvOS 18, *) {
             encoderIsStateful = !encoder.modelDescription.stateDescriptionsByName.isEmpty
             if encoderIsStateful {
                 logger.info("Encoder has MLState — per-stream state will be allocated on consumer init")
@@ -272,7 +272,7 @@ extension StreamingNemotronMultilingualAsrManager {
 
         // Per-stream MLState instance (each stream gets its own).
         // makeState() returns a fresh zero-initialized state.
-        if #available(macOS 15, iOS 18, *) {
+        if #available(macOS 15, iOS 18, tvOS 18, *) {
             if shared.encoderIsStateful {
                 self.encoderState = shared.encoder.makeState()
             }

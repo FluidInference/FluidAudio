@@ -299,7 +299,7 @@ final class AsrModelsTests: XCTestCase {
     }
 
     func testReduxRequiresIOS18() {
-        if #available(macOS 15, iOS 18, *) {
+        if #available(macOS 15, iOS 18, tvOS 18, *) {
             XCTAssertNoThrow(try AsrModels.checkPlatformSupport(for: .redux))
             XCTAssertNoThrow(try AsrModels.checkPlatformSupport(for: .phonon2))
         } else {

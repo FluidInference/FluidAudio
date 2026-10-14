@@ -357,7 +357,7 @@ extension SortformerModels {
             chunkEmbeddings = fp32
         } else {
             #if arch(arm64)
-            if #available(macOS 15.0, iOS 18.0, *),
+            if #available(macOS 15.0, iOS 18.0, tvOS 18.0, *),
                 let fp16 = output.featureValue(for: "chunk_pre_encoder_embs_out")?.shapedArrayValue(of: Float16.self)?
                     .scalars
             {

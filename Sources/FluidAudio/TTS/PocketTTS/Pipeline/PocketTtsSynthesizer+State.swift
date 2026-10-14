@@ -11,7 +11,7 @@ extension PocketTtsSynthesizer {
 
     /// Whether the current OS can run the `.aneState` placement.
     static var isStatePlacementAvailable: Bool {
-        if #available(macOS 15.0, iOS 18.0, *) {
+        if #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) {
             return true
         }
         return false

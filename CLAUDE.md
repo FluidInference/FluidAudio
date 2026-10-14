@@ -178,13 +178,13 @@ FluidAudio/
 - **Stateless ASR**: Each chunk transcribed independently (~14.96s chunks, 2.0s overlap)
 - **Auto-recovery**: Corrupt CoreML model detection and re-download from HuggingFace
 - **Model management**: Models auto-download from HuggingFace on first use. Can be pre-fetched via `swift run fluidaudiocli download`.
-- **Cross-platform**: macOS 14.0+, iOS 17.0+ (library), CLI macOS-only
+- **Cross-platform**: macOS 14.0+, iOS 17.0+, tvOS 17.0+, visionOS 2.0+ (library), CLI macOS-only
 
 ## Platform Requirements
 
 - **Swift**: 5.10+ (Swift 6+ for swift-format)
 - **C++17**: Required for `FastClusterWrapper` (set via `cxxLanguageStandard: .cxx17` in Package.swift)
-- **Platforms**: macOS 14.0+, iOS 17.0+
+- **Platforms**: macOS 14.0+, iOS 17.0+, tvOS 17.0+, visionOS 2.0+
 - **Hardware**: Apple Silicon recommended
 
 ## CI/CD

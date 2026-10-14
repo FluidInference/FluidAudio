@@ -14,6 +14,7 @@ let package = Package(
         .macOS(.v14),
         .iOS(.v17),
         .visionOS(.v2),
+        .tvOS(.v17),
     ],
     products: [
         .library(
@@ -56,7 +57,7 @@ let package = Package(
             dependencies: [
                 "FastClusterWrapper",
                 "MachTaskSelfWrapper",
-                // The prebuilt xcframework has no visionOS slice.
+                // The prebuilt xcframework has no visionOS or tvOS slice.
                 .target(
                     name: "NemoTextProcessing",
                     condition: .when(platforms: [.macOS, .iOS, .macCatalyst], traits: ["NemoTextProcessing"])
