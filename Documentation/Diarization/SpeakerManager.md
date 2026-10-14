@@ -501,9 +501,10 @@ if let avgEmbedding = SpeakerUtilities.averageEmbeddings(embeddingArray) {
 Build one embedding per speaker from clean speech only, to enroll speakers from a finished diarization. Averaging everything a speaker said lets crosstalk, short turns, and clustering mistakes pull the embedding toward another voice.
 
 - Reads `chunkEmbeddings`, one independent embedding per chunk and local speaker. Segment embeddings repeat the chunk's vector or the cluster centroid, so they can't be filtered.
-- Weights each chunk by the speaker's clean speech inside it (their turns minus other speakers' turns) and skips chunks with under 1.5 s of it.
+- A speaker's clean speech is their turns minus other speakers' turns, counted as seconds of audio: `OfflineDiarizerManager`'s windows overlap 80%, so each moment is split between the chunks covering it, and a chunk's share is its weight.
+- Skips chunks with under 1.5 s of clean speech, but still counts their clean speech toward the speaker's total.
 - Keeps the chunks within cosine distance 0.5 of the speaker's medoid chunk (picked by chunk count, not seconds).
-- Returns no embedding when the kept chunks hold under 60% of the speaker's clean speech (likely two people in one cluster), when two chunks disagree, or when under 4 s is kept.
+- Returns no embedding when fewer than 2 chunks are kept (`minChunks`), when the kept chunks hold under 60% of the speaker's clean speech (likely two people in one cluster, including a second voice spread over many short chunks), or when they hold under 4 s.
 
 ```swift
 var config = DiarizerConfig.default

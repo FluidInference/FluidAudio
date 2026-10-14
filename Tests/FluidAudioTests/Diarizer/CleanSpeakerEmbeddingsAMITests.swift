@@ -3,12 +3,13 @@ import XCTest
 
 @testable import FluidAudio
 
-/// `SpeakerUtilities.cleanEmbeddingsBySpeaker` on real meetings with the real `DiarizerManager` models.
+/// `SpeakerUtilities.cleanEmbeddingsBySpeaker` on real meetings with the real `DiarizerManager` and
+/// `OfflineDiarizerManager` models (the offline windows overlap 80%, so clean speech must count as audio).
 ///
 /// Opt-in: set `FLUIDAUDIO_AMI_FIXTURES` to a directory of meetings, each `<meeting>/audio.wav` plus
 /// `<meeting>/turns.json` (reference turns: `[{"speaker": "MEE071", "start": 0.0, "end": 1.37}, ...]`,
-/// e.g. exported from the AMI corpus). Each diarizer speaker is mapped to the reference speaker it overlaps
-/// most, and each chunk to the reference speaker who talks most inside its span.
+/// e.g. exported from the AMI corpus). Each chunk is labeled with the reference speaker who talks most inside
+/// its span, and turns come from the reference, so the tests measure this function, not clustering.
 final class CleanSpeakerEmbeddingsAMITests: XCTestCase {
 
     private struct Turn: Decodable, Sendable {
@@ -20,26 +21,31 @@ final class CleanSpeakerEmbeddingsAMITests: XCTestCase {
     private struct Meeting: Sendable {
         let id: String
         let result: DiarizationResult
+        let offline: DiarizationResult
         let turns: [Turn]
-        /// Reference speaker for each chunk embedding (by most speech inside its span).
-        let chunkSpeaker: [String]
 
-        /// The real chunk embeddings, labeled with reference speakers and reference turns, so tests measure
-        /// `cleanEmbeddingsBySpeaker` and not the diarizer's clustering.
+        /// `DiarizerManager`'s chunk embeddings, labeled with reference speakers and reference turns.
         var labeled: DiarizationResult { labeled(minTurn: 0) }
+
+        /// `OfflineDiarizerManager`'s overlapping windows, labeled the same way.
+        var offlineLabeled: DiarizationResult { Self.label(offline, turns: turns, minTurn: 0) }
 
         /// `labeled`, keeping only turns of `minTurn` seconds or more: `DiarizerManager` drops turns under
         /// `minSpeechDuration` (1 s), so other speakers' short interjections aren't subtracted.
-        func labeled(minTurn: Double) -> DiarizationResult {
+        func labeled(minTurn: Double) -> DiarizationResult { Self.label(result, turns: turns, minTurn: minTurn) }
+
+        static func label(_ result: DiarizationResult, turns: [Turn], minTurn: Double) -> DiarizationResult {
             DiarizationResult(
                 segments: turns.filter { $0.end - $0.start >= minTurn }.map {
                     TimedSpeakerSegment(
                         speakerId: $0.speaker, embedding: [], startTimeSeconds: Float($0.start),
                         endTimeSeconds: Float($0.end), qualityScore: 1)
                 },
-                chunkEmbeddings: zip(result.chunkEmbeddings ?? [], chunkSpeaker).map { chunk, speaker in
+                chunkEmbeddings: (result.chunkEmbeddings ?? []).map { chunk in
                     ChunkEmbedding(
-                        speakerId: speaker, chunkIndex: chunk.chunkIndex, speakerIndex: chunk.speakerIndex,
+                        speakerId: CleanSpeakerEmbeddingsAMITests.reference(
+                            in: (chunk.startTimeSeconds, chunk.endTimeSeconds), turns: turns),
+                        chunkIndex: chunk.chunkIndex, speakerIndex: chunk.speakerIndex,
                         startTimeSeconds: chunk.startTimeSeconds, endTimeSeconds: chunk.endTimeSeconds,
                         embedding256: chunk.embedding256)
                 })
@@ -65,6 +71,10 @@ final class CleanSpeakerEmbeddingsAMITests: XCTestCase {
         config.exposeChunkEmbeddings = true
         let diarizer = DiarizerManager(config: config)
         diarizer.initialize(models: models)
+        var offlineConfig = OfflineDiarizerConfig.default
+        offlineConfig.exposeChunkEmbeddings = true
+        let offlineDiarizer = OfflineDiarizerManager(config: offlineConfig)
+        try await offlineDiarizer.prepareModels()
 
         var out: [Meeting] = []
         let dirs = try FileManager.default.contentsOfDirectory(
@@ -79,10 +89,8 @@ final class CleanSpeakerEmbeddingsAMITests: XCTestCase {
             guard Set(turns.map(\.speaker)).count >= 2 else { continue }
             let samples = try AudioConverter().resampleAudioFile(audio)
             let result = try diarizer.performCompleteDiarization(samples)
-            let chunkSpeaker = (result.chunkEmbeddings ?? []).map { chunk in
-                Self.reference(in: (chunk.startTimeSeconds, chunk.endTimeSeconds), turns: turns)
-            }
-            out.append(Meeting(id: dir.lastPathComponent, result: result, turns: turns, chunkSpeaker: chunkSpeaker))
+            let offline = try await offlineDiarizer.process(audio: samples)
+            out.append(Meeting(id: dir.lastPathComponent, result: result, offline: offline, turns: turns))
         }
         return out
     }
@@ -91,18 +99,6 @@ final class CleanSpeakerEmbeddingsAMITests: XCTestCase {
         var talk: [String: Double] = [:]
         for t in turns { talk[t.speaker, default: 0] += max(0, min(t.end, span.1) - max(t.start, span.0)) }
         return talk.max { $0.value < $1.value }?.key ?? ""
-    }
-
-    /// The reference speaker each diarizer speaker overlaps most.
-    private func mapping(_ m: Meeting) -> [String: String] {
-        var overlap: [String: [String: Double]] = [:]
-        for s in m.result.segments {
-            for t in m.turns {
-                let o = min(Double(s.endTimeSeconds), t.end) - max(Double(s.startTimeSeconds), t.start)
-                if o > 0 { overlap[s.speakerId, default: [:]][t.speaker, default: 0] += o }
-            }
-        }
-        return overlap.compactMapValues { $0.max { $0.value < $1.value }?.key }
     }
 
     /// Relabels two diarizer speakers as one, as a clustering merge would.
@@ -139,7 +135,8 @@ final class CleanSpeakerEmbeddingsAMITests: XCTestCase {
                 segments: labeled.segments, chunkEmbeddings: chunks.filter { $0.startTimeSeconds > end / 2 })
             for chunk in late.chunkEmbeddings ?? [] where embeddings[chunk.speakerId] != nil {
                 let alone = DiarizationResult(segments: labeled.segments, chunkEmbeddings: [chunk])
-                guard !SpeakerUtilities.cleanEmbeddingsBySpeaker(alone, minTotalCleanSpeech: 0).isEmpty else {
+                guard !SpeakerUtilities.cleanEmbeddingsBySpeaker(alone, minTotalCleanSpeech: 0, minChunks: 1).isEmpty
+                else {
                     continue
                 }
                 let best = embeddings.max {
@@ -256,5 +253,65 @@ final class CleanSpeakerEmbeddingsAMITests: XCTestCase {
                     format: "[clean-embeddings] pair distance %.1f: same %.1f%%, different %.1f%%", t, 100 * keep,
                     100 * leak))
         }
+    }
+
+    /// The offline pipeline's windows overlap 80%: counted as audio, its embeddings should be the same
+    /// voices as `DiarizerManager`'s and identify held-out windows as well.
+    func testOfflineOverlappingWindows() async throws {
+        var right = 0
+        var total = 0
+        var agreement: [Float] = []
+        var withheld = 0
+        var majority = 0
+        var worstLeak: Float = -1
+        for m in try await meetings() {
+            let windows = m.offlineLabeled.chunkEmbeddings ?? []
+            let spans = windows.map { $0.endTimeSeconds - $0.startTimeSeconds }
+            print(
+                "[clean-embeddings] \(m.id) offline: \(windows.count) windows, \(String(format: "%.1f", spans.max() ?? 0)) s long"
+            )
+            let offline = SpeakerUtilities.cleanEmbeddingsBySpeaker(m.offlineLabeled)
+            let online = SpeakerUtilities.cleanEmbeddingsBySpeaker(m.labeled)
+            for (speaker, e) in offline { if let o = online[speaker] { agreement.append(similarity(e, o)) } }
+
+            guard let end = windows.map(\.endTimeSeconds).max() else { continue }
+            let early = DiarizationResult(
+                segments: m.offlineLabeled.segments, chunkEmbeddings: windows.filter { $0.endTimeSeconds <= end / 2 })
+            let embeddings = SpeakerUtilities.cleanEmbeddingsBySpeaker(early)
+            for w in windows where w.startTimeSeconds > end / 2 && embeddings[w.speakerId] != nil {
+                let best = embeddings.max {
+                    similarity(w.embedding256, $0.value) < similarity(w.embedding256, $1.value)
+                }!.key
+                right += best == w.speakerId ? 1 : 0
+                total += 1
+            }
+
+            let ids = offline.keys.sorted()
+            for (i, a) in ids.enumerated() {
+                for b in ids[(i + 1)...] {
+                    guard
+                        let merged = SpeakerUtilities.cleanEmbeddingsBySpeaker(merging(a, b, in: m.offlineLabeled))[
+                            "merged"]
+                    else {
+                        withheld += 1
+                        continue
+                    }
+                    majority += 1
+                    let leak =
+                        min(similarity(merged, offline[a]!), similarity(merged, offline[b]!))
+                        - similarity(offline[a]!, offline[b]!)
+                    worstLeak = max(worstLeak, leak)
+                }
+            }
+        }
+        print(
+            "[clean-embeddings] offline vs DiarizerManager embeddings, same speaker: \(agreement.sorted().map { String(format: "%.2f", $0) })"
+        )
+        print(
+            "[clean-embeddings] offline held-out windows identified \(right)/\(total); merged: \(withheld) withheld, \(majority) majority, worst leak \(worstLeak)"
+        )
+        XCTAssertGreaterThan(total, 50)
+        XCTAssertGreaterThan(Double(right) / Double(total), 0.75)
+        XCTAssertLessThan(worstLeak, 0.1, "no merged pair blends toward the other voice")
     }
 }
