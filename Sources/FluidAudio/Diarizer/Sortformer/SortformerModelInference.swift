@@ -1,3 +1,4 @@
+#if Diarizer
 @preconcurrency import CoreML
 import Foundation
 import OSLog
@@ -376,3 +377,4 @@ extension SortformerModels {
         )
     }
 }
+#endif

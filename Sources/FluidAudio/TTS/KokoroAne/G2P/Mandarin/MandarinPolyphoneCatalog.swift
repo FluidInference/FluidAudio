@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Loader / lookup for `POLYPHONIC_CHARS.txt`, the pronunciation
@@ -177,3 +178,4 @@ public struct MandarinPolyphoneCatalog: Sendable {
         }
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -267,3 +268,4 @@ public actor StyleTTS2ModelStore {
         }
     }
 }
+#endif

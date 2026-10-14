@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Pure host-side math for the LuxTTS pipeline: ratio-based duration
@@ -64,3 +65,4 @@ public enum LuxTtsSolver {
         }
     }
 }
+#endif

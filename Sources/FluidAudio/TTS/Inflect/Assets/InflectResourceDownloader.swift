@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Downloads Inflect v2 CoreML bundles from
@@ -56,3 +57,4 @@ extension InflectVariant {
         }
     }
 }
+#endif

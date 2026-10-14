@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -436,3 +437,4 @@ public actor StyleTTS2Synthesizer {
         return descMap.keys.sorted()
     }
 }
+#endif

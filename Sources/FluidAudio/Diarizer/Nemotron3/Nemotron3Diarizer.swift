@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 import Foundation
 
@@ -458,3 +459,4 @@ struct Nemotron3StreamingFrontend {
         }
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 import CoreML
 import Foundation
 import os
@@ -274,3 +275,4 @@ actor G2PModel {
         logger.info("Loaded G2P CoreML models")
     }
 }
+#endif

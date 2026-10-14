@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Compile-time constants for the Chatterbox Nano backend (beta model
@@ -67,7 +68,9 @@ public enum ChatterboxNanoConstants {
 
     public static let defaultVoice = "default"
 }
+#endif
 
+// Outside the `TTS` guard: `ModelNames.ChatterboxNano` keys required-file sets on this.
 /// Which S3Gen flow/vocoder bucket pair to download and load. The flow
 /// bucket holds `voice prompt tokens + generated speech tokens + 3 silence
 /// tokens`, so the audio each capacity can generate depends on the voice:
@@ -96,10 +99,14 @@ public enum ChatterboxNanoOutputCapacity: String, CaseIterable, Sendable {
 
     /// Mel frames produced by the flow bucket (2 per token) = HiFT bucket.
     public var melFrameBucket: Int { 2 * flowTokenBucket }
+}
 
+#if TTS
+extension ChatterboxNanoOutputCapacity {
     /// Speech tokens available for generation once `promptTokens` (the
     /// loaded voice's prompt) and the appended silence tokens are counted.
     public func generationBudget(promptTokens: Int) -> Int {
         max(0, flowTokenBucket - promptTokens - ChatterboxNanoConstants.silenceTokenCount)
     }
 }
+#endif

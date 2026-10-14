@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -125,3 +126,4 @@ struct ChatterboxModels: Sendable {
         return root
     }
 }
+#endif

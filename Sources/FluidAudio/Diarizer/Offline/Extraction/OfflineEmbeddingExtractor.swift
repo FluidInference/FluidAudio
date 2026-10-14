@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 import CoreML
 import Foundation
@@ -1061,3 +1062,4 @@ struct OfflineEmbeddingExtractor {
         return 0
     }
 }
+#endif

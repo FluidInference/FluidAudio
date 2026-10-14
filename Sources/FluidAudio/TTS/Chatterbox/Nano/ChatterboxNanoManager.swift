@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Public API for Chatterbox Nano synthesis (ResembleAI, 110M, English,
@@ -84,3 +85,4 @@ public actor ChatterboxNanoManager {
         return Audio(samples: result.samples, sampleRate: ChatterboxNanoConstants.sampleRate)
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Downloads StyleTTS2 LibriTTS (iteration_3) CoreML models from HuggingFace.
@@ -158,3 +159,4 @@ public enum StyleTTS2ResourceDownloader {
         return root
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// User-supplied pronunciation overrides for the Mandarin
@@ -240,3 +241,4 @@ public struct MandarinCustomLexicon: Sendable, Equatable {
         return set
     }()
 }
+#endif

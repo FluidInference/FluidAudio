@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 import CoreML
 import Accelerate
@@ -161,3 +162,4 @@ public enum LSEENDError: Error, LocalizedError {
     case invalidInputSize(String)
     case notInitialized
 }
+#endif

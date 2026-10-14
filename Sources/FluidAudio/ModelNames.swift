@@ -973,6 +973,7 @@ public enum ModelNames {
                 }
             }
 
+            #if Diarizer
             public var defaultConfiguration: SortformerConfig {
                 switch self {
                 case .fastV2:
@@ -991,6 +992,7 @@ public enum ModelNames {
                     return .efficientV2_1
                 }
             }
+            #endif
 
             /// Compiled-model path for this variant at the default (`.fp16`) precision.
             public var fileName: String {
@@ -1002,9 +1004,11 @@ public enum ModelNames {
                 return "\(precision.subdirectory)/\(name).mlmodelc"
             }
 
+            #if Diarizer
             public func isCompatible(with config: SortformerConfig) -> Bool {
                 defaultConfiguration.isCompatible(with: config)
             }
+            #endif
         }
 
         /// Repo subdirectory holding the default (`.fp16`) model set. Both v3 sets are the
@@ -1027,6 +1031,7 @@ public enum ModelNames {
             return variant.fileName(precision: precision)
         }
 
+        #if Diarizer
         /// Bundle name for a given configuration (honors `config.precision`)
         public static func bundle(for config: SortformerConfig) -> String? {
             guard let variant = config.modelVariant else {
@@ -1035,6 +1040,7 @@ public enum ModelNames {
             assert(variant.isCompatible(with: config), "ERROR: Model variant and configuration are not compatible.")
             return variant.fileName(precision: config.precision)
         }
+        #endif
 
         /// Default bundle name
         public static var defaultBundle: String {
@@ -1455,10 +1461,13 @@ public enum ModelNames {
             "synthesizer_f\(frames).mlmodelc"
         }
 
+        /// Synthesizer frame buckets; `InflectConstants.frameBuckets` reads these.
+        public static let frameBuckets = [256, 384, 512, 640, 768, 896, 1024, 2048]
+
         /// Encoder + all 8 synthesizer buckets (downloaded up front; buckets
-        /// load lazily). Buckets mirror `InflectConstants.frameBuckets`.
+        /// load lazily).
         public static let requiredModels: Set<String> = Set(
-            [encoderFile] + InflectConstants.frameBuckets.map { synthesizerFile(frames: $0) })
+            [encoderFile] + frameBuckets.map { synthesizerFile(frames: $0) })
     }
 
     /// Paradee-8M model names. File names match

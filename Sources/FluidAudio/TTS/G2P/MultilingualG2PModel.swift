@@ -1,3 +1,4 @@
+#if TTS
 import CoreML
 import Foundation
 import os
@@ -220,3 +221,4 @@ public actor MultilingualG2PModel {
         logger.info("Loaded multilingual G2P CoreML models from \(modelsDir.path)")
     }
 }
+#endif

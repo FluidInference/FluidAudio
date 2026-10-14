@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 
 /// Cacheable result of deterministic segmentation and embedding extraction.
@@ -24,3 +25,4 @@ public struct PreparedDiarization: Sendable {
 
     public var segmentationChunkCount: Int { segmentation.numChunks }
 }
+#endif

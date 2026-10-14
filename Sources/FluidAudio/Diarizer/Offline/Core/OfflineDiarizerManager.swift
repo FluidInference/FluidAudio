@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 @preconcurrency import CoreML
 import Foundation
@@ -1043,3 +1044,4 @@ public final class OfflineDiarizerManager {
         logger.info("Exported \(payload.count) embeddings to \(path)")
     }
 }
+#endif

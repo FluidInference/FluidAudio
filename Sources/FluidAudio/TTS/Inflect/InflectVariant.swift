@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Inflect v2 model size. Both share the same pipeline, symbol table, and
@@ -13,3 +14,4 @@ public enum InflectVariant: String, Sendable, CaseIterable {
     /// Subdirectory under `FluidInference/inflect-v2-coreml/`.
     public var subdirectory: String { rawValue }
 }
+#endif

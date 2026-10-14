@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 
 /// Utility helpers to resample soft VAD weights with the same half-pixel offset
@@ -145,3 +146,4 @@ enum WeightInterpolation {
         return resample(input, to: outputLength)
     }
 }
+#endif

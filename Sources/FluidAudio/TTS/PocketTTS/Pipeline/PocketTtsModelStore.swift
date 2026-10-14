@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -548,3 +549,4 @@ public actor PocketTtsModelStore {
         return data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
     }
 }
+#endif

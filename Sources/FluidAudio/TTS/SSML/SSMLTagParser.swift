@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Regex-based parser for SSML tags
@@ -118,3 +119,4 @@ enum SSMLTagParser {
         return nsText.substring(with: groupRange)
     }
 }
+#endif

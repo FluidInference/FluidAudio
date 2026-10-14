@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Compile-time constants for the NeuTTS-2E backend (emotional English TTS).
@@ -40,3 +41,4 @@ public enum NeuTtsConstants {
     public static let kvHeads = 4
     public static let headDim = 128
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Minimal SentencePiece unigram tokenizer for PocketTTS.
@@ -154,3 +155,4 @@ public struct SentencePieceTokenizer: Sendable {
         return ids
     }
 }
+#endif

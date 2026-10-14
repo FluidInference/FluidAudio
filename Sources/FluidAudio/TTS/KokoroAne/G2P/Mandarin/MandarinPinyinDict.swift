@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Hanzi → pinyin lookup, loaded from the binary `.bin` files shipped at
@@ -143,3 +144,4 @@ public struct MandarinPinyinDict: Sendable {
         return MandarinPinyinDict(phrases: phrases, singles: singles)
     }
 }
+#endif

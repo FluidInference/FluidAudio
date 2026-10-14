@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Splits a phoneme / IPA string into chunks that each fit a model's input
@@ -100,3 +101,4 @@ enum PhonemeChunker {
         if !text.isEmpty { chunks.append(text) }
     }
 }
+#endif

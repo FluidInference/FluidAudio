@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Languages supported by the CharsiuG2P ByT5 multilingual model,
@@ -51,3 +52,4 @@ public enum MultilingualG2PLanguage: String, CaseIterable, Sendable {
         }
     }
 }
+#endif

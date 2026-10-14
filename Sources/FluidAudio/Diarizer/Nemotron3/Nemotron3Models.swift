@@ -1,3 +1,4 @@
+#if Diarizer
 @preconcurrency import CoreML
 import Accelerate
 import Foundation
@@ -517,3 +518,4 @@ public struct Nemotron3Models {
         return result
     }
 }
+#endif

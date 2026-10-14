@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Pure-Swift port of `mobius/styletts2/text_utils.py::TextCleaner`.
@@ -69,3 +70,4 @@ public enum StyleTTS2TextCleaner {
     /// Total symbol count (used by tests + as a sanity check on shape).
     public static var vocabularySize: Int { symbols.count }
 }
+#endif

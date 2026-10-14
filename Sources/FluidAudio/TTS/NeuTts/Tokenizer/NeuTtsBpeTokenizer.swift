@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Minimal byte-level BPE encoder for the NeuTTS-2E (Qwen2-style) tokenizer.
@@ -175,3 +176,4 @@ final class NeuTtsBpeTokenizer: Sendable {
         return byteToScalar.map { String(UnicodeScalar($0)!) }
     }
 }
+#endif

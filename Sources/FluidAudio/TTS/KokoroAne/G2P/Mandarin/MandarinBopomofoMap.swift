@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Pinyin syllable → Bopomofo + tone digit string, matching
@@ -202,3 +203,4 @@ public enum MandarinBopomofoMap {
         return ("", syllable)
     }
 }
+#endif

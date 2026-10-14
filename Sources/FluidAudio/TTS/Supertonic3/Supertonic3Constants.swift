@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Compile-time constants for the Supertonic-3 multilingual TTS pipeline.
@@ -105,3 +106,4 @@ public enum Supertonic3Constants {
     /// Languages that should use the tighter `maxChunkLengthCJK` (57-char) chunker.
     public static let cjkLanguages: Set<String> = ["ko", "ja"]
 }
+#endif

@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 
 /// Re-centers FBANK features on the frames that hold signal (#981).
@@ -54,3 +55,4 @@ enum SilenceAwareFbank {
         return true
     }
 }
+#endif

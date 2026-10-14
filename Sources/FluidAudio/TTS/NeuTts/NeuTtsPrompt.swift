@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Prompt construction for NeuTTS-2E, mirroring upstream
@@ -105,3 +106,4 @@ struct NeuTtsPrompt {
         }
     }
 }
+#endif

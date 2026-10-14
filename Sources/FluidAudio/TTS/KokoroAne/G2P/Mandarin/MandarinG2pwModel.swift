@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -180,3 +181,4 @@ public actor MandarinG2pwModel {
         return out
     }
 }
+#endif

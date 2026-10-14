@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Karras-noise + ADPM2-step helpers for the StyleTTS2 fused diffusion sampler.
@@ -79,3 +80,4 @@ public struct StyleTTS2NoiseSource: Sendable {
         return out
     }
 }
+#endif

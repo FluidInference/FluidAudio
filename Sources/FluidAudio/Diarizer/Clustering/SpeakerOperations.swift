@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 import Foundation
 import OSLog
@@ -592,3 +593,4 @@ extension SpeakerManager {
         return (speakers.count, totalDuration, min(1.0, averageConfidence), speakersWithHistory)
     }
 }
+#endif

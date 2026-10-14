@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 
 /// pyannote-parity constrained assignment (`constrained_argmax`): within a
@@ -41,3 +42,4 @@ enum ConstrainedClusterAssignment {
         return assignments
     }
 }
+#endif

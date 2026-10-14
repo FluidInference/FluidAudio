@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -259,3 +260,4 @@ struct SplitMix64 {
         Double(next() >> 11) * (1.0 / 9_007_199_254_740_992.0)
     }
 }
+#endif

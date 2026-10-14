@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Hanzi → Bopomofo + tone-digit string for the Kokoro v1.1-zh
@@ -464,3 +465,4 @@ public struct MandarinG2P: Sendable {
         return out.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
+#endif

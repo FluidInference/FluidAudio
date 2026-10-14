@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Public API for Chatterbox Multilingual synthesis (ResembleAI, 24 kHz).
@@ -74,3 +75,4 @@ public actor ChatterboxManager {
         return Audio(samples: result.samples, sampleRate: ChatterboxConstants.sampleRate)
     }
 }
+#endif

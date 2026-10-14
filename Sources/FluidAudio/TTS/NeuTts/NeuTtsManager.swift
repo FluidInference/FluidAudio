@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Public API for NeuTTS-2E synthesis (emotional English TTS, 24 kHz).
@@ -68,3 +69,4 @@ public actor NeuTtsManager {
         return Audio(samples: result.samples, sampleRate: NeuTtsConstants.sampleRate)
     }
 }
+#endif
