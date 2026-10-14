@@ -140,4 +140,16 @@ final class CohereLongFormTests: XCTestCase {
         let merged = CoherePipeline.mergeTokenStreams(prefix: prefix, suffix: suffix)
         XCTAssertEqual(merged, body + overlap + Array(3000..<3150))
     }
+
+    func testMergeIgnoresChancePhraseFarFromTheSeam() {
+        // A common 4-token phrase sits at the very start of the prefix window
+        // and at the very end of the suffix window. Cutting there would drop
+        // ~90 tokens; the cut distance exceeds the window, so the match is
+        // treated as a chance repeat and the streams are concatenated.
+        let phrase = [7, 8, 9, 10]
+        let prefix = Array(0..<100) + phrase + Array(200..<244)
+        let suffix = Array(300..<344) + phrase + Array(400..<460)
+        let merged = CoherePipeline.mergeTokenStreams(prefix: prefix, suffix: suffix)
+        XCTAssertEqual(merged, prefix + suffix)
+    }
 }

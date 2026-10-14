@@ -1368,11 +1368,7 @@ public enum TtsBenchmarkCommand {
         // pass the Models base dir and let it land the bundle at `target`.
         let modelsBase = appSupport.appendingPathComponent("FluidAudio/Models")
         let target = modelsBase.appendingPathComponent("cohere-transcribe/q8")
-        let needed = [
-            ModelNames.CohereTranscribe.encoderCompiledFile,
-            ModelNames.CohereTranscribe.decoderCacheExternalV2CompiledFile,
-            "vocab.json",
-        ]
+        let needed = Array(ModelNames.CohereTranscribe.requiredModels)
         func missingFiles() -> [String] {
             needed.filter { name in
                 !FileManager.default.fileExists(
@@ -1514,7 +1510,6 @@ public enum TtsBenchmarkCommand {
                         audio: samples,
                         models: models,
                         language: language,
-                        maxNewTokens: 108,
                         repetitionPenalty: 1.1,
                         noRepeatNgram: 3)
                     return r.text

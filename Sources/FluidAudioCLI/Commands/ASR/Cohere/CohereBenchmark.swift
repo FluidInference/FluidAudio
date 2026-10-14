@@ -168,7 +168,7 @@ enum CohereBenchmark {
         logger.info("  Decoder dir:      \(decDir)")
         logger.info("  Vocab dir:        \(vocDir)")
         logger.info("  Max files:        \(maxFiles?.description ?? "all")")
-        logger.info("  Max tokens:       \(maxTokens.map(String.init) ?? "cache − prompt")")
+        logger.info("  Max tokens:       \(maxTokens.map(String.init) ?? "cache capacity")")
         logger.info("  Rep penalty:      \(repetitionPenalty)")
         logger.info("  No-repeat-ngram:  \(noRepeatNgram)")
         logger.info("  Auto-download:    \(autoDownload)")
@@ -703,7 +703,7 @@ enum CohereBenchmark {
 
             Decode:
                 --max-tokens <n>                Max decoded tokens per 35 s window
-                                                (default: decoder cache length − prompt)
+                                                (default: all the cache holds — 99 v2, 247 v3)
                 --repetition-penalty <f>        CTRL-style penalty, 1.0 disables (default: 1.1)
                 --no-repeat-ngram <n>           Forbid repeating n-grams, 0 disables (default: 3)
 

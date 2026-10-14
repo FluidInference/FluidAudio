@@ -337,9 +337,11 @@ public actor CoherePipeline {
         /// model's input shape.
         public let decoderVariant: DecoderVariant
         /// KV-cache slots in the loaded decoder (`k_cache_0` shape `[1, H, slots, D]`).
-        /// Shared by the language prompt and the generated tokens, so the
-        /// longest possible output per 35 s window is `cacheLength - prompt.count`.
+        /// Shared by the language prompt and the generated tokens; see
+        /// `resolveMaxNewTokens` for the resulting output budget.
         public let cacheLength: Int
+        /// Element type the decoder was compiled with for its caches and masks.
+        public let cacheDataType: MLMultiArrayDataType
     }
 
     private let melExtractor: CohereMelSpectrogram
@@ -420,6 +422,9 @@ public actor CoherePipeline {
 
         let cacheLength = try Self.probeCacheLength(
             decoder: decoder, variant: decoderVariant, path: decoderURL.path)
+        let cacheDataType =
+            decoder.modelDescription.inputDescriptionsByName["k_cache_0"]?
+            .multiArrayConstraint?.dataType ?? .float16
         pipelineLogger.info("Decoder \(decoderVariant): \(cacheLength)-slot KV cache")
 
         let vocab = try loadVocabulary(vocabDir: vocabDir)
@@ -428,7 +433,8 @@ public actor CoherePipeline {
             decoder: decoder,
             vocabulary: vocab,
             decoderVariant: decoderVariant,
-            cacheLength: cacheLength)
+            cacheLength: cacheLength,
+            cacheDataType: cacheDataType)
     }
 
     /// Read the KV-cache length from the decoder's `k_cache_0` input shape
@@ -440,20 +446,20 @@ public actor CoherePipeline {
     ) throws -> Int {
         let inputs = decoder.modelDescription.inputDescriptionsByName
         guard let kDesc = inputs["k_cache_0"], kDesc.type == .multiArray,
-            let kShape = kDesc.multiArrayConstraint?.shape, kShape.count == 4
+            let kConstraint = kDesc.multiArrayConstraint, kConstraint.shape.count == 4
         else {
             throw CohereAsrError.decodingFailed(
                 "Decoder at \(path) is not cache-external (missing rank-4 k_cache_0).")
         }
-        let slots = kShape[2].intValue
+        let slots = Self.maxExtent(of: kConstraint, dimension: 2)
         guard slots > 0 else {
             throw CohereAsrError.decodingFailed(
-                "Decoder at \(path) declares an empty KV cache (k_cache_0 shape \(kShape)).")
+                "Decoder at \(path) declares an empty KV cache (k_cache_0 shape \(kConstraint.shape)).")
         }
         if variant.usesStaticSelfMask {
             guard let mDesc = inputs["attention_mask"], mDesc.type == .multiArray,
-                let mShape = mDesc.multiArrayConstraint?.shape,
-                let maskLen = mShape.last?.intValue, maskLen == slots
+                let mConstraint = mDesc.multiArrayConstraint, !mConstraint.shape.isEmpty,
+                Self.maxExtent(of: mConstraint, dimension: mConstraint.shape.count - 1) == slots
             else {
                 throw CohereAsrError.decodingFailed(
                     "Decoder at \(path): static attention_mask length does not match the "
@@ -461,6 +467,40 @@ public actor CoherePipeline {
             }
         }
         return slots
+    }
+
+    /// Largest size an input can take along `dimension`: the declared size for
+    /// a fixed shape, the upper bound of a range, or the widest enumerated
+    /// shape. The shipped exports are fixed-shape; the fallback keeps a
+    /// flexible export from reporting its (small) default shape as capacity.
+    static func maxExtent(of constraint: MLMultiArrayConstraint, dimension: Int) -> Int {
+        return maxExtent(
+            shape: constraint.shape,
+            shapeConstraint: constraint.shapeConstraint,
+            dimension: dimension)
+    }
+
+    static func maxExtent(
+        shape: [NSNumber], shapeConstraint: MLMultiArrayShapeConstraint?, dimension: Int
+    ) -> Int {
+        guard dimension >= 0, dimension < shape.count else { return 0 }
+        guard let shapeConstraint else { return shape[dimension].intValue }
+        switch shapeConstraint.type {
+        case .range:
+            let ranges = shapeConstraint.sizeRangeForDimension
+            guard dimension < ranges.count else { return shape[dimension].intValue }
+            let range = ranges[dimension].rangeValue
+            return range.location + range.length - 1
+        case .enumerated:
+            let widest = shapeConstraint.enumeratedShapes.compactMap { shape -> Int? in
+                dimension < shape.count ? shape[dimension].intValue : nil
+            }.max()
+            return widest ?? shape[dimension].intValue
+        case .unspecified:
+            return shape[dimension].intValue
+        @unknown default:
+            return shape[dimension].intValue
+        }
     }
 
     private static func loadVocabulary(vocabDir: URL) throws -> [Int: String] {
@@ -495,14 +535,25 @@ public actor CoherePipeline {
     }
 
     /// Output-token budget for one window: the caller's `maxNewTokens` if
-    /// given, otherwise everything the KV cache can hold after the prompt.
-    /// Either way the budget never exceeds the cache.
+    /// given, otherwise everything the KV cache can hold. The decode loop
+    /// runs at most `cacheLength` steps (one cache slot each); the last
+    /// prompt step already yields the first output, so the prompt costs
+    /// `promptCount - 1` steps and the capacity is `cacheLength - promptCount + 1`
+    /// (99 with a 108-slot cache, 247 with 256). Either way the budget never
+    /// exceeds the cache.
     static func resolveMaxNewTokens(
         requested: Int?, cacheLength: Int, promptCount: Int
     ) -> Int {
-        let capacity = max(0, cacheLength - promptCount)
+        let capacity = max(0, cacheLength - promptCount + 1)
         guard let requested = requested else { return capacity }
         return max(0, min(requested, capacity))
+    }
+
+    /// Decode steps needed to emit `maxNewTokens` outputs after a
+    /// `promptCount`-token prompt, bounded by the cache. Outputs start at step
+    /// `promptCount - 1`, so `steps - (promptCount - 1)` tokens come out.
+    static func decodeStepCount(maxNewTokens: Int, promptCount: Int, cacheLength: Int) -> Int {
+        return max(0, min(maxNewTokens + promptCount - 1, cacheLength))
     }
 
     public func transcribe(
@@ -544,6 +595,7 @@ public actor CoherePipeline {
             noRepeatNgram: noRepeatNgram,
             decoder: models.decoder,
             cacheLength: models.cacheLength,
+            cacheDType: models.cacheDataType,
             useStaticSelfMask: models.decoderVariant.usesStaticSelfMask)
         let decoderSecs = CFAbsoluteTimeGetCurrent() - dec0
         if decoded.hitCap {
@@ -671,6 +723,12 @@ public actor CoherePipeline {
     /// Ties between equally long runs go to the one closest to the prefix's
     /// end, so a phrase repeated inside the prefix window does not cut the
     /// seam early and drop the text between its two occurrences.
+    ///
+    /// For a genuine seam the prefix tokens after the run plus the suffix
+    /// tokens up to the run's end together cover the overlap audio once, so
+    /// their sum is about the overlap's token count (~30 for dense speech). A
+    /// match whose cut would drop more than `windowTokens` tokens in total is
+    /// a chance repeat of a common phrase, not the seam, and is ignored.
     static func mergeTokenStreams(
         prefix: [Int],
         suffix: [Int],
@@ -712,10 +770,11 @@ public actor CoherePipeline {
         }
 
         guard bestLen >= minMatch else { return prefix + suffix }
+        let prefixDrop = m - bestPEnd
+        guard prefixDrop + bestSEnd <= windowTokens else { return prefix + suffix }
 
         // Cut both streams at the end of the matched run.
-        let prefixKeep = prefix.count - (m - bestPEnd)
-        return Array(prefix.prefix(prefixKeep)) + Array(suffix.dropFirst(bestSEnd))
+        return Array(prefix.prefix(prefix.count - prefixDrop)) + Array(suffix.dropFirst(bestSEnd))
     }
 
     // MARK: Encoder
@@ -777,6 +836,7 @@ public actor CoherePipeline {
         noRepeatNgram: Int,
         decoder: MLModel,
         cacheLength: Int,
+        cacheDType: MLMultiArrayDataType,
         useStaticSelfMask: Bool
     ) async throws -> DecodeOutput {
         let cacheShape: [NSNumber] = [
@@ -785,18 +845,6 @@ public actor CoherePipeline {
             NSNumber(value: cacheLength),
             NSNumber(value: CohereAsrConfig.headDim),
         ]
-
-        // Probe the expected cache dtype from the model description to match
-        // whatever precision the .mlmodelc was compiled with.
-        let cacheDType: MLMultiArrayDataType = {
-            if let desc = decoder.modelDescription.inputDescriptionsByName["k_cache_0"],
-                desc.type == .multiArray,
-                let arrCon = desc.multiArrayConstraint
-            {
-                return arrCon.dataType
-            }
-            return .float16
-        }()
 
         var kCaches: [MLMultiArray] = []
         var vCaches: [MLMultiArray] = []
@@ -822,7 +870,8 @@ public actor CoherePipeline {
         var outputTokens: [Int] = []
         var currentToken = prompt[0]
         var sawEos = false
-        let effectiveMax = min(maxNewTokens + prompt.count, cacheLength)
+        let effectiveMax = Self.decodeStepCount(
+            maxNewTokens: maxNewTokens, promptCount: prompt.count, cacheLength: cacheLength)
 
         for step in 0..<effectiveMax {
             if step < prompt.count { currentToken = prompt[step] }

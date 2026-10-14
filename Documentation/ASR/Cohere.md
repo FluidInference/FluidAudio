@@ -24,9 +24,10 @@ variants live in different directories.
 - **Decoder**: 8-layer transformer with external KV cache (Parakeet pattern),
   hidden size 1024, 8 heads × 128 head-dim
 - **Cache window**: 256 slots (v3 decoder, default); 108 slots in the v1/v2
-  exports. The prompt (10 tokens) and the output share the cache, so the
-  longest output per 35 s window is `cacheLength − 10`. The runtime reads
-  the length from the loaded decoder's `k_cache_0` shape.
+  exports. The prompt (10 tokens) and the output share the cache: the last
+  prompt step already yields the first output, so the longest output per
+  35 s window is `cacheLength − 9` (99 with v2, 247 with v3). The runtime
+  reads the length from the loaded decoder's `k_cache_0` shape.
 - **Vocabulary**: 16,384 SentencePiece tokens
 - **Max audio**: 35 s per call (single chunk)
 
@@ -38,14 +39,14 @@ variants live in different directories.
 | `.v2` | `cohere_decoder_cache_external_v2.mlmodelc` | static `[1, 1, 1, 108]` | 108 slots | ANE-resident static shapes |
 | `.v1` | `cohere_decoder_cache_external.mlmodelc` | dynamic `RangeDim(1, 108)` | 108 slots | FP16, CPU/GPU only |
 
-The 108-slot exports cap each 35 s window at 98 output tokens. Dense speech
+The 108-slot exports cap each 35 s window at 99 output tokens. Dense speech
 (fast German, two-speaker calls) needs 150–225 tokens per window, so every
 window hit the cap and the rest of the window was silently dropped — up to a
 third of the words on a 25 min call ([#1013](https://github.com/FluidInference/FluidAudio/issues/1013)).
 `TranscriptionResult.cappedWindows` reports how many windows ran out of
 budget without emitting EOS; the CLI prints it as a warning. If you pass
 `maxNewTokens` explicitly it is clamped to the cache, so the v3 decoder is
-needed to get past 98 tokens per window.
+needed to get past 99 tokens per window.
 
 ### Upstream model spec (`cohere-pytorch/config.json`)
 

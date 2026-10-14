@@ -226,7 +226,7 @@ enum CohereTranscribeCommand {
                 --language, -l <code>           en / fr / de / es / it / pt / nl / pl / el /
                                                  ar / ja / zh / ko / vi  (default: en)
                 --max-tokens <n>                Max decoded tokens per 35 s window
-                                                (default: decoder cache length − prompt)
+                                                (default: all the cache holds — 99 v2, 247 v3)
                 --repetition-penalty <f>        CTRL-style penalty, 1.0 disables (default: 1.1)
                 --no-repeat-ngram <n>           Forbid repeating n-grams, 0 disables (default: 3)
                 --decoder-variant <v1|v2|v3>    Decoder to load (default: v3)

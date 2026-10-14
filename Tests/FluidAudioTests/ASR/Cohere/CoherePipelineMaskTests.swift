@@ -169,21 +169,59 @@ final class CoherePipelineMaskTests: XCTestCase {
         for i in (step + 1)..<length { XCTAssertEqual(ptr[i], -1.0e4) }
     }
 
-    func testResolveMaxNewTokensDefaultsToCacheMinusPrompt() {
+    func testResolveMaxNewTokensDefaultsToCacheCapacity() {
+        // The last prompt step yields the first output, so a 10-token prompt
+        // costs 9 of the cache's steps.
         XCTAssertEqual(
-            CoherePipeline.resolveMaxNewTokens(requested: nil, cacheLength: 256, promptCount: 10), 246)
+            CoherePipeline.resolveMaxNewTokens(requested: nil, cacheLength: 256, promptCount: 10), 247)
         XCTAssertEqual(
-            CoherePipeline.resolveMaxNewTokens(requested: nil, cacheLength: 108, promptCount: 10), 98)
+            CoherePipeline.resolveMaxNewTokens(requested: nil, cacheLength: 108, promptCount: 10), 99)
     }
 
     func testResolveMaxNewTokensClampsRequestToCache() {
         XCTAssertEqual(
             CoherePipeline.resolveMaxNewTokens(requested: 50, cacheLength: 256, promptCount: 10), 50)
         XCTAssertEqual(
-            CoherePipeline.resolveMaxNewTokens(requested: 1000, cacheLength: 256, promptCount: 10), 246)
+            CoherePipeline.resolveMaxNewTokens(requested: 1000, cacheLength: 256, promptCount: 10), 247)
         XCTAssertEqual(
             CoherePipeline.resolveMaxNewTokens(requested: 0, cacheLength: 256, promptCount: 10), 0)
         XCTAssertEqual(
+            CoherePipeline.resolveMaxNewTokens(requested: -5, cacheLength: 256, promptCount: 10), 0)
+        XCTAssertEqual(
             CoherePipeline.resolveMaxNewTokens(requested: nil, cacheLength: 5, promptCount: 10), 0)
+    }
+
+    func testDecodeStepCountEmitsExactlyTheBudget() {
+        let prompt = CohereAsrConfig.Language.german.promptSequence.count
+        for (budget, cache) in [(0, 108), (1, 108), (50, 108), (99, 108), (247, 256)] {
+            let steps = CoherePipeline.decodeStepCount(
+                maxNewTokens: budget, promptCount: prompt, cacheLength: cache)
+            XCTAssertLessThanOrEqual(steps, cache, "budget \(budget) cache \(cache)")
+            // Outputs appear from step promptCount-1 onward.
+            XCTAssertEqual(max(0, steps - (prompt - 1)), budget, "budget \(budget) cache \(cache)")
+        }
+        // The full default budget uses every cache slot exactly once.
+        let full = CoherePipeline.resolveMaxNewTokens(requested: nil, cacheLength: 256, promptCount: prompt)
+        XCTAssertEqual(
+            CoherePipeline.decodeStepCount(maxNewTokens: full, promptCount: prompt, cacheLength: 256), 256)
+    }
+
+    func testMaxExtentPrefersFlexibleUpperBound() {
+        let shape: [NSNumber] = [1, 8, 1, 128]
+        XCTAssertEqual(CoherePipeline.maxExtent(shape: shape, shapeConstraint: nil, dimension: 2), 1)
+        XCTAssertEqual(CoherePipeline.maxExtent(shape: shape, shapeConstraint: nil, dimension: 7), 0)
+        XCTAssertEqual(CoherePipeline.maxExtent(shape: [1, 8, 108, 128], shapeConstraint: nil, dimension: 2), 108)
+    }
+
+    func testRequiredModelsFollowDecoderVariant() {
+        XCTAssertEqual(
+            ModelNames.getRequiredModelNames(for: .cohereTranscribeCoreml, variant: nil),
+            ModelNames.CohereTranscribe.requiredModels)
+        XCTAssertEqual(
+            ModelNames.getRequiredModelNames(for: .cohereTranscribeCoreml, variant: "v2"),
+            ModelNames.CohereTranscribe.requiredModelsV2)
+        XCTAssertEqual(
+            ModelNames.getRequiredModelNames(for: .cohereTranscribeCoreml, variant: "v1"),
+            ModelNames.CohereTranscribe.requiredModelsLegacy)
     }
 }

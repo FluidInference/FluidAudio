@@ -1869,7 +1869,11 @@ public enum ModelNames {
         case .multilingualG2p:
             return ModelNames.MultilingualG2P.requiredModels
         case .cohereTranscribeCoreml:
-            return ModelNames.CohereTranscribe.requiredModels
+            switch variant {
+            case "v2": return ModelNames.CohereTranscribe.requiredModelsV2
+            case "v1": return ModelNames.CohereTranscribe.requiredModelsLegacy
+            default: return ModelNames.CohereTranscribe.requiredModels
+            }
         case .canary1bV2:
             return ModelNames.Canary.requiredModels(
                 precision: CanaryPrecision(rawValue: variant ?? "") ?? .int4)
