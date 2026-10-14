@@ -1,14 +1,39 @@
 import CoreML
 import Foundation
+import os
 
 /// Thread-safe CoreML-based multilingual grapheme-to-phoneme converter.
 ///
 /// Uses the CharsiuG2P ByT5 encoder-decoder model to convert words in multiple
 /// languages to IPA phonemes. The model uses byte-level tokenization (no vocab
 /// file required).
+///
+/// The bundles load from `<models root>/kokoro/`, where the root is the
+/// `directory` the instance was created with, or the shared TTS cache
+/// (`TtsCacheDirectory`) when `nil`. Use ``shared(directory:)`` so every
+/// consumer of one root reuses a single loaded model.
 public actor MultilingualG2PModel {
 
-    public static let shared = MultilingualG2PModel()
+    /// Instance bound to the default TTS cache root.
+    public static var shared: MultilingualG2PModel { shared(directory: nil) }
+
+    /// One instance per models root so a root's bundles load once per process.
+    private static let registry = OSAllocatedUnfairLock<[String: MultilingualG2PModel]>(initialState: [:])
+
+    /// The instance that loads from `<directory>/kokoro/` (`nil` = default
+    /// TTS cache root, as `TtsCacheDirectory.ensure()/Models`).
+    public static func shared(directory: URL?) -> MultilingualG2PModel {
+        let key = directory?.standardizedFileURL.path ?? ""
+        return registry.withLock { registry in
+            if let existing = registry[key] { return existing }
+            let model = MultilingualG2PModel(directory: directory)
+            registry[key] = model
+            return model
+        }
+    }
+
+    /// Models root passed at creation; `nil` resolves to the default cache.
+    public nonisolated let modelsDirectory: URL?
 
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "MultilingualG2PModel")
 
@@ -25,7 +50,15 @@ public actor MultilingualG2PModel {
     private var encoder: MLModel?
     private var decoder: MLModel?
 
-    private init() {}
+    init(directory: URL? = nil) {
+        self.modelsDirectory = directory
+    }
+
+    /// `<models root>/kokoro/`: where the encoder/decoder bundles are read from.
+    nonisolated func kokoroDirectory() throws -> URL {
+        let root = try modelsDirectory ?? TtsCacheDirectory.ensure().appendingPathComponent("Models")
+        return root.appendingPathComponent(Repo.kokoro.folderName)
+    }
 
     /// Convert a word to IPA phonemes using the multilingual G2P model.
     ///
@@ -147,9 +180,7 @@ public actor MultilingualG2PModel {
     private func loadIfNeeded() throws {
         if encoder != nil && decoder != nil { return }
 
-        let modelsDir = try TtsCacheDirectory.ensure()
-            .appendingPathComponent("Models")
-            .appendingPathComponent(Repo.kokoro.folderName)
+        let modelsDir = try kokoroDirectory()
 
         let encoderURL = modelsDir.appendingPathComponent(ModelNames.MultilingualG2P.encoderFile)
         guard FileManager.default.fileExists(atPath: encoderURL.path) else {

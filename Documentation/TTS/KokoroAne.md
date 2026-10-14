@@ -64,7 +64,10 @@ is separate from legacy assets:
 `<Models>/kokoro-82m-coreml/ANE-v3/<release revision>/<en|ja|zh>/`.
 Passing `directory:` overrides the `<Models>` root. Voice packs download
 on demand; English JSON voice rows are converted to the runtime's binary
-layout. Text frontends retain their existing shared asset caches.
+layout. The text-frontend assets (English BART G2P + Misaki lexicon cache,
+French CharsiuG2P + lexicon, Spanish lexicon) follow the same root, under
+`<Models>/kokoro/`, so an app that passes `directory:` keeps every
+Kokoro file under it (#1023).
 
 The SDK adopts `KokoroProsody_v2` (fp32 prosody) and `KokoroTail_v2`
 (COLA-corrected output level) from the pinned base revision instead of reverting
