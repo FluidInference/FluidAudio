@@ -93,6 +93,11 @@ jobs:
       - name: Build with TTS only
         run: swift build --traits TTS --target FluidAudio
 
+      # Positive control for the assertion above: the same path must appear once TTS is on,
+      # otherwise a renamed bundle or build-dir layout change would make the check pass vacuously.
+      - name: Assert TTS resource bundle present
+        run: test -e .build/debug/FluidAudio_LuxTtsG2pResources.bundle
+
       - name: Build with Diarizer only
         run: swift build --traits Diarizer --target FluidAudio
 

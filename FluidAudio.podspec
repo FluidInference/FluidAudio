@@ -22,7 +22,8 @@ Pod::Spec.new do |spec|
 
   spec.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
-    # SwiftPM trait flags (#990); CocoaPods always builds every subsystem.
+    # SwiftPM trait flags (#990). CocoaPods has no trait support, so the pod always
+    # builds every subsystem; the LuxTTS G2P resources ship as a resource bundle below.
     'SWIFT_ACTIVE_COMPILATION_CONDITIONS' => '$(inherited) TTS Diarizer',
     'ARCHS[sdk=macosx*]' => 'arm64',
     'EXCLUDED_ARCHS[sdk=macosx*]' => 'x86_64',
@@ -59,11 +60,14 @@ Pod::Spec.new do |spec|
   spec.subspec "Core" do |core|
     core.dependency "#{spec.name}/FastClusterWrapper"
     core.dependency "#{spec.name}/MachTaskSelfWrapper"
-    core.source_files = "Sources/FluidAudio/**/*.swift"
+    core.source_files = "Sources/FluidAudio/**/*.swift", "Sources/LuxTtsG2pResources/**/*.swift"
+    # SwiftPM serves these via a separate `LuxTtsG2pResources` target (trait-pruned);
+    # `LuxTtsG2pResources.bundle` falls back to this bundle when `Bundle.module` is absent.
+    core.resource_bundles = {
+      "LuxTtsG2pResources" => ["Sources/LuxTtsG2pResources/Resources/*"]
+    }
 
     # iOS Configuration
-    # TTS sources are moved under `Sources/FluidAudioTTS` and are not part of the Core subspec.
-    # iOS builds include ASR, Diarization, and VAD.
     core.ios.frameworks = "CoreML", "AVFoundation", "Accelerate", "UIKit"
 
     # macOS Configuration

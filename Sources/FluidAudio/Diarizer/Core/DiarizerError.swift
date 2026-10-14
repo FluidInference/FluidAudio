@@ -1,6 +1,6 @@
+#if Diarizer
 import Foundation
 
-// Outside the `Diarizer` trait guard: Shared/ANEMemoryOptimizer throws it.
 public enum DiarizerError: Error, LocalizedError {
     case notInitialized
     case modelDownloadFailed
@@ -32,3 +32,4 @@ public enum DiarizerError: Error, LocalizedError {
         }
     }
 }
+#endif

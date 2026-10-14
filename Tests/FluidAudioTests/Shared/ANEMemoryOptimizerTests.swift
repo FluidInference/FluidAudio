@@ -200,7 +200,22 @@ final class ANEMemoryOptimizerTests: XCTestCase {
         // 100-element source cannot back it even though it holds 100 logical elements.
         let source = try optimizer.createAlignedArray(shape: [100], dataType: .float32)
 
-        XCTAssertThrowsError(try optimizer.createZeroCopyView(from: source, shape: [10, 10]))
+        XCTAssertThrowsError(try optimizer.createZeroCopyView(from: source, shape: [10, 10])) { error in
+            // Shared code must not surface diarizer-specific errors (#990).
+            guard case ANEMemoryUtils.ANEMemoryError.invalidArrayBounds = error else {
+                return XCTFail("expected ANEMemoryError.invalidArrayBounds, got \(error)")
+            }
+            XCTAssertNotNil(error.localizedDescription)
+        }
+    }
+
+    func testANEMemoryErrorsHaveDescriptions() {
+        let errors: [ANEMemoryUtils.ANEMemoryError] = [
+            .allocationFailed, .invalidShape, .unsupportedDataType, .invalidArrayBounds,
+        ]
+        for error in errors {
+            XCTAssertFalse(error.errorDescription?.isEmpty ?? true, "\(error) has no description")
+        }
     }
 
     func testZeroCopyViewAcceptsSpanWithinSource() throws {

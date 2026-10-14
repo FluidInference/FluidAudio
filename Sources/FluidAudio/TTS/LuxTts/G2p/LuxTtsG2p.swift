@@ -1,6 +1,8 @@
 #if TTS
 import Foundation
+#if canImport(LuxTtsG2pResources)
 import LuxTtsG2pResources
+#endif
 
 /// English text → espeak-IPA phonemes for LuxTTS (phase 2).
 ///

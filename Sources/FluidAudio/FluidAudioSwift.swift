@@ -8,10 +8,10 @@ import OSLog
 
 // MARK: - Backward Compatibility
 
+#if Diarizer
 /// Backward compatibility alias for the old error type
 public typealias SpeakerDiarizationError = DiarizerError
 
-#if Diarizer
 /// Backward compatibility alias for the old config name
 public typealias SpeakerDiarizationConfig = DiarizerConfig
 #endif
