@@ -45,7 +45,7 @@ enum CohereBenchmark {
         var maxFiles: Int?
         var fleursDir: String?
         var outputFile = "cohere_benchmark_results.json"
-        var maxTokens = 108
+        var maxTokens: Int?
         var repetitionPenalty: Float = 1.1
         var noRepeatNgram = 3
         var computeUnits: MLComputeUnits = .all
@@ -168,7 +168,7 @@ enum CohereBenchmark {
         logger.info("  Decoder dir:      \(decDir)")
         logger.info("  Vocab dir:        \(vocDir)")
         logger.info("  Max files:        \(maxFiles?.description ?? "all")")
-        logger.info("  Max tokens:       \(maxTokens)")
+        logger.info("  Max tokens:       \(maxTokens.map(String.init) ?? "cache capacity")")
         logger.info("  Rep penalty:      \(repetitionPenalty)")
         logger.info("  No-repeat-ngram:  \(noRepeatNgram)")
         logger.info("  Auto-download:    \(autoDownload)")
@@ -245,7 +245,7 @@ enum CohereBenchmark {
         maxFiles: Int?,
         fleursDir: String?,
         autoDownload: Bool,
-        maxTokens: Int,
+        maxTokens: Int?,
         repetitionPenalty: Float,
         noRepeatNgram: Int,
         outputFile: String,
@@ -351,7 +351,7 @@ enum CohereBenchmark {
         subset: String,
         maxFiles: Int?,
         autoDownload: Bool,
-        maxTokens: Int,
+        maxTokens: Int?,
         repetitionPenalty: Float,
         noRepeatNgram: Int,
         outputFile: String,
@@ -432,7 +432,7 @@ enum CohereBenchmark {
         languageLabel: String,
         models: CoherePipeline.LoadedModels,
         pipeline: CoherePipeline,
-        maxTokens: Int,
+        maxTokens: Int?,
         repetitionPenalty: Float,
         noRepeatNgram: Int,
         checkpointEvery: Int = Int.max,
@@ -702,7 +702,8 @@ enum CohereBenchmark {
                 --auto-download                 Fetch missing dataset splits
 
             Decode:
-                --max-tokens <n>                Max decoded tokens (default: 108)
+                --max-tokens <n>                Max decoded tokens per 35 s window
+                                                (default: all the cache holds — 99 v2, 247 v3)
                 --repetition-penalty <f>        CTRL-style penalty, 1.0 disables (default: 1.1)
                 --no-repeat-ngram <n>           Forbid repeating n-grams, 0 disables (default: 3)
 
