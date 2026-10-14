@@ -271,8 +271,10 @@ The shared phonemizer assets (`G2PEncoder.mlmodelc`,
 `G2PDecoder.mlmodelc`, `g2p_vocab.json`, `us_lexicon_cache.json`) are
 fetched from
 [`FluidInference/kokoro-82m-coreml`](https://huggingface.co/FluidInference/kokoro-82m-coreml)
-and cached under `~/.cache/fluidaudio/Models/kokoro/`, the same
-location KokoroAne reuses — a single download serves both backends.
+and cached under `<Models>/kokoro/`, the same location KokoroAne
+reuses — a single download serves both backends. `<Models>` is the
+`directory:` passed to `StyleTTS2Manager` (or `~/.cache/fluidaudio/Models/`
+on macOS when none is given), so the G2P assets stay under the app's root.
 
 ## License
 

@@ -22,6 +22,8 @@ public actor ParadeeManager {
     private let logger = AppLogger(category: "ParadeeManager")
 
     private let store: ParadeeModelStore
+    /// BART G2P fallback bound to the store's models root (#1023).
+    nonisolated let englishG2P: G2PModel
     private let englishLexiconCache = LexiconAssetCache()
     private var englishPhonemizer: KokoroAneEnglishPhonemizer?
     private var englishFrontendReady = false
@@ -34,6 +36,7 @@ public actor ParadeeManager {
         computeUnits: MLComputeUnits = .cpuOnly
     ) {
         self.store = ParadeeModelStore(variant: variant, directory: directory, computeUnits: computeUnits)
+        self.englishG2P = G2PModel.shared(directory: directory)
     }
 
     /// Download (if missing) and load both models, the vocab, and the
@@ -41,12 +44,12 @@ public actor ParadeeManager {
     public func initialize() async throws {
         try await store.loadIfNeeded()
         guard !englishFrontendReady else { return }
-        // G2PModel.loadIfNeeded only reads from cache, so fetch the assets
-        // explicitly first. They live at the default kokoro cache path
-        // (G2PModel.shared hardcodes it), not the store's `directory`.
-        try await KokoroAneResourceDownloader.ensureG2PAssets(directory: nil)
-        try await G2PModel.shared.ensureModelsAvailable()
-        _ = await KokoroAneResourceDownloader.ensureEnglishLexicon(directory: nil)
+        // G2PModel.loadIfNeeded only reads from disk, so fetch the assets
+        // explicitly first. They live under the store's `directory`
+        // (`<directory>/kokoro/`), next to the Paradee models.
+        try await KokoroAneResourceDownloader.ensureG2PAssets(directory: store.directory)
+        try await englishG2P.ensureModelsAvailable()
+        _ = await KokoroAneResourceDownloader.ensureEnglishLexicon(directory: store.directory)
         englishFrontendReady = true
     }
 
@@ -90,8 +93,9 @@ public actor ParadeeManager {
     public func phonemes(for text: String) async throws -> String {
         guard englishFrontendReady else { throw ParadeeError.notInitialized }
         let phonemizer = await ensureEnglishPhonemizer()
-        let raw = try await phonemizer.phonemize(EnglishTextNormalizer.normalizeForFrontend(text)) { word in
-            try await G2PModel.shared.phonemize(word: word)
+        let raw = try await phonemizer.phonemize(EnglishTextNormalizer.normalizeForFrontend(text)) {
+            [englishG2P] word in
+            try await englishG2P.phonemize(word: word)
         }
         return Self.misakiOutputForm(raw)
     }
@@ -172,7 +176,7 @@ public actor ParadeeManager {
         do {
             let vocab = try await store.vocabulary()
             punctuation = Set(vocab.map.keys.filter { !$0.isLetter && !$0.isNumber && !$0.isWhitespace })
-            if let kokoroDir = await KokoroAneResourceDownloader.ensureEnglishLexicon(directory: nil) {
+            if let kokoroDir = await KokoroAneResourceDownloader.ensureEnglishLexicon(directory: store.directory) {
                 try await englishLexiconCache.ensureLoaded(
                     kokoroDirectory: kokoroDir, allowedTokens: Set(vocab.map.keys.map(String.init)))
                 let maps = await englishLexiconCache.lexicons()

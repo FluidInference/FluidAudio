@@ -1,8 +1,14 @@
 import CoreML
 import Foundation
+import os
 
 /// Thread-safe CoreML-based grapheme-to-phoneme converter.
 /// Uses a small BART encoder-decoder model to convert English words to IPA phonemes.
+///
+/// Assets load from `<models root>/kokoro/`, where the root is the
+/// `directory` the instance was created with, or the shared TTS cache
+/// (`TtsCacheDirectory`) when `nil`. Use ``shared(directory:)`` so every
+/// consumer of one root (KokoroAne, StyleTTS2) reuses a single loaded model.
 actor G2PModel {
     enum G2PModelError: Error, LocalizedError {
         case vocabLoadFailed(String)
@@ -24,8 +30,45 @@ actor G2PModel {
         }
     }
 
-    static let shared = G2PModel()
+    /// Instance bound to the default TTS cache root.
+    static var shared: G2PModel { shared(directory: nil) }
+
+    private struct WeakModel {
+        weak var model: G2PModel?
+    }
+
+    /// One live instance per models root, so consumers of a root share one
+    /// loaded model while any of them holds it; a root nobody references
+    /// anymore releases its CoreML models.
+    private static let registry = OSAllocatedUnfairLock<[String: WeakModel]>(initialState: [:])
+
+    /// The instance that loads from `<directory>/kokoro/` (`nil` = default
+    /// TTS cache root, as `TtsCacheDirectory.ensure()/Models`). Hold the
+    /// returned instance; it is not retained by the registry.
+    static func shared(directory: URL?) -> G2PModel {
+        let key = registryKey(directory: directory)
+        return registry.withLock { registry in
+            if let existing = registry[key]?.model { return existing }
+            registry = registry.filter { $0.value.model != nil }
+            let model = G2PModel(directory: directory)
+            registry[key] = WeakModel(model: model)
+            return model
+        }
+    }
+
+    /// Resolved models-root path, so `nil`, the explicit default root and a
+    /// symlinked spelling of one location map to the same instance.
+    private static func registryKey(directory: URL?) -> String {
+        guard let root = try? directory ?? TtsCacheDirectory.ensure().appendingPathComponent("Models") else {
+            return ""
+        }
+        return root.standardizedFileURL.resolvingSymlinksInPath().path
+    }
+
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "G2PModel")
+
+    /// Models root passed at creation; `nil` resolves to the default cache.
+    nonisolated let modelsDirectory: URL?
 
     // Vocab tables (loaded once)
     private var graphemeToId: [Character: Int]?
@@ -38,7 +81,16 @@ actor G2PModel {
     private var encoder: MLModel?
     private var decoder: MLModel?
 
-    private init() {}
+    init(directory: URL? = nil) {
+        self.modelsDirectory = directory
+    }
+
+    /// `<models root>/kokoro/`: where the vocab and the encoder/decoder
+    /// bundles are read from.
+    nonisolated func kokoroDirectory() throws -> URL {
+        let root = try modelsDirectory ?? TtsCacheDirectory.ensure().appendingPathComponent("Models")
+        return root.appendingPathComponent(Repo.kokoro.folderName)
+    }
 
     func phonemize(word: String) throws -> [String]? {
         do {
@@ -165,9 +217,7 @@ actor G2PModel {
     private func loadIfNeeded() throws {
         if graphemeToId != nil && encoder != nil && decoder != nil { return }
 
-        let kokoroDir = try TtsCacheDirectory.ensure()
-            .appendingPathComponent("Models")
-            .appendingPathComponent(Repo.kokoro.folderName)
+        let kokoroDir = try kokoroDirectory()
 
         // Load g2p_vocab.json from cache directory
         let vocabURL = kokoroDir.appendingPathComponent(ModelNames.G2P.vocabularyFile)

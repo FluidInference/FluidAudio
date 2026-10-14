@@ -11,7 +11,9 @@ public actor ParadeeModelStore {
     private let logger = AppLogger(category: "ParadeeModelStore")
 
     private let variant: ParadeeVariant
-    private let directory: URL?
+    /// Models root every asset of this store resolves under (`nil` = the
+    /// default TTS cache root).
+    nonisolated let directory: URL?
     private let computeUnits: MLComputeUnits
 
     private var textModel: MLModel?
