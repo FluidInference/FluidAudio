@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -141,3 +142,4 @@ enum ParadeeSynthesizer {
         return out
     }
 }
+#endif
