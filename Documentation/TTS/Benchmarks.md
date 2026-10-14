@@ -286,7 +286,7 @@ peak RSS, WER, CER) so there is a single source of truth.
 | Kokoro ANEᴷ | Apache-2.0 | ja (`jf_alpha`)ᴶ          | ~0.33 GB                   | 24 kHz      | 510 phonemes / pass (≈25–30 s of audio)                          | No        | **210 / 320 ms** | 210 / 320 ms     | 41.6×ᴷ     | 953 MB   | n/aᴶ   | 1.51%ᴶ |
 | PocketTTS (v2.1) | research   | en (`alba`, 6L pack)      | fp16 ~330 MB | 24 kHz      | 80 ms Mimi frame, streams until EOS (no fixed cap)               | Yes       | **26 / 27 ms** | 933 / 1233 ms    | **6.51×** | 761 MB   | 0.51%  | 0.08%  |
 | StyleTTS2 (M2)ˢ | research   | en (LibriTTS iteration_3) | ~0.67 GB¶                  | 24 kHz      | 256 tokens / pass (≈30 s of audio max)                           | No        | 1574 / 3088 ms    | 1574 / 3088 ms    | 4.59×     | 522 MB   | 9.4%   | 4.1%   |
-| Supertonic-3 (int4) | Apache-2.0 | en (`M1`, 31-lang)        | int4 ~0.10 GB                   | 44.1 kHz    | 128 codepoints / pass (chunker splits ≥70 char Latin / 57 CJK)   | No        | **81 / 120 ms** | 81 / 120 ms     | **94×** | 197 MB   | 1.02%ᶜ | 0.31%ᶜ |
+| Supertonic-3 (int4) | OpenRAIL-M | en (`M1`, 31-lang)        | int4 ~0.10 GB                   | 44.1 kHz    | 128 codepoints / pass (chunker splits ≥70 char Latin / 57 CJK)   | No        | **81 / 120 ms** | 81 / 120 ms     | **94×** | 197 MB   | 1.02%ᶜ | 0.31%ᶜ |
 
 ᴷ **Historical legacy routing on macOS 26.6:** `.aneTailGpu` requests
 `.cpuAndNeuralEngine` for Albert, PostAlbert, Alignment, Prosody and Vocoder,

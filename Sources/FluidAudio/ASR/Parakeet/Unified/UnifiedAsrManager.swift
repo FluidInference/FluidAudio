@@ -369,7 +369,8 @@ public actor UnifiedAsrManager {
             // No warm-up prefix here: the window decodes from its own start.
             let window = ChunkProcessor.WindowFrames(
                 decodeStart: chunkStart / config.frameSamples, end: chunkEnd / config.frameSamples)
-            let seam = config.seamTimingRealignment
+            let seam =
+                config.seamTimingRealignment
                 ? previousWindow.map { ChunkProcessor.SeamWindows(left: $0, right: window) } : nil
             merged =
                 merged.isEmpty

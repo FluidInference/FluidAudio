@@ -21,11 +21,11 @@ enum CohereTranscribeCommand {
         var decoderDir: String?
         var vocabDir: String?
         var language: CohereAsrConfig.Language = .english
-        var maxTokens = 108
+        var maxTokens: Int?
         var repetitionPenalty: Float = 1.1
         var noRepeatNgram = 3
         var computeUnits: MLComputeUnits = .all
-        var decoderVariant: CoherePipeline.DecoderVariant = .v2
+        var decoderVariant: CoherePipeline.DecoderVariant = .v3
 
         var i = 1
         while i < arguments.count {
@@ -86,10 +86,12 @@ enum CohereTranscribeCommand {
             case "--decoder-variant":
                 if i + 1 < arguments.count {
                     switch arguments[i + 1].lowercased() {
+                    case "v3": decoderVariant = .v3
                     case "v2": decoderVariant = .v2
                     case "v1": decoderVariant = .v1
                     default:
-                        logger.error("Unknown decoder variant '\(arguments[i + 1])' (expected v1 or v2)")
+                        logger.error(
+                            "Unknown decoder variant '\(arguments[i + 1])' (expected v1, v2 or v3)")
                         exit(1)
                     }
                     i += 1
@@ -132,7 +134,7 @@ enum CohereTranscribeCommand {
         decoderDir: URL,
         vocabDir: URL,
         language: CohereAsrConfig.Language,
-        maxTokens: Int,
+        maxTokens: Int?,
         repetitionPenalty: Float,
         noRepeatNgram: Int,
         computeUnits: MLComputeUnits,
@@ -184,6 +186,11 @@ enum CohereTranscribeCommand {
             print(result.text)
             logger.info("")
             logger.info("Tokens generated: \(result.tokenIds.count)")
+            logger.info("Decoder cache:    \(models.cacheLength) slots")
+            if result.cappedWindows > 0 {
+                logger.warning(
+                    "Windows that hit the decode cap: \(result.cappedWindows) (speech dropped)")
+            }
             logger.info("Encoder time:  \(String(format: "%.3f", result.encoderSeconds))s")
             logger.info("Decoder time:  \(String(format: "%.3f", result.decoderSeconds))s")
             logger.info("Total time:    \(String(format: "%.3f", result.totalSeconds))s")
@@ -210,17 +217,19 @@ enum CohereTranscribeCommand {
 
             Expected files inside each dir:
                 cohere_encoder.mlmodelc
-                cohere_decoder_cache_external_v2.mlmodelc  (v2 — ANE-resident static shapes)
+                cohere_decoder_cache_external_v3.mlmodelc  (v3 — static shapes, 256-slot cache)
+                cohere_decoder_cache_external_v2.mlmodelc  (v2 — static shapes, 108-slot cache)
                 cohere_decoder_cache_external.mlmodelc     (v1 — FP16 dynamic RangeDim)
                 vocab.json  (in --vocab-dir / --model-dir)
 
             Decode options:
                 --language, -l <code>           en / fr / de / es / it / pt / nl / pl / el /
                                                  ar / ja / zh / ko / vi  (default: en)
-                --max-tokens <n>                Max decoded tokens (default: 108)
+                --max-tokens <n>                Max decoded tokens per 35 s window
+                                                (default: all the cache holds — 99 v2, 247 v3)
                 --repetition-penalty <f>        CTRL-style penalty, 1.0 disables (default: 1.1)
                 --no-repeat-ngram <n>           Forbid repeating n-grams, 0 disables (default: 3)
-                --decoder-variant <v1|v2>       Decoder to load (default: v2)
+                --decoder-variant <v1|v2|v3>    Decoder to load (default: v3)
 
             Compute units:
                 --cpu-only                      Force CPU

@@ -90,6 +90,11 @@ public struct AsrModels: Sendable {
     public let joint: MLModel
     /// Optional CTC decoder head for custom vocabulary (encoder features → CTC logits)
     public let ctcHead: MLModel?
+    /// Shorter-window functions of a multifunction encoder, ascending by
+    /// length; empty for a single-shape encoder. A window runs on the
+    /// smallest function that holds it, so it pays Neural Engine time for
+    /// the audio it carries rather than for the full 15 s shape.
+    public let encoderLadder: [EncoderLadderFunction]
     public let configuration: MLModelConfiguration
     public let vocabulary: [Int: String]
     public let version: AsrModelVersion
@@ -102,11 +107,13 @@ public struct AsrModels: Sendable {
         decoder: MLModel,
         joint: MLModel,
         ctcHead: MLModel? = nil,
+        encoderLadder: [EncoderLadderFunction] = [],
         configuration: MLModelConfiguration,
         vocabulary: [Int: String],
         version: AsrModelVersion
     ) {
         self.encoder = encoder
+        self.encoderLadder = encoderLadder
         self.preprocessor = preprocessor
         self.decoder = decoder
         self.joint = joint
@@ -119,6 +126,72 @@ public struct AsrModels: Sendable {
     /// Whether this model uses a separate preprocessor and encoder (true for 0.6B, false for 110m fused)
     public var usesSplitFrontend: Bool {
         !version.hasFusedEncoder
+    }
+}
+
+/// One window length of a multifunction encoder (`enc_<milliseconds>ms`).
+public struct EncoderLadderFunction: Sendable {
+    public let seconds: Double
+    /// Mel frames the function consumes (1 + 100 × seconds).
+    public let melFrames: Int
+    public let model: MLModel
+
+    /// Multifunction encoder function names are `enc_<milliseconds>ms`
+    /// (integer: Core ML's Neural Engine compiler crashes on a '.' in a
+    /// function name).
+    static func seconds(fromFunctionName name: String) -> Double? {
+        guard name.hasPrefix("enc_"), name.hasSuffix("ms"), let ms = Int(name.dropFirst(4).dropLast(2)) else {
+            return nil
+        }
+        return Double(ms) / 1000
+    }
+}
+
+extension AsrModels {
+    /// Load every `enc_<N>ms` function of a multifunction encoder at `path`.
+    /// Returns an empty array for a single-function encoder, or when the
+    /// platform predates multifunction models (macOS 15 / iOS 18).
+    static func loadEncoderLadder(
+        at path: URL, computeUnits: MLComputeUnits, defaultEncoder: MLModel
+    ) async -> [EncoderLadderFunction] {
+        guard #available(macOS 15.0, iOS 18.0, *) else { return [] }
+        let names: [String]
+        do {
+            names = try await MLModelAsset(url: path).functionNames
+        } catch {
+            return []
+        }
+        // The default function is already loaded as `defaultEncoder`; reuse it
+        // rather than hold a second instance of the same program.
+        let defaultMelFrames =
+            defaultEncoder.modelDescription.inputDescriptionsByName["mel"]?.multiArrayConstraint?.shape.last?.intValue
+        var ladder: [EncoderLadderFunction] = []
+        for name in names {
+            guard let seconds = EncoderLadderFunction.seconds(fromFunctionName: name) else { continue }
+            if let defaultMelFrames, defaultMelFrames == 1 + Int(seconds * 100) {
+                ladder.append(
+                    EncoderLadderFunction(seconds: seconds, melFrames: defaultMelFrames, model: defaultEncoder))
+                continue
+            }
+            let config = MLModelConfiguration()
+            config.computeUnits = computeUnits
+            config.allowLowPrecisionAccumulationOnGPU = true
+            config.functionName = name
+            let start = Date()
+            do {
+                let model = try MLModel(contentsOf: path, configuration: config)
+                let melFrames =
+                    model.modelDescription.inputDescriptionsByName["mel"]?.multiArrayConstraint?.shape.last?.intValue
+                    ?? (1 + Int(seconds * 100))
+                ladder.append(EncoderLadderFunction(seconds: seconds, melFrames: melFrames, model: model))
+                logger.info(
+                    "Loaded encoder function \(name) in \(String(format: "%.0f", Date().timeIntervalSince(start) * 1000)) ms"
+                )
+            } catch {
+                logger.warning("Encoder function \(name) failed to load: \(error.localizedDescription)")
+            }
+        }
+        return ladder.sorted { $0.seconds < $1.seconds }
     }
 }
 
@@ -376,6 +449,17 @@ extension AsrModels {
         if !version.hasFusedEncoder && encoderModel == nil {
             throw AsrModelsError.loadingFailed("Failed to load encoder model (required for split frontend)")
         }
+        var encoderLadder: [EncoderLadderFunction] = []
+        if let encoderModel, let encoderSpec = specs.first(where: { $0.fileName == fileNames.encoder }) {
+            encoderLadder = await loadEncoderLadder(
+                at: directory.appendingPathComponent(fileNames.encoder),
+                computeUnits: encoderSpec.computeUnits,
+                defaultEncoder: encoderModel
+            )
+            if !encoderLadder.isEmpty {
+                logger.info("Encoder ladder: \(encoderLadder.map { "\($0.seconds) s" }.joined(separator: ", "))")
+            }
+        }
 
         // Load decoder first
         let decoderModels = try await ModelHub.loadModels(
@@ -458,6 +542,7 @@ extension AsrModels {
             decoder: decoderModel,
             joint: jointModel,
             ctcHead: ctcHeadModel,
+            encoderLadder: encoderLadder,
             configuration: config,
             vocabulary: try loadVocabulary(from: directory, version: version),
             version: version

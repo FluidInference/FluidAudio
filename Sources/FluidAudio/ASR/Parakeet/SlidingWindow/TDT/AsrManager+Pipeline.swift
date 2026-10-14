@@ -176,13 +176,22 @@ extension AsrManager {
                 options: predictionOptions
             )
             let encoderOutputProvider: MLFeatureProvider
-            if let encoderModel = encoderModel {
-                // Split frontend: run separate encoder
+            if let defaultEncoder = encoderModel {
+                // Split frontend: run separate encoder — the smallest ladder
+                // function that holds the window's mel frames, else the
+                // full-shape model.
+                let melFrames =
+                    preprocessorOutput.featureValue(for: "mel_length")?.multiArrayValue?[0].intValue ?? Int.max
+                let function = encoderLadder.first { $0.melFrames >= melFrames }
+                let encoderModel = function?.model ?? defaultEncoder
                 var encoderInput = try prepareEncoderInput(
                     encoder: encoderModel,
                     preprocessorOutput: preprocessorOutput,
                     originalInput: preprocessorInput
                 )
+                if let function {
+                    encoderInput = try Self.slicingMel(encoderInput, toFrames: function.melFrames)
+                }
                 if lengthPolicy.contains(.encoderFull) {
                     encoderInput = try Self.declaringFullMelLength(encoderInput)
                 }
@@ -246,6 +255,45 @@ extension AsrManager {
             features[name] = input.featureValue(for: name)
         }
         features["mel_length"] = MLFeatureValue(multiArray: full)
+        return try MLDictionaryFeatureProvider(dictionary: features)
+    }
+
+    /// The encoder input with `mel` cut to its first `frames` frames, for a
+    /// ladder function shorter than the preprocessor's 15 s shape. The
+    /// preprocessor zero-pads beyond `mel_length`, so the dropped frames are
+    /// padding the function would have masked anyway. Inputs whose `mel`
+    /// already has `frames` frames (or no `mel`) are returned unchanged.
+    static func slicingMel(_ input: MLFeatureProvider, toFrames frames: Int) throws -> MLFeatureProvider {
+        guard let mel = input.featureValue(for: "mel")?.multiArrayValue, mel.shape.count == 3,
+            mel.shape[2].intValue != frames
+        else { return input }
+        let channels = mel.shape[1].intValue
+        guard mel.shape[0].intValue == 1, frames <= mel.shape[2].intValue, mel.dataType == .float32 else {
+            throw ASRError.processingFailed(
+                "Cannot slice mel \(mel.shape) of type \(mel.dataType.rawValue) to \(frames) frames")
+        }
+        let sliced = try MLMultiArray(
+            shape: [1, NSNumber(value: channels), NSNumber(value: frames)], dataType: .float32)
+        let source = mel.dataPointer.assumingMemoryBound(to: Float.self)
+        let destination = sliced.dataPointer.assumingMemoryBound(to: Float.self)
+        let sourceChannelStride = mel.strides[1].intValue
+        let sourceFrameStride = mel.strides[2].intValue
+        for channel in 0..<channels {
+            let row = source + channel * sourceChannelStride
+            let out = destination + channel * frames
+            if sourceFrameStride == 1 {
+                out.update(from: row, count: frames)
+            } else {
+                for frame in 0..<frames {
+                    out[frame] = row[frame * sourceFrameStride]
+                }
+            }
+        }
+        var features: [String: MLFeatureValue] = [:]
+        for name in input.featureNames {
+            features[name] = input.featureValue(for: name)
+        }
+        features["mel"] = MLFeatureValue(multiArray: sliced)
         return try MLDictionaryFeatureProvider(dictionary: features)
     }
 

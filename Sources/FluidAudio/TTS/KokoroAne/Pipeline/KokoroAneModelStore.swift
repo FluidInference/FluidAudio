@@ -183,7 +183,9 @@ public actor KokoroAneModelStore {
     static let lexiconRetryInterval: TimeInterval = 300
     private var mandarinCustomLexicon: MandarinCustomLexicon = .empty
 
-    private let directory: URL?
+    /// Models root every asset of this store resolves under (`nil` = the
+    /// default TTS cache root).
+    public nonisolated let directory: URL?
     private let computeUnits: KokoroAneComputeUnits
     private let variant: KokoroAneVariant
 
@@ -433,11 +435,13 @@ public actor KokoroAneModelStore {
             throw KokoroAneError.inputProcessingFailed("French G2P requested on a non-french store")
         }
         let lexiconURL = try await KokoroAneResourceDownloader.ensureLexiconCache(
-            KokoroAneConstants.frenchLexiconCacheFile)
+            KokoroAneConstants.frenchLexiconCacheFile, directory: directory)
         let lexicon = try KokoroAneLexicon(contentsOf: lexiconURL)
+        let directory = self.directory
+        let multilingualG2P = MultilingualG2PModel.shared(directory: directory)
         let pipeline = FrenchG2P(lexicon: lexicon) { word in
-            try await KokoroAneResourceDownloader.ensureMultilingualG2PAssets(directory: nil)
-            return try await MultilingualG2PModel.shared.phonemize(word: word, language: .french)?.joined()
+            try await KokoroAneResourceDownloader.ensureMultilingualG2PAssets(directory: directory)
+            return try await multilingualG2P.phonemize(word: word, language: .french)?.joined()
         }
         frenchG2P = pipeline
         logger.info("Loaded French G2P (\(lexicon.count) lexicon entries)")
@@ -455,7 +459,7 @@ public actor KokoroAneModelStore {
         if let retryAfter = spanishLexiconRetryAfter, Date() < retryAfter { return .empty }
         do {
             let url = try await KokoroAneResourceDownloader.ensureLexiconCache(
-                KokoroAneConstants.spanishLexiconCacheFile)
+                KokoroAneConstants.spanishLexiconCacheFile, directory: directory)
             let lexicon = try KokoroAneLexicon(contentsOf: url)
             spanishLexiconCache = lexicon
             logger.info("Loaded Spanish lexicon (\(lexicon.count) exceptions)")
