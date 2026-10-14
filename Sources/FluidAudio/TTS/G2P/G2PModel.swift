@@ -33,19 +33,36 @@ actor G2PModel {
     /// Instance bound to the default TTS cache root.
     static var shared: G2PModel { shared(directory: nil) }
 
-    /// One instance per models root so a root's assets load once per process.
-    private static let registry = OSAllocatedUnfairLock<[String: G2PModel]>(initialState: [:])
+    private struct WeakModel {
+        weak var model: G2PModel?
+    }
+
+    /// One live instance per models root, so consumers of a root share one
+    /// loaded model while any of them holds it; a root nobody references
+    /// anymore releases its CoreML models.
+    private static let registry = OSAllocatedUnfairLock<[String: WeakModel]>(initialState: [:])
 
     /// The instance that loads from `<directory>/kokoro/` (`nil` = default
-    /// TTS cache root, as `TtsCacheDirectory.ensure()/Models`).
+    /// TTS cache root, as `TtsCacheDirectory.ensure()/Models`). Hold the
+    /// returned instance; it is not retained by the registry.
     static func shared(directory: URL?) -> G2PModel {
-        let key = directory?.standardizedFileURL.path ?? ""
+        let key = registryKey(directory: directory)
         return registry.withLock { registry in
-            if let existing = registry[key] { return existing }
+            if let existing = registry[key]?.model { return existing }
+            registry = registry.filter { $0.value.model != nil }
             let model = G2PModel(directory: directory)
-            registry[key] = model
+            registry[key] = WeakModel(model: model)
             return model
         }
+    }
+
+    /// Resolved models-root path, so `nil`, the explicit default root and a
+    /// symlinked spelling of one location map to the same instance.
+    private static func registryKey(directory: URL?) -> String {
+        guard let root = try? directory ?? TtsCacheDirectory.ensure().appendingPathComponent("Models") else {
+            return ""
+        }
+        return root.standardizedFileURL.resolvingSymlinksInPath().path
     }
 
     private let logger = AppLogger(subsystem: "com.fluidaudio.tts", category: "G2PModel")

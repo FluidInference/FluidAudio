@@ -37,13 +37,35 @@ final class G2PModelDirectoryTests: XCTestCase {
     func testG2PModelSharedRegistryIsPerDirectory() throws {
         let root = try makeTempRoot()
         let other = try makeTempRoot()
-        XCTAssertTrue(G2PModel.shared(directory: root) === G2PModel.shared(directory: root))
-        XCTAssertTrue(G2PModel.shared === G2PModel.shared(directory: nil))
-        XCTAssertFalse(G2PModel.shared(directory: root) === G2PModel.shared)
-        XCTAssertFalse(G2PModel.shared(directory: root) === G2PModel.shared(directory: other))
-        // Same location spelled differently (trailing slash) → same instance.
+        // Hold every instance: the registry only tracks live ones.
+        let forRoot = G2PModel.shared(directory: root)
+        let forOther = G2PModel.shared(directory: other)
+        let forDefault = G2PModel.shared
+        XCTAssertTrue(forRoot === G2PModel.shared(directory: root))
+        XCTAssertTrue(forDefault === G2PModel.shared(directory: nil))
+        XCTAssertFalse(forRoot === forDefault)
+        XCTAssertFalse(forRoot === forOther)
+        // Same location spelled differently (trailing slash, symlinked
+        // /var vs /private/var) → same instance.
         let slashed = URL(fileURLWithPath: root.path + "/", isDirectory: true)
-        XCTAssertTrue(G2PModel.shared(directory: root) === G2PModel.shared(directory: slashed))
+        XCTAssertTrue(forRoot === G2PModel.shared(directory: slashed))
+        XCTAssertTrue(forRoot === G2PModel.shared(directory: root.resolvingSymlinksInPath()))
+        // An explicit default root is the same instance as `nil`.
+        let explicitDefault = try TtsCacheDirectory.ensure().appendingPathComponent("Models")
+        XCTAssertTrue(forDefault === G2PModel.shared(directory: explicitDefault))
+    }
+
+    func testG2PModelSharedRegistryReleasesUnreferencedInstances() throws {
+        let root = try makeTempRoot()
+        weak var released: G2PModel?
+        func makeAndDrop() {
+            let model = G2PModel.shared(directory: root)
+            released = model
+        }
+        makeAndDrop()
+        XCTAssertNil(released, "registry must not retain an instance nobody holds")
+        let fresh = G2PModel.shared(directory: root)
+        XCTAssertTrue(fresh === G2PModel.shared(directory: root))
     }
 
     func testG2PModelLoadsFromCustomRootNotDefaultCache() async throws {
@@ -71,9 +93,11 @@ final class G2PModelDirectoryTests: XCTestCase {
         XCTAssertEqual(
             try model.kokoroDirectory().standardizedFileURL,
             root.appendingPathComponent(Repo.kokoro.folderName).standardizedFileURL)
-        XCTAssertTrue(MultilingualG2PModel.shared(directory: root) === MultilingualG2PModel.shared(directory: root))
-        XCTAssertTrue(MultilingualG2PModel.shared === MultilingualG2PModel.shared(directory: nil))
-        XCTAssertFalse(MultilingualG2PModel.shared(directory: root) === MultilingualG2PModel.shared)
+        let forRoot = MultilingualG2PModel.shared(directory: root)
+        let forDefault = MultilingualG2PModel.shared
+        XCTAssertTrue(forRoot === MultilingualG2PModel.shared(directory: root))
+        XCTAssertTrue(forDefault === MultilingualG2PModel.shared(directory: nil))
+        XCTAssertFalse(forRoot === forDefault)
     }
 
     func testMultilingualG2PModelLoadsFromCustomRootNotDefaultCache() async throws {
@@ -101,8 +125,18 @@ final class G2PModelDirectoryTests: XCTestCase {
         let store = KokoroAneModelStore(directory: root, variant: .english)
         XCTAssertEqual(store.directory, root)
         let fromStore = KokoroAneManager(modelStore: store)
-        XCTAssertTrue(fromStore.englishG2P === G2PModel.shared(directory: root))
+        XCTAssertTrue(fromStore.englishG2P === manager.englishG2P)
 
-        XCTAssertTrue(KokoroAneManager().englishG2P === G2PModel.shared)
+        let defaultManager = KokoroAneManager()
+        XCTAssertTrue(defaultManager.englishG2P === G2PModel.shared)
+    }
+
+    func testParadeeManagerBindsEnglishG2PToDirectory() throws {
+        let root = try makeTempRoot()
+        let manager = ParadeeManager(directory: root)
+        XCTAssertEqual(manager.englishG2P.modelsDirectory, root)
+        XCTAssertTrue(manager.englishG2P === G2PModel.shared(directory: root))
+        let kokoro = KokoroAneManager(directory: root)
+        XCTAssertTrue(kokoro.englishG2P === manager.englishG2P, "backends on one root share one G2P model")
     }
 }
