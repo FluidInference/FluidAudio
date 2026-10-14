@@ -1561,21 +1561,33 @@ public enum ModelNames {
     ///     (`RangeDim(1, 108)`). CPU/GPU only — dynamic shapes block ANE.
     ///   - `decoderCacheExternalV2` — FP32, fixed `attention_mask` shape
     ///     `[1, 1, 1, 108]`. ANE-resident, ~1.6× faster decoder end-to-end
-    ///     on Apple Silicon. Drop-in replacement; `CoherePipeline`
-    ///     auto-detects the variant by inspecting the `attention_mask`
-    ///     input shape.
+    ///     on Apple Silicon.
+    ///   - `decoderCacheExternalV3` — same static graph as v2 with a 256-slot
+    ///     KV cache. Default. The 108-slot cache capped dense 35 s windows at
+    ///     ~99 output tokens and silently dropped the rest (#1013).
+    ///     `CoherePipeline` reads the cache length from the loaded model's
+    ///     `k_cache_0` shape, so all three variants load with the same code.
     public enum CohereTranscribe {
         public static let encoder = "cohere_encoder"
         public static let decoderCacheExternal = "cohere_decoder_cache_external"
         public static let decoderCacheExternalV2 = "cohere_decoder_cache_external_v2"
+        public static let decoderCacheExternalV3 = "cohere_decoder_cache_external_v3"
         public static let vocab = "vocab.json"
 
         public static let encoderCompiledFile = encoder + ".mlmodelc"
         public static let decoderCacheExternalCompiledFile = decoderCacheExternal + ".mlmodelc"
         public static let decoderCacheExternalV2CompiledFile = decoderCacheExternalV2 + ".mlmodelc"
+        public static let decoderCacheExternalV3CompiledFile = decoderCacheExternalV3 + ".mlmodelc"
 
-        /// Default required set — ships the ANE-friendly v2 decoder.
+        /// Default required set — ships the 256-slot static v3 decoder.
         public static let requiredModels: Set<String> = [
+            encoderCompiledFile,
+            decoderCacheExternalV3CompiledFile,
+            vocab,
+        ]
+
+        /// 108-slot static v2 decoder set (pre-v3).
+        public static let requiredModelsV2: Set<String> = [
             encoderCompiledFile,
             decoderCacheExternalV2CompiledFile,
             vocab,

@@ -1502,7 +1502,7 @@ public enum TtsBenchmarkCommand {
                 encoderDir: modelDir,
                 decoderDir: modelDir,
                 vocabDir: modelDir,
-                decoderVariant: .v2,
+                decoderVariant: .v3,
                 computeUnits: computeUnits)
             let pipeline = CoherePipeline()
             let converter = AudioConverter()

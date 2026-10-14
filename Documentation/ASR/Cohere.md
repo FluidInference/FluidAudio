@@ -23,9 +23,29 @@ variants live in different directories.
   (35 s at 10 ms hop), output `[1, 438, 1024]` (FP16)
 - **Decoder**: 8-layer transformer with external KV cache (Parakeet pattern),
   hidden size 1024, 8 heads × 128 head-dim
-- **Cache window**: 108 tokens
+- **Cache window**: 256 slots (v3 decoder, default); 108 slots in the v1/v2
+  exports. The prompt (10 tokens) and the output share the cache, so the
+  longest output per 35 s window is `cacheLength − 10`. The runtime reads
+  the length from the loaded decoder's `k_cache_0` shape.
 - **Vocabulary**: 16,384 SentencePiece tokens
 - **Max audio**: 35 s per call (single chunk)
+
+### Decoder variants
+
+| Variant | File | `attention_mask` | KV cache | Notes |
+|---|---|---|---|---|
+| `.v3` (default) | `cohere_decoder_cache_external_v3.mlmodelc` | static `[1, 1, 1, 256]` | 256 slots | Same graph as v2; fixes the token cap below |
+| `.v2` | `cohere_decoder_cache_external_v2.mlmodelc` | static `[1, 1, 1, 108]` | 108 slots | ANE-resident static shapes |
+| `.v1` | `cohere_decoder_cache_external.mlmodelc` | dynamic `RangeDim(1, 108)` | 108 slots | FP16, CPU/GPU only |
+
+The 108-slot exports cap each 35 s window at 98 output tokens. Dense speech
+(fast German, two-speaker calls) needs 150–225 tokens per window, so every
+window hit the cap and the rest of the window was silently dropped — up to a
+third of the words on a 25 min call ([#1013](https://github.com/FluidInference/FluidAudio/issues/1013)).
+`TranscriptionResult.cappedWindows` reports how many windows ran out of
+budget without emitting EOS; the CLI prints it as a warning. If you pass
+`maxNewTokens` explicitly it is clamped to the cache, so the v3 decoder is
+needed to get past 98 tokens per window.
 
 ### Upstream model spec (`cohere-pytorch/config.json`)
 
@@ -97,7 +117,14 @@ let result = try await pipeline.transcribe(
     language: .english
 )
 print(result.text)
+print(models.cacheLength)     // 256 with the v3 decoder
+print(result.cappedWindows)   // > 0 means a window ran out of decode budget
 ```
+
+`transcribeLong` slides the 35 s window with a 5 s overlap over longer audio
+and stitches the windows at the longest common token run inside the overlap.
+The seam is cut after the matched run on both sides, so neither window's copy
+of the overlap audio is emitted twice.
 
 `TranscriptionResult` also exposes `encoderSeconds`, `decoderSeconds`, and
 `totalSeconds` for per-stage profiling.
