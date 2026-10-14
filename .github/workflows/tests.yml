@@ -113,6 +113,23 @@ jobs:
       - name: Build package (x86_64)
         run: swift build --arch x86_64
 
+  build-tvos:
+    name: Build library (tvOS simulator cross-compile)
+    runs-on: macos-15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Select Xcode 26
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.3.app
+          swift --version
+
+      # NemoTextProcessing.xcframework ships no tvOS slice, so the library must
+      # build with the engine absent (#890). Nothing else compiles this triple.
+      - name: Build library (tvOS simulator)
+        run: swift build --product FluidAudio --triple arm64-apple-tvos-simulator
+
   build-ios:
     name: Build (iOS)
     runs-on: macos-15

@@ -219,7 +219,7 @@ public actor KokoroAneModelStore {
 
     private func loadModels() async throws {
         if version == .v3 {
-            guard #available(macOS 15, iOS 18, *) else {
+            guard #available(macOS 15, iOS 18, tvOS 18, *) else {
                 throw KokoroAneError.inputProcessingFailed("ANE-v3 requires macOS 15 / iOS 18 or newer")
             }
             try KokoroAneV3Assets.validateVariant(variant)

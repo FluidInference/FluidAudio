@@ -32,7 +32,7 @@ struct PocketTtsStateModels: Sendable {
 /// writes, so access must be serialized. One engine per session; the state
 /// is reset per chunk by re-injecting the fp16 voice snapshot (which
 /// overwrites every slot, so no `makeState()` per utterance is needed).
-@available(macOS 15.0, iOS 18.0, *)
+@available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
 actor PocketTtsStateEngine {
 
     /// A voice KV snapshot converted to the state's at-rest format: fp16 bit

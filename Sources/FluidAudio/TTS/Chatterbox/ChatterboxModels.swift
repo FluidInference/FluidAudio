@@ -8,7 +8,7 @@ import Foundation
 /// `tokenizer/*.json`).
 ///
 /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
-@available(macOS 15.0, iOS 18.0, *)
+@available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
 struct ChatterboxModels: Sendable {
 
     private static let logger = AppLogger(category: "ChatterboxModels")

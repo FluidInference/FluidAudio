@@ -154,7 +154,7 @@ extension AsrModels {
     static func loadEncoderLadder(
         at path: URL, computeUnits: MLComputeUnits, defaultEncoder: MLModel
     ) async -> [EncoderLadderFunction] {
-        guard #available(macOS 15.0, iOS 18.0, *) else { return [] }
+        guard #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) else { return [] }
         let names: [String]
         do {
             names = try await MLModelAsset(url: path).functionNames
@@ -242,7 +242,7 @@ extension AsrModels {
         case .phonon2: name = "Phonon-2"
         default: return
         }
-        if #available(macOS 15, iOS 18, *) { return }
+        if #available(macOS 15, iOS 18, tvOS 18, *) { return }
         throw AsrModelsError.loadingFailed(
             "\(name) requires iOS 18 / macOS 15 (its compressed encoder uses iOS 18 Core ML ops). "
                 + "Use AsrModelVersion.ultra on iOS 17 / macOS 14.")

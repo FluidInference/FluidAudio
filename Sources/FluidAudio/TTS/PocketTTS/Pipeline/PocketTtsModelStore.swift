@@ -94,7 +94,7 @@ public actor PocketTtsModelStore {
             // MLState + multifunction models need the macOS 15 / iOS 18
             // CoreML runtime; the package itself still targets macOS 14, so
             // this is a runtime gate rather than a compile-time one.
-            guard #available(macOS 15.0, iOS 18.0, *) else {
+            guard #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) else {
                 throw PocketTTSError.processingFailed(
                     "PocketTTS `.aneState` placement requires macOS 15+/iOS 18+ "
                         + "(MLState and multifunction CoreML models)."
@@ -228,7 +228,7 @@ public actor PocketTtsModelStore {
     /// prefill no longer round-trips ~100 MB of cache I/O so it doesn't need
     /// the GPU escape hatch that the IO `cond_prefill` uses. Mimi stays
     /// `.cpuOnly` (ANE fp16 feedback beep, mobius IOS_COREML_ISSUES.md #7).
-    @available(macOS 15.0, iOS 18.0, *)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
     private func loadStatePipeline(languageRoot: URL) throws {
         let loadStart = Date()
         let stateURL = languageRoot.appendingPathComponent(

@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Errors thrown by the Paradee TTS backend.
@@ -36,3 +37,4 @@ public enum ParadeeError: Error, LocalizedError {
         }
     }
 }
+#endif

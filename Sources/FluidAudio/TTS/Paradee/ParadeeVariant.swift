@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Paradee weight precision. Both variants share the same graphs, vocab and
@@ -21,3 +22,4 @@ public enum ParadeeVariant: String, Sendable, CaseIterable {
         }
     }
 }
+#endif

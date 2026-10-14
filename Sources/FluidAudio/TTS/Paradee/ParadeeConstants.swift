@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Fixed pipeline parameters for the Paradee-8M CoreML backend. Values mirror
@@ -28,3 +29,4 @@ public enum ParadeeConstants {
     /// Speech-rate multiplier. Durations scale by `1 / speed`.
     public static let defaultSpeed: Float = 1.0
 }
+#endif
