@@ -9,7 +9,7 @@ import Foundation
 ///
 /// The decoder carries no KV cache: each step re-runs the full `[1, 256]` token
 /// sequence (matches the converted CoreML model). The 15 s window is fixed; audio
-/// longer than 15 s is truncated (chunking is a future addition).
+/// longer than 15 s is split into overlapping windows and merged at the seams.
 ///
 /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 public actor CanaryManager {
@@ -54,7 +54,7 @@ public actor CanaryManager {
         source: CanaryLanguage,
         target: CanaryLanguage,
         pnc: Bool = true,
-        progressHandler: DownloadUtils.ProgressHandler? = nil
+        progressHandler: ProgressHandler? = nil
     ) async throws -> CanaryManager {
         let models = try await CanaryModels.downloadAndLoad(precision: precision, progressHandler: progressHandler)
         return try CanaryManager(models: models, source: source, target: target, pnc: pnc)
