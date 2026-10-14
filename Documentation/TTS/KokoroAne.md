@@ -412,12 +412,17 @@ Asset footprint (downloaded on first synthesis, cached at
 |-----------------------|--------|-----------------------------------------|
 | `pinyin_phrases.bin`  | 9.5 MB | `kokoro-82m-coreml/ANE-zh/assets/`      |
 | `pinyin_single.bin`   | 480 KB | same                                    |
+| `jieba_hmm_*.bin`     | 3 MB   | same (HMM word segmentation for OOV runs) |
+| `g2pw/g2pw.mlmodelc`  | 152 MB | `kokoro-82m-coreml/ANE-zh/g2pw/` (int8 BERT polyphone classifier) |
+| `g2pw/vocab.txt`, `g2pw/POLYPHONIC_CHARS.txt` | 210 KB | same (`bert-base-chinese` vocab + 3582-char Traditional inventory) |
 
-What the Mandarin G2P intentionally does **not** ship: jieba HMM
-fallback, POS-aware tone sandhi, neural polyphone disambiguation
-(g2pW-style), erhua handling, number/date verbalization. These are all
-viable upgrades — the current pipeline trades them for a zero-network
-~10 MB footprint that handles short conversational text well.
+On top of the dict lookup the pipeline runs jieba-HMM segmentation for
+out-of-vocabulary runs, tone sandhi, erhua folding and g2pW polyphone
+disambiguation. g2pW only fires on single-char dict fallbacks whose
+Hanzi exists in its Traditional inventory (e.g. `行`, `重`, `好`);
+simplified-only polyphones such as `还` / `长` / `发` keep the dict's
+first reading. Every g2pW asset is optional — if the bundle or its text
+files are missing, synthesis continues dict-only.
 
 ## Japanese G2P
 

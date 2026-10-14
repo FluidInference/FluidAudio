@@ -491,12 +491,19 @@ public actor KokoroAneModelStore {
             let tokenizer = try MandarinBertTokenizer.load(vocabURL: vocabURL)
             let catalog = try MandarinPolyphoneCatalog.load(fileURL: polyURL)
             let config = MLModelConfiguration()
-            config.computeUnits = .cpuAndNeuralEngine
+            // CPU only: the masked-softmax tail of this bundle comes back
+            // unnormalised on the ANE (candidate mass ≈ 0.01 instead of
+            // 1) and the GPU path pays a ~2.5 s per-process compile.
+            // fp32 CPU is exact at ~47 ms per polyphone query.
+            config.computeUnits = .cpuOnly
             let model = try MLModel(contentsOf: modelURL, configuration: config)
-            return MandarinG2pwModel(
+            return try MandarinG2pwModel(
                 model: model, tokenizer: tokenizer, catalog: catalog)
         } catch {
-            logger.info(
+            // Assets are on disk but unusable — louder than the
+            // missing-asset case so a stale bundle doesn't hide behind
+            // the dict fallback.
+            logger.warning(
                 "g2pW load failed (\(error.localizedDescription)) — "
                     + "Mandarin G2P will run dict-only")
             return nil
