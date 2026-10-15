@@ -254,9 +254,14 @@ final class CleanSpeakerEmbeddingsTests: XCTestCase {
         let r = DiarizationResult(
             segments: [segment("A", 0, 8)],
             chunkEmbeddings: [chunk("A", 0, 6, a), chunk("A", 0, 6, a1), chunk("A", 6, 8, a2)])
-        let unit = { (v: [Float]) in VDSPOperations.l2Normalize(v) }
-        let shared = VDSPOperations.l2Normalize(
-            zip(zip(unit(a), unit(a1)), unit(a2)).map { 3 * $0.0 + 3 * $0.1 + 2 * $1 })
+        let ua = VDSPOperations.l2Normalize(a)
+        let ua1 = VDSPOperations.l2Normalize(a1)
+        let ua2 = VDSPOperations.l2Normalize(a2)
+        var weighted = [Float](repeating: 0, count: ua.count)
+        for i in weighted.indices {
+            weighted[i] = 3 * ua[i] + 3 * ua1[i] + 2 * ua2[i]
+        }
+        let shared = VDSPOperations.l2Normalize(weighted)
         XCTAssertGreaterThan(similarity(clean(r)["A"], shared), 0.99999)
         XCTAssertEqual(SpeakerUtilities.sharedWeights([[(0, 6)], [(0, 6)], [(6, 8)]]), [3, 3, 2])
         XCTAssertEqual(SpeakerUtilities.sharedWeights([[(0, 2), (4, 6)], [(1, 5)]]), [3, 3])

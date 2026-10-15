@@ -125,10 +125,26 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.3.app
           swift --version
 
+      # SwiftPM does not pick the tvOS SDK from the triple alone; without
+      # --sdk it compiles against the macOS sysroot and fails to load the
+      # tvOS standard library.
+      - name: Locate tvOS simulator SDK
+        id: tvos-sdk
+        run: |
+          if ! sdk=$(xcrun --sdk appletvsimulator --show-sdk-path); then
+            xcodebuild -downloadPlatform tvOS
+            sdk=$(xcrun --sdk appletvsimulator --show-sdk-path)
+          fi
+          echo "path=$sdk" >> "$GITHUB_OUTPUT"
+          echo "tvOS SDK: $sdk"
+
       # NemoTextProcessing.xcframework ships no tvOS slice, so the library must
       # build with the engine absent (#890). Nothing else compiles this triple.
       - name: Build library (tvOS simulator)
-        run: swift build --product FluidAudio --triple arm64-apple-tvos-simulator
+        run: |
+          swift build --target FluidAudio \
+            --triple arm64-apple-tvos-simulator \
+            --sdk "${{ steps.tvos-sdk.outputs.path }}"
 
   build-ios:
     name: Build (iOS)
