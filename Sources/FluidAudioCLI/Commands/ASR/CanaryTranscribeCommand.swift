@@ -4,9 +4,11 @@ import FluidAudio
 import Foundation
 
 /// `canary-transcribe <audio> [--fp16|--int8] [--reference "..."] [--verbose]`
+/// `canary-transcribe <audio> --translate-to de [--source-lang en]`
 /// `canary-transcribe --benchmark <librispeech-dir> [--max-files N] [--fp16|--int8]`
 ///
-/// Canary-1B-v2 attention encoder-decoder ASR. Default precision int4 (ANE).
+/// Canary-1B-v2 attention encoder-decoder ASR + speech translation (en ↔ 24
+/// European languages via `--translate-to`). Default precision int4 (ANE).
 enum CanaryTranscribeCommand {
     private static let logger = AppLogger(category: "CanaryTranscribe")
 
@@ -18,6 +20,9 @@ enum CanaryTranscribeCommand {
         var maxFiles = Int.max
         var maxDuration = Double.greatestFiniteMagnitude
         var verbose = false
+        var sourceLang: CanaryLanguage = .english
+        var targetLang: CanaryLanguage?
+        var translateBenchmarkManifest: String?
 
         var i = 0
         while i < arguments.count {
@@ -31,12 +36,27 @@ enum CanaryTranscribeCommand {
             case "--benchmark":
                 i += 1
                 if i < arguments.count { benchmarkDir = arguments[i] }
+            case "--translate-benchmark":
+                i += 1
+                if i < arguments.count { translateBenchmarkManifest = arguments[i] }
             case "--max-files":
                 i += 1
-                if i < arguments.count { maxFiles = Int(arguments[i]) ?? .max }
+                if i < arguments.count { maxFiles = max(Int(arguments[i]) ?? .max, 0) }
             case "--max-duration":
                 i += 1
                 if i < arguments.count { maxDuration = Double(arguments[i]) ?? .greatestFiniteMagnitude }
+            case "--source-lang", "--translate-to":
+                let flag = arguments[i]
+                i += 1
+                guard i < arguments.count else {
+                    print("Error: \(flag) requires a language code. Supported: \(supportedCodes)")
+                    return
+                }
+                guard let lang = CanaryLanguage(rawValue: arguments[i]) else {
+                    print("Error: unknown \(flag) '\(arguments[i])'. Supported: \(supportedCodes)")
+                    return
+                }
+                if flag == "--source-lang" { sourceLang = lang } else { targetLang = lang }
             case "--verbose", "-v": verbose = true
             case "--help", "-h":
                 printUsage()
@@ -46,15 +66,48 @@ enum CanaryTranscribeCommand {
             i += 1
         }
 
+        // Flag-combination validation: the language flags change the decode task,
+        // so modes that score against fixed-language references must not compose
+        // with a translation prompt.
+        let isTranslating = targetLang.map { $0 != sourceLang } ?? false
+        if benchmarkDir != nil && translateBenchmarkManifest != nil {
+            print("Error: --benchmark and --translate-benchmark are mutually exclusive")
+            return
+        }
+        if translateBenchmarkManifest != nil && !isTranslating {
+            print("Error: --translate-benchmark requires --translate-to with a language different from --source-lang")
+            return
+        }
+        if isTranslating && (benchmarkDir != nil || reference != nil) {
+            print(
+                "Error: --translate-to cannot be combined with WER scoring (--benchmark/--reference): "
+                    + "hypotheses would be in \(targetLang!.rawValue) while references are transcripts")
+            return
+        }
+        if isTranslating, sourceLang != .english, targetLang != .english {
+            print("Error: canary-1b-v2 only supports translation to or from English (en ↔ X)")
+            return
+        }
+
         do {
             logger.info("Loading Canary models (\(precision.rawValue))...")
             let loadStart = Date()
-            let manager = try await CanaryManager.load(precision: precision)
+            let manager = try await CanaryManager.load(
+                precision: precision, source: sourceLang, target: targetLang ?? sourceLang)
+            if let target = targetLang, target != sourceLang {
+                logger.info("Speech translation: \(sourceLang.rawValue) → \(target.rawValue)")
+            }
             if verbose { logger.info("Loaded in \(String(format: "%.1f", Date().timeIntervalSince(loadStart)))s") }
 
             if let dir = benchmarkDir {
                 await runBenchmark(
                     manager: manager, dir: dir, maxFiles: maxFiles, maxDuration: maxDuration, precision: precision)
+                return
+            }
+
+            if let manifest = translateBenchmarkManifest {
+                await runTranslateBenchmark(
+                    manager: manager, manifestPath: manifest, maxFiles: maxFiles, precision: precision)
                 return
             }
 
@@ -87,6 +140,75 @@ enum CanaryTranscribeCommand {
             }
         } catch {
             logger.error("Transcription failed: \(error)")
+        }
+    }
+
+    // MARK: - Translation benchmark (FLEURS-style pairs manifest)
+
+    private struct TranslatePair: Codable {
+        let audio: String
+        let reference: String
+        let id: String?
+    }
+
+    /// Run speech translation over a JSON manifest of `{audio, reference}` pairs
+    /// and report corpus BLEU + RTFx. Writes `<manifest>.hyps.json` with parallel
+    /// hypotheses/references for exact scoring via sacrebleu.
+    private static func runTranslateBenchmark(
+        manager: CanaryManager, manifestPath: String, maxFiles: Int, precision: CanaryPrecision
+    ) async {
+        let url = URL(fileURLWithPath: manifestPath)
+        guard let data = try? Data(contentsOf: url),
+            let pairs = try? JSONDecoder().decode([TranslatePair].self, from: data)
+        else {
+            logger.error("Could not read pairs manifest at \(manifestPath)")
+            return
+        }
+        let subset = Array(pairs.prefix(maxFiles))
+        logger.info("Translation benchmark (\(precision.rawValue)): \(subset.count)/\(pairs.count) pairs")
+
+        var hyps: [String] = []
+        var refs: [String] = []
+        var totalAudio = 0.0
+        var totalTime = 0.0
+        var failed = 0
+        for (idx, pair) in subset.enumerated() {
+            let audioURL = URL(fileURLWithPath: pair.audio)
+            do {
+                let duration = audioDuration(audioURL)
+                let start = Date()
+                let hyp = try await manager.transcribe(audioURL: audioURL)
+                totalTime += Date().timeIntervalSince(start)
+                totalAudio += duration
+                hyps.append(hyp)
+                refs.append(pair.reference)
+            } catch {
+                failed += 1
+                logger.warning("Failed \(pair.audio): \(error.localizedDescription)")
+            }
+            if (idx + 1) % 50 == 0 {
+                let bleuSoFar = BLEUCalculator.corpusBLEU(hypotheses: hyps, references: refs)
+                logger.info(
+                    "  \(idx + 1)/\(subset.count) | BLEU \(String(format: "%.2f", bleuSoFar)) | RTFx \(String(format: "%.2f", totalAudio / max(totalTime, 0.001)))x"
+                )
+            }
+        }
+
+        let bleu = BLEUCalculator.corpusBLEU(hypotheses: hyps, references: refs)
+        print("Pairs: \(hyps.count) scored, \(failed) failed")
+        print("Corpus BLEU (in-process, 13a-style): \(String(format: "%.2f", bleu))")
+        print(
+            "Audio \(String(format: "%.1f", totalAudio))s | inference \(String(format: "%.1f", totalTime))s | RTFx \(String(format: "%.2f", totalAudio / max(totalTime, 0.001)))x"
+        )
+
+        let outURL = url.deletingPathExtension().appendingPathExtension("hyps.json")
+        do {
+            let out = try JSONSerialization.data(
+                withJSONObject: ["hypotheses": hyps, "references": refs], options: [.prettyPrinted])
+            try out.write(to: outURL)
+            print("Hypotheses written to \(outURL.path) (score exactly with: sacrebleu)")
+        } catch {
+            logger.error("Failed to write hypotheses JSON to \(outURL.path): \(error)")
         }
     }
 
@@ -183,6 +305,10 @@ enum CanaryTranscribeCommand {
         return CMTimeGetSeconds(asset.duration)
     }
 
+    private static var supportedCodes: String {
+        CanaryLanguage.allCases.map(\.rawValue).sorted().joined(separator: ", ")
+    }
+
     private static func printUsage() {
         print(
             """
@@ -196,8 +322,13 @@ enum CanaryTranscribeCommand {
               --int4         int4 encoder/decoder (ANE, ~573 MB, iOS18) — default
               --fp16         fp16 encoder/decoder (ANE, exact parity, iOS17)
               --int8         int8 encoder/decoder (CPU only)
+              --translate-to L  translate speech to language L (ISO 639-1, e.g. de)
+              --source-lang L   spoken language (default en)
               --reference T  reference transcript for single-file WER
               --benchmark D  run over a LibriSpeech-style dir (uses *.trans.txt refs)
+              --translate-benchmark M  BLEU over a JSON manifest of {audio, reference}
+                             pairs (requires --translate-to; not combinable
+                             with --benchmark/--reference)
               --max-files N  limit benchmark file count
               --verbose,-v   print load + per-file timing
               --help,-h      show this help
