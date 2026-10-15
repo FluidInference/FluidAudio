@@ -913,7 +913,7 @@ struct ChunkProcessor {
 
         if orderedChunkOutputs.count > 1 {
             let vocabulary = await manager.vocabulary
-            let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary)
+            let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary, modelVersion: modelVersion)
             let caseVariantIds = Self.caseVariantCanonicalIds(vocabulary: vocabulary)
             for (index, chunk) in orderedChunkOutputs.enumerated().dropFirst() {
                 mergedTokens = mergeChunks(
@@ -948,7 +948,7 @@ struct ChunkProcessor {
         // Documentation/ASR/LongTranscription.md.
         if orderedChunkOutputs.count > 1, mergedTokens.count > 1, await manager.seamGapRepair {
             let vocabulary = await manager.vocabulary
-            let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary)
+            let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary, modelVersion: modelVersion)
             let minGapSeconds = await manager.seamGapRepairMinGapSeconds
             let speechRmsThreshold = try adaptiveSpeechRmsThreshold()
 
@@ -1061,6 +1061,15 @@ struct ChunkProcessor {
             ids.insert(id)
         }
         return ids
+    }
+
+    /// The splice guard for one model. Japanese is written without word spaces, so no piece marks a word
+    /// start: the guard would read every piece as a mid-word continuation and drop tokens up to the next
+    /// punctuation mark ("愛をつかいます。" became "愛をつ。"). Nil merges by time and token match alone, which
+    /// is correct for an unspaced script (a token is never split across a seam).
+    static func spliceSafeTokenIds(vocabulary: [Int: String], modelVersion: AsrModelVersion?) -> Set<Int>? {
+        if modelVersion == .tdtJa { return nil }
+        return spliceSafeTokenIds(vocabulary: vocabulary)
     }
 
     /// Maps token IDs with a case-only twin to a shared canonical ID so the
