@@ -162,7 +162,7 @@ final class CtcDPAlgorithmTests: XCTestCase {
         }
     }
 
-    // MARK: - fillDPTable (indirectly tested through ctcWordSpotConstrained)
+    // MARK: - Terminal states (indirectly tested through ctcWordSpotConstrained)
 
     func testDPTableScoreMonotonicity() {
         // With a perfect match, the score at the end should be non-negative
