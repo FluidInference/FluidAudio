@@ -68,6 +68,14 @@ public enum CanaryConfig {
     /// <|pnc|> <|noitn|> <|notimestamp|> <|nodiarize|>
     public static let promptEnTranscribePnc: [Int32] = [16053, 7, 4, 16, 64, 64, 5, 9, 11, 13]
 
+    /// VAD segmentation for pause-aligned long-form decoding. Speech is cut only at
+    /// real pauses (no forced split at a duration cap, which lands on the smallest
+    /// gap inside a phrase); `CanaryManager` packs the pieces into ≤ 15 s spans and
+    /// overlap-chunks any single pause-free stretch longer than that.
+    public static func vadSegmentation(minSilence: TimeInterval = 0.75) -> VadSegmentationConfig {
+        VadSegmentationConfig(minSilenceDuration: minSilence, maxSpeechDuration: .infinity)
+    }
+
     /// Slot indices of the source/target language tokens within a canary2 prompt.
     public static let promptSourceLangIndex = 4
     public static let promptTargetLangIndex = 5

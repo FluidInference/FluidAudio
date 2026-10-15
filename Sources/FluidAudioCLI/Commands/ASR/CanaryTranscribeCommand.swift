@@ -4,7 +4,7 @@ import FluidAudio
 import Foundation
 
 /// `canary-transcribe <audio> [--fp16|--int8] [--reference "..."] [--verbose]`
-/// `canary-transcribe <audio> --translate-to de [--source-lang en]`
+/// `canary-transcribe <audio> --translate-to de [--source-lang en] [--vad]`
 /// `canary-transcribe --benchmark <librispeech-dir> [--max-files N] [--fp16|--int8]`
 ///
 /// Canary-1B-v2 attention encoder-decoder ASR + speech translation (en ↔ 24
@@ -23,6 +23,8 @@ enum CanaryTranscribeCommand {
         var sourceLang: CanaryLanguage = .english
         var targetLang: CanaryLanguage?
         var translateBenchmarkManifest: String?
+        var useVad = false
+        var vadMinSilence: TimeInterval = 0.75
 
         var i = 0
         while i < arguments.count {
@@ -57,6 +59,10 @@ enum CanaryTranscribeCommand {
                     return
                 }
                 if flag == "--source-lang" { sourceLang = lang } else { targetLang = lang }
+            case "--vad": useVad = true
+            case "--vad-min-silence":
+                i += 1
+                if i < arguments.count { vadMinSilence = Double(arguments[i]) ?? vadMinSilence }
             case "--verbose", "-v": verbose = true
             case "--help", "-h":
                 printUsage()
@@ -98,6 +104,11 @@ enum CanaryTranscribeCommand {
                 logger.info("Speech translation: \(sourceLang.rawValue) → \(target.rawValue)")
             }
             if verbose { logger.info("Loaded in \(String(format: "%.1f", Date().timeIntervalSince(loadStart)))s") }
+            let vad: VadManager? = useVad ? try await VadManager() : nil
+            let segmentation = CanaryConfig.vadSegmentation(minSilence: vadMinSilence)
+            if vad != nil {
+                logger.info("VAD segmentation on: pauses ≥ \(vadMinSilence)s, pieces ≤ 15 s, no seam merge")
+            }
 
             if let dir = benchmarkDir {
                 await runBenchmark(
@@ -107,7 +118,8 @@ enum CanaryTranscribeCommand {
 
             if let manifest = translateBenchmarkManifest {
                 await runTranslateBenchmark(
-                    manager: manager, manifestPath: manifest, maxFiles: maxFiles, precision: precision)
+                    manager: manager, vad: vad, segmentation: segmentation, manifestPath: manifest,
+                    maxFiles: maxFiles, precision: precision)
                 return
             }
 
@@ -124,7 +136,12 @@ enum CanaryTranscribeCommand {
 
             let duration = audioDuration(audioURL)
             let start = Date()
-            let text = try await manager.transcribe(audioURL: audioURL)
+            let text: String
+            if let vad {
+                text = try await manager.transcribe(audioURL: audioURL, vad: vad, segmentation: segmentation)
+            } else {
+                text = try await manager.transcribe(audioURL: audioURL)
+            }
             let elapsed = Date().timeIntervalSince(start)
             let rtfx = duration > 0 ? duration / elapsed : 0
 
@@ -155,7 +172,8 @@ enum CanaryTranscribeCommand {
     /// and report corpus BLEU + RTFx. Writes `<manifest>.hyps.json` with parallel
     /// hypotheses/references for exact scoring via sacrebleu.
     private static func runTranslateBenchmark(
-        manager: CanaryManager, manifestPath: String, maxFiles: Int, precision: CanaryPrecision
+        manager: CanaryManager, vad: VadManager?, segmentation: VadSegmentationConfig, manifestPath: String,
+        maxFiles: Int, precision: CanaryPrecision
     ) async {
         let url = URL(fileURLWithPath: manifestPath)
         guard let data = try? Data(contentsOf: url),
@@ -177,7 +195,12 @@ enum CanaryTranscribeCommand {
             do {
                 let duration = audioDuration(audioURL)
                 let start = Date()
-                let hyp = try await manager.transcribe(audioURL: audioURL)
+                let hyp: String
+                if let vad {
+                    hyp = try await manager.transcribe(audioURL: audioURL, vad: vad, segmentation: segmentation)
+                } else {
+                    hyp = try await manager.transcribe(audioURL: audioURL)
+                }
                 totalTime += Date().timeIntervalSince(start)
                 totalAudio += duration
                 hyps.append(hyp)
@@ -324,6 +347,9 @@ enum CanaryTranscribeCommand {
               --int8         int8 encoder/decoder (CPU only)
               --translate-to L  translate speech to language L (ISO 639-1, e.g. de)
               --source-lang L   spoken language (default en)
+              --vad          split long audio at pauses (Silero VAD) into ≤ 15 s pieces instead of
+                             overlap chunking; recommended for translation of audio > 15 s
+              --vad-min-silence S  pause length that ends a piece with --vad (default 0.75)
               --reference T  reference transcript for single-file WER
               --benchmark D  run over a LibriSpeech-style dir (uses *.trans.txt refs)
               --translate-benchmark M  BLEU over a JSON manifest of {audio, reference}
