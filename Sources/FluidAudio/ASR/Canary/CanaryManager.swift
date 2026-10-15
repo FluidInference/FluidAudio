@@ -92,10 +92,82 @@ public actor CanaryManager {
             // token-stable across the overlap the way a transcript is, so the
             // LCS seam merge can duplicate or drop content at window seams.
             Self.logger.warning(
-                "Translating \(audio.count) samples (> 15 s) via chunking; seam merges are "
-                    + "unreliable for translation output. Prefer segmenting at pauses ≤ 15 s.")
+                "Translating \(audio.count) samples (> 15 s) via overlap chunking; seam merges are "
+                    + "unreliable for translation output. Use transcribe(audio:vad:) to split at pauses.")
         }
+        return detokenize(try transcribeOverlapping(audio: audio))
+    }
 
+    /// Transcribe or translate long audio by decoding pause-aligned pieces.
+    ///
+    /// `speechSegments` (from `VadManager.segmentSpeech`) are packed into
+    /// contiguous spans of at most 15 s, each decoded as one window. Pieces never
+    /// overlap, so no seam merge runs — this is the path for speech translation,
+    /// where translated text is not token-stable across an overlap. Silence
+    /// between packed segments is kept so the model sees natural phrasing. A
+    /// single segment longer than 15 s falls back to overlap chunking.
+    public func transcribe(audio: [Float], speechSegments: [VadSegment]) throws -> String {
+        let sampleRate = CanaryConfig.sampleRate
+        let ranges = speechSegments.compactMap { segment -> Range<Int>? in
+            let start = max(0, min(segment.startSample(sampleRate: sampleRate), audio.count))
+            let end = max(start, min(segment.endSample(sampleRate: sampleRate), audio.count))
+            return end > start ? start..<end : nil
+        }
+        let maxN = CanaryConfig.maxSamples
+        var pieces: [String] = []
+        for span in Self.packSegments(ranges, maxSamples: maxN) {
+            let slice = Array(audio[span])
+            let tokens =
+                slice.count <= maxN ? try transcribeWindow(audio: slice) : try transcribeOverlapping(audio: slice)
+            let text = detokenize(tokens).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty { pieces.append(text) }
+        }
+        return pieces.joined(separator: " ")
+    }
+
+    /// Run VAD, then decode pause-aligned pieces (see `transcribe(audio:speechSegments:)`).
+    public func transcribe(
+        audio: [Float],
+        vad: VadManager,
+        segmentation: VadSegmentationConfig = CanaryConfig.vadSegmentation()
+    ) async throws -> String {
+        let segments = try await vad.segmentSpeech(audio, config: segmentation)
+        return try transcribe(audio: audio, speechSegments: segments)
+    }
+
+    /// Run VAD on a file, then decode pause-aligned pieces.
+    public func transcribe(
+        audioURL: URL,
+        vad: VadManager,
+        segmentation: VadSegmentationConfig = CanaryConfig.vadSegmentation()
+    ) async throws -> String {
+        let converter = AudioConverter(sampleRate: Double(CanaryConfig.sampleRate))
+        let samples = try converter.resampleAudioFile(audioURL)
+        return try await transcribe(audio: samples, vad: vad, segmentation: segmentation)
+    }
+
+    /// Pack ascending, non-overlapping sample ranges into contiguous spans of at
+    /// most `maxSamples`. A span runs from its first segment's start to its last
+    /// segment's end. A segment longer than `maxSamples` becomes its own span.
+    static func packSegments(_ segments: [Range<Int>], maxSamples: Int) -> [Range<Int>] {
+        var spans: [Range<Int>] = []
+        var current: Range<Int>?
+        for segment in segments where !segment.isEmpty {
+            if let span = current, segment.upperBound - span.lowerBound <= maxSamples {
+                current = span.lowerBound..<segment.upperBound
+                continue
+            }
+            if let span = current { spans.append(span) }
+            current = segment
+        }
+        if let span = current { spans.append(span) }
+        return spans
+    }
+
+    /// Overlap-chunked decode for audio longer than one window; returns merged token ids.
+    private func transcribeOverlapping(audio: [Float]) throws -> [Int] {
+        let maxN = CanaryConfig.maxSamples
+        if audio.count <= maxN { return try transcribeWindow(audio: audio) }
         let hop = maxN - CanaryConfig.chunkOverlapSamples
         var merged: [Int] = []
         var start = 0
@@ -113,7 +185,7 @@ public actor CanaryManager {
             if end >= audio.count { break }
             start += hop
         }
-        return detokenize(merged)
+        return merged
     }
 
     /// Run the 4-stage pipeline over a single ≤15 s window; returns generated
