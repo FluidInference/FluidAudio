@@ -508,6 +508,40 @@ public final class OfflineDiarizerManager {
         )
     }
 
+    /// Embeds time spans of `audioSource` directly, without segmentation or clustering.
+    ///
+    /// Returns one raw (not L2-normalized) 256-dim speaker embedding per span, in order: the same
+    /// kind of vector as `DiarizationResult.speakerDatabase` values. Use it when the speaker turns
+    /// are already known, e.g. to get a voice embedding per turn from another diarizer's output.
+    ///
+    /// Each span is repeated to fill the model window and every frame is weighted, so only the
+    /// span's own audio counts. Spans longer than a window are cut into equal pieces of at most
+    /// one window and their embeddings averaged. Predictions run in batches of up to
+    /// `embedding.batchSize` windows.
+    ///
+    /// - Parameters:
+    ///   - audioSource: Mono audio at the model's sample rate.
+    ///   - spans: Time spans in seconds; each must cover at least one sample of the audio.
+    /// - Returns: One embedding per span.
+    public func embedSpans(
+        audioSource: AudioSampleSource,
+        spans: [Range<TimeInterval>]
+    ) async throws -> [[Float]] {
+        if models == nil {
+            try await prepareModels()
+        }
+        guard let models else {
+            throw OfflineDiarizationError.modelNotLoaded("offline-diarizer")
+        }
+        let extractor = OfflineEmbeddingExtractor(
+            fbankModel: models.fbankModel,
+            embeddingModel: models.embeddingModel,
+            pldaTransform: PLDATransform(pldaRhoModel: models.pldaRhoModel, psi: models.pldaPsi),
+            config: config
+        )
+        return try extractor.embedSpans(audioSource: audioSource, spans: spans)
+    }
+
     /// Map the internal `[TimedEmbedding] + assignments` pair to the public
     /// `[ChunkEmbedding]` representation. Speaker IDs follow the same
     /// "S\(cluster + 1)" convention used by `OfflineReconstruction.buildSegments`,
