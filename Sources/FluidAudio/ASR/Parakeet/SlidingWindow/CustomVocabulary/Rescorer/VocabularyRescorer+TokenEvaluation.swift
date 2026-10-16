@@ -21,6 +21,7 @@ extension VocabularyRescorer {
     ///
     /// - Parameters:
     ///   - candidate: The match candidate to evaluate
+    ///   - wordTimings: Original words, used to protect recognized vocabulary occurrences
     ///   - logProbs: CTC log-probabilities
     ///   - frameDuration: Duration of each CTC frame in seconds
     ///   - cbw: Context-biasing weight
@@ -28,18 +29,22 @@ extension VocabularyRescorer {
     /// - Returns: Evaluation result with replacement decision
     func evaluateCTCMatch(
         candidate: CTCMatchCandidate,
+        wordTimings: [WordTiming],
+        recognizedSpans: RecognizedVocabularySpans,
         logProbs: [[Float]],
         frameDuration: Double,
         cbw: Float,
         marginSeconds: Double
     ) -> CTCMatchResult {
-        // Calculate frame window
-        let marginFrames = Int(marginSeconds / frameDuration)
-        let spanStartFrame = Int(candidate.spanStartTime / frameDuration)
-        let spanEndFrame = Int(candidate.spanEndTime / frameDuration)
-
-        let searchStart = max(0, spanStartFrame - marginFrames)
-        let searchEnd = min(logProbs.count, spanEndFrame + marginFrames)
+        let searchWindow = Self.protectedSearchWindow(
+            for: candidate, wordTimings: wordTimings, recognizedSpans: recognizedSpans, frameDuration: frameDuration,
+            frameCount: logProbs.count, marginSeconds: marginSeconds)
+        let searchStart = searchWindow.frames.lowerBound
+        let searchEnd = searchWindow.frames.upperBound
+        let inflectedTerm = Self.preservingPossessive(candidate.vocabTerm, from: candidate.originalPhrase)
+        let boundaryTokens =
+            inflectedTerm == candidate.vocabTerm
+            ? candidate.vocabTokens : (ctcTokenizer?.encode(inflectedTerm) ?? candidate.vocabTokens)
 
         // Score vocabulary term against the constrained window. We try the
         // standard `▁`-prefixed tokenization AND the mid-utterance variant
@@ -47,21 +52,23 @@ extension VocabularyRescorer {
         // matches like "Liv" + "marli" → "Livmarli" do not begin at a CTC
         // word boundary, so the leading `▁` token has no acoustic
         // counterpart and penalizes the DP unfairly.
-        var vocabTokensUsed = candidate.vocabTokens
+        var vocabTokensUsed = boundaryTokens
         var vocabCtcScore: Float = -.infinity
+        var acousticFrameRange: Range<Int>?
         do {
-            let (score, _, _) = spotter.ctcWordSpotConstrained(
+            let (score, start, end) = spotter.ctcWordSpotConstrained(
                 logProbs: logProbs,
-                keywordTokens: candidate.vocabTokens,
+                keywordTokens: boundaryTokens,
                 searchStartFrame: searchStart,
                 searchEndFrame: searchEnd
             )
             vocabCtcScore = score
+            if start < end { acousticFrameRange = start..<end }
         }
         if let tokenizer = ctcTokenizer {
-            let altTokens = tokenizer.encodeWithoutBoundary(candidate.vocabTerm)
-            if !altTokens.isEmpty && altTokens != candidate.vocabTokens {
-                let (altScore, _, _) = spotter.ctcWordSpotConstrained(
+            let altTokens = tokenizer.encodeWithoutBoundary(inflectedTerm)
+            if !altTokens.isEmpty && altTokens != boundaryTokens {
+                let (altScore, start, end) = spotter.ctcWordSpotConstrained(
                     logProbs: logProbs,
                     keywordTokens: altTokens,
                     searchStartFrame: searchStart,
@@ -70,6 +77,7 @@ extension VocabularyRescorer {
                 if altScore > vocabCtcScore {
                     vocabCtcScore = altScore
                     vocabTokensUsed = altTokens
+                    acousticFrameRange = start < end ? start..<end : nil
                 }
             }
         }
@@ -115,7 +123,13 @@ extension VocabularyRescorer {
 
         // Apply adaptive context-biasing weight, scaled to the variant
         // tokenization that actually scored best.
-        let adaptiveCbwValue = config.adaptiveCbw(baseCbw: cbw, tokenCount: vocabTokensUsed.count)
+        // A weak textual match must not gain an extra occurrence beside an
+        // already recognized name on bias alone. Close spellings and aliases
+        // retain the normal bonus so genuine repetitions can still be corrected.
+        let configuredBoost = config.adaptiveCbw(baseCbw: cbw, tokenCount: vocabTokensUsed.count)
+        let adaptiveCbwValue =
+            searchWindow.createsAdjacentDuplicate && !Self.isTextSupportedRepetition(candidate)
+            ? min(0, configuredBoost) : configuredBoost
         let boostedVocabScore = vocabCtcScore + adaptiveCbwValue
 
         // CTC-vs-CTC comparison
@@ -132,13 +146,11 @@ extension VocabularyRescorer {
                 + "\(String(format: "%.2f", candidate.spanEndTime))s]"
         )
         debugLog("    CTC('\(candidate.originalPhrase)'): \(String(format: "%.2f", originalCtcScore))")
-        let variantLabel = vocabTokensUsed == candidate.vocabTokens ? "boundary" : "no-boundary"
+        let variantLabel = vocabTokensUsed == boundaryTokens ? "boundary" : "no-boundary"
         let cbwInfo =
-            config.useAdaptiveThresholds
-            ? "adaptive=\(String(format: "%.2f", adaptiveCbwValue)) (base=\(cbw), tokens=\(vocabTokensUsed.count))"
-            : String(format: "%.2f", cbw)
+            "effective=\(String(format: "%.2f", adaptiveCbwValue)) (base=\(cbw), tokens=\(vocabTokensUsed.count))"
         debugLog(
-            "    CTC('\(candidate.vocabTerm)' [\(variantLabel)]): \(String(format: "%.2f", vocabCtcScore)) + cbw=\(cbwInfo) "
+            "    CTC('\(inflectedTerm)' [\(variantLabel)]): \(String(format: "%.2f", vocabCtcScore)) + cbw=\(cbwInfo) "
                 + "= \(String(format: "%.2f", boostedVocabScore))"
         )
         debugLog("    -> \(shouldReplace ? "REPLACE" : "KEEP") (vocab \(shouldReplace ? ">" : "<=") original)")
@@ -147,12 +159,12 @@ extension VocabularyRescorer {
         let firstOriginalWord =
             candidate.originalPhrase.split(separator: " ").first.map(String.init)
             ?? candidate.originalPhrase
-        let replacement = preserveCapitalization(original: firstOriginalWord, replacement: candidate.vocabTerm)
+        let replacement = preserveCapitalization(original: firstOriginalWord, replacement: inflectedTerm)
 
         let reasonPrefix = candidate.spanLength > 1 ? "CTC-vs-CTC (multi-word)" : "CTC-vs-CTC"
         let reason = Self.ctcComparisonReason(
             prefix: reasonPrefix,
-            vocabularyTerm: candidate.vocabTerm,
+            vocabularyTerm: inflectedTerm,
             boostedVocabularyScore: boostedVocabScore,
             originalPhrase: candidate.originalPhrase,
             originalScore: originalCtcScore,
@@ -168,7 +180,11 @@ extension VocabularyRescorer {
             rawOriginalCTCScore: originalCtcScore.isFinite ? originalCtcScore : nil,
             effectiveBoost: adaptiveCbwValue.isFinite ? adaptiveCbwValue : nil,
             replacement: replacement,
-            reason: reason
+            reason: reason,
+            acousticFrameRange: acousticFrameRange,
+            sourceFrameRange: Int(
+                candidate.spanStartTime / frameDuration)..<max(
+                    Int(candidate.spanStartTime / frameDuration), Int(ceil(candidate.spanEndTime / frameDuration)))
         )
     }
 
