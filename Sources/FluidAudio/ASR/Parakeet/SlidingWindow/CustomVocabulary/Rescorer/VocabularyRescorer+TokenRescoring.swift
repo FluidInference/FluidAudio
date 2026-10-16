@@ -92,6 +92,10 @@ extension VocabularyRescorer {
         let effectiveBoost: Float?
         let replacement: String
         let reason: String
+        // Retain the winning tokenization's alignment so two source spans
+        // cannot spend the same acoustic occurrence on duplicate corrections.
+        var acousticFrameRange: Range<Int>? = nil
+        var sourceFrameRange: Range<Int>? = nil
     }
 
     /// Pending replacement candidate for two-pass selection.
@@ -287,10 +291,23 @@ extension VocabularyRescorer {
         }
 
         var occupiedIndices = occupiedIndices
+        var occupiedAcoustics: [String: [Range<Int>]] = [:]
         var applied: [PendingReplacement] = []
         var supersededCandidateIDs = Set<Int>()
         for pending in sortedReplacements {
-            guard pending.candidate.spanIndices.allSatisfy({ !occupiedIndices.contains($0) }) else {
+            let term = normalizeForSimilarity(pending.candidate.vocabTerm)
+            let reusesAcoustics =
+                pending.result.acousticFrameRange.map { range in
+                    // Coarse source timings can contain the same strongest CTC
+                    // path for two genuine repetitions. Overlap alone is not a
+                    // veto unless the candidate borrowed outside its own span.
+                    let contained =
+                        pending.result.sourceFrameRange.map {
+                            $0.lowerBound <= range.lowerBound && $0.upperBound >= range.upperBound
+                        } ?? false
+                    return !contained && occupiedAcoustics[term, default: []].contains { $0.overlaps(range) }
+                } ?? false
+            guard !reusesAcoustics, pending.candidate.spanIndices.allSatisfy({ !occupiedIndices.contains($0) }) else {
                 if let candidateID = pending.candidateID {
                     supersededCandidateIDs.insert(candidateID)
                 }
@@ -298,6 +315,9 @@ extension VocabularyRescorer {
             }
             applied.append(pending)
             occupiedIndices.formUnion(pending.candidate.spanIndices)
+            if let range = pending.result.acousticFrameRange {
+                occupiedAcoustics[term, default: []].append(range)
+            }
         }
 
         return PendingReplacementArbitration(
@@ -538,6 +558,7 @@ extension VocabularyRescorer {
             (word: $0.word, startTime: $0.startTime, endTime: $0.endTime)
         }
         var replacedIndices = Set<Int>()
+        let recognizedSpans = Self.recognizedVocabularySpans(in: wordTimings, canonicalTerms: vocabulary.terms)
         var pendingReplacements: [PendingReplacement] = []
 
         // Lowest per-term similarity across the vocabulary. The BK-tree search
@@ -623,8 +644,7 @@ extension VocabularyRescorer {
                     : spanIndices.map { normalizedWords[$0] }.joined(separator: " ")
 
                 // Skip if already exact match to canonical (no replacement needed)
-                let normalizedCanonical = Self.normalizeForSimilarity(vocabTerm)
-                if normalizedPhrase == normalizedCanonical {
+                if Self.isCanonicalMatch(originalPhrase, canonical: vocabTerm) {
                     continue
                 }
 
@@ -690,6 +710,11 @@ extension VocabularyRescorer {
                     spanEndTime: spanEndTime
                 )
 
+                guard
+                    Self.preservesRecognizedSpans(
+                        matchCandidate, recognizedSpans: recognizedSpans, wordTimings: wordTimings)
+                else { continue }
+
                 // Stop at the exact scoring boundary, after all text safety guards.
                 if candidateFound != nil {
                     candidateFound = true
@@ -697,6 +722,8 @@ extension VocabularyRescorer {
                 }
                 let result = evaluateCTCMatch(
                     candidate: matchCandidate,
+                    wordTimings: wordTimings,
+                    recognizedSpans: recognizedSpans,
                     logProbs: logProbs,
                     frameDuration: frameDuration,
                     cbw: cbw,
@@ -766,6 +793,7 @@ extension VocabularyRescorer {
             (word: $0.word, startTime: $0.startTime, endTime: $0.endTime)
         }
         var replacedIndices = Set<Int>()
+        let recognizedSpans = Self.recognizedVocabularySpans(in: wordTimings, canonicalTerms: vocabulary.terms)
         var pendingReplacements: [PendingReplacement] = []  // Two-pass: collect first, apply later
 
         let normalizedWords = wordTimings.map { Self.normalizeForSimilarity($0.word) }
@@ -796,7 +824,6 @@ extension VocabularyRescorer {
             let normalizedForms = buildNormalizedForms(for: term)
             guard !normalizedForms.isEmpty else { continue }
 
-            let normalizedCanonical = Self.normalizeForSimilarity(vocabTerm)
             let normalizedCurrentSet = Set(normalizedForms.map { $0.normalized })
 
             // Split forms by word count for appropriate matching
@@ -837,7 +864,7 @@ extension VocabularyRescorer {
                         }
 
                         // Skip if already exact match to canonical (no replacement needed)
-                        if normalizedPhrase == normalizedCanonical {
+                        if Self.isCanonicalMatch(tdtPhrase, canonical: vocabTerm) {
                             continue
                         }
 
@@ -877,6 +904,11 @@ extension VocabularyRescorer {
                             spanEndTime: spanEndTime
                         )
 
+                        guard
+                            Self.preservesRecognizedSpans(
+                                matchCandidate, recognizedSpans: recognizedSpans, wordTimings: wordTimings)
+                        else { continue }
+
                         // Stop at the exact scoring boundary, after all text safety guards.
                         if candidateFound != nil {
                             candidateFound = true
@@ -884,6 +916,8 @@ extension VocabularyRescorer {
                         }
                         let result = evaluateCTCMatch(
                             candidate: matchCandidate,
+                            wordTimings: wordTimings,
+                            recognizedSpans: recognizedSpans,
                             logProbs: logProbs,
                             frameDuration: frameDuration,
                             cbw: cbw,
@@ -920,7 +954,7 @@ extension VocabularyRescorer {
                     guard !normalizedWord.isEmpty else { continue }
 
                     // Skip if already exact match to canonical (no replacement needed)
-                    if normalizedWord == normalizedCanonical {
+                    if Self.isCanonicalMatch(tdtWord, canonical: vocabTerm) {
                         continue
                     }
 
@@ -1061,6 +1095,11 @@ extension VocabularyRescorer {
                         spanEndTime: spanEndTime
                     )
 
+                    guard
+                        Self.preservesRecognizedSpans(
+                            matchCandidate, recognizedSpans: recognizedSpans, wordTimings: wordTimings)
+                    else { continue }
+
                     // Stop at the exact scoring boundary, after all text safety guards.
                     if candidateFound != nil {
                         candidateFound = true
@@ -1068,6 +1107,8 @@ extension VocabularyRescorer {
                     }
                     let result = evaluateCTCMatch(
                         candidate: matchCandidate,
+                        wordTimings: wordTimings,
+                        recognizedSpans: recognizedSpans,
                         logProbs: logProbs,
                         frameDuration: frameDuration,
                         cbw: cbw,
@@ -1125,6 +1166,7 @@ extension VocabularyRescorer {
                 cbw: cbw,
                 marginSeconds: marginSeconds,
                 vocabularyNormalizedSet: vocabularyNormalizedSet,
+                recognizedSpans: recognizedSpans,
                 pendingReplacements: &pendingReplacements,
                 candidateEvidence: &candidateEvidence
             )
@@ -1163,6 +1205,7 @@ extension VocabularyRescorer {
         cbw: Float,
         marginSeconds: Double,
         vocabularyNormalizedSet: Set<String>,
+        recognizedSpans: RecognizedVocabularySpans,
         pendingReplacements: inout [PendingReplacement],
         candidateEvidence: inout CandidateEvidenceCollector?
     ) {
@@ -1219,8 +1262,7 @@ extension VocabularyRescorer {
 
             // If the TDT phrase already equals the canonical (or an
             // alias), there's nothing to replace.
-            let normalizedCanonical = Self.normalizeForSimilarity(vocabTerm)
-            if normalizedPhrase == normalizedCanonical { continue }
+            if Self.isCanonicalMatch(originalPhrase, canonical: vocabTerm) { continue }
             if normalizedCurrentSet.contains(normalizedPhrase) { continue }
 
             guard let vocabTokens = term.ctcTokenIds ?? term.tokenIds, !vocabTokens.isEmpty else {
@@ -1294,8 +1336,14 @@ extension VocabularyRescorer {
                 spanEndTime: wordTimings[lastIdx].endTime
             )
 
+            guard
+                Self.preservesRecognizedSpans(
+                    candidate, recognizedSpans: recognizedSpans, wordTimings: wordTimings)
+            else { continue }
             let evalResult = evaluateCTCMatch(
                 candidate: candidate,
+                wordTimings: wordTimings,
+                recognizedSpans: recognizedSpans,
                 logProbs: logProbs,
                 frameDuration: frameDuration,
                 cbw: cbw,

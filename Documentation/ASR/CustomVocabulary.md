@@ -325,7 +325,27 @@ Performs principled comparison between original transcript words and vocabulary 
 - `VocabularyRescorer.swift` — struct definition, Config, result types, word timing builder
 - `VocabularyRescorer+TokenRescoring.swift` — three-pass orchestration (`ctcTokenRescore()`)
 - `VocabularyRescorer+TokenEvaluation.swift` — per-candidate scoring and guard logic
+- `VocabularyRescorer+SpanProtection.swift` — recognized spans, acoustic search boundaries and possessive preservation
 - `VocabularyRescorer+Utilities.swift` — string similarity, normalization, token boundary helpers
+
+#### Preserving recognized words and inflections
+
+Canonical vocabulary phrases already present in the transcript are protected, including
+singular possessives such as `Quilter's` and `Quilter’s`. Other candidates cannot consume
+part of those phrases. A longer correction may retain recognized words at their existing
+offsets, such as `John Collar` → `John Collier` when `John` is also listed. Corrections to
+misspelled names preserve the possessive in both scoring and replacement text.
+
+With disjoint timestamps, the CTC search margin stops at other recognized occurrences
+of the proposed term. A weak textual match creating a nearby adjacent duplicate must
+beat the original without a positive context-bias bonus. One-edit name spellings and
+registered aliases retain their normal bonus. Coarse overlapping timestamps do not
+establish acoustic ownership and leave the normal search and bias intact.
+
+Candidate selection rejects a replacement that borrows an overlapping CTC alignment
+already used for the same term outside its own source span. Coarse source timings that
+contain the alignment remain eligible, preserving genuine repetitions. Other similarity
+thresholds and bias settings remain unchanged.
 
 #### Non-Mutating Candidate Evidence
 
