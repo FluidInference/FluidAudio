@@ -797,6 +797,8 @@ extension VocabularyRescorer {
         var pendingReplacements: [PendingReplacement] = []  // Two-pass: collect first, apply later
 
         let normalizedWords = wordTimings.map { Self.normalizeForSimilarity($0.word) }
+        let wordComponentCounts = normalizedWords.map { max(1, $0.split(separator: "-").count) }
+        let hasJoinedWords = wordComponentCounts.contains { $0 > 1 }
 
         // TERM-CENTRIC LOOP: For each vocabulary term, find similar TDT words and run constrained CTC
         for term in vocabulary.terms {
@@ -835,13 +837,22 @@ extension VocabularyRescorer {
                 let maxWordCount = multiWordForms.map { $0.wordCount }.max() ?? 0
                 let minWordCount = multiWordForms.map { $0.wordCount }.min() ?? 0
                 let maxSpan = min(4, maxWordCount + 1)  // Allow some flexibility
-                let minSpan = max(2, minWordCount)
-
-                guard minSpan <= maxSpan else { continue }
+                guard minWordCount <= maxSpan else { continue }
+                let minSpan = hasJoinedWords ? 1 : minWordCount
+                let formComponentCounts = Set(
+                    multiWordForms.map {
+                        $0.normalized.split { $0 == " " || $0 == "-" }.count
+                    })
 
                 for spanLength in minSpan...maxSpan {
                     guard spanLength <= wordTimings.count else { break }
                     for startIdx in 0..<(wordTimings.count - spanLength + 1) {
+                        // A hyphen can join several name components in one timing word.
+                        // A shorter span must match a canonical/alias component count exactly.
+                        if spanLength < minWordCount {
+                            let componentCount = wordComponentCounts[startIdx..<(startIdx + spanLength)].reduce(0, +)
+                            guard formComponentCounts.contains(componentCount) else { continue }
+                        }
                         // Check if any word in the span is already replaced
                         let spanIndices = Array(startIdx..<(startIdx + spanLength))
                         guard spanIndices.allSatisfy({ !replacedIndices.contains($0) }) else { continue }
@@ -880,7 +891,7 @@ extension VocabularyRescorer {
                         // Use adaptive similarity threshold
                         let minSimilarityForSpan = requiredSimilarity(
                             minSimilarity: termMinSimilarity,
-                            spanLength: spanLength
+                            spanLength: max(2, spanLength)
                         )
                         if bestSimilarity < minSimilarityForSpan { continue }
 

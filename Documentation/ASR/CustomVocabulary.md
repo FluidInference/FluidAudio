@@ -336,6 +336,12 @@ part of those phrases. A longer correction may retain recognized words at their 
 offsets, such as `John Collar` → `John Collier` when `John` is also listed. Corrections to
 misspelled names preserve the possessive in both scoring and replacement text.
 
+A hyphenated name may occupy fewer timing words than its canonical phrase.
+Shorter spans are considered only when their hyphen-separated component count
+matches a canonical form or alias. The multi-word similarity floor still applies.
+This lets a correction retain the next ordinary word instead of consuming it to
+reach the canonical word count. Partial-word replacements remain unsupported.
+
 With disjoint timestamps, the CTC search margin stops at other recognized occurrences
 of the proposed term. A weak textual match creating a nearby adjacent duplicate must
 beat the original without a positive context-bias bonus. One-edit name spellings and

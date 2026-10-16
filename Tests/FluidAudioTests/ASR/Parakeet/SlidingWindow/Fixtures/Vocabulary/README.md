@@ -7,6 +7,14 @@ each recording. Tests run the installed CTC 110M model against the audio without
 depending on a particular TDT decoder version. They skip when CTC is absent and
 never download models.
 
+`tdt-v2-solanki.json` stores the recorded v2 text/timings with a hyphenated
+full name. Its boundary regression preserves every surrounding word while
+correcting that name. Joined, ordinary, split and registered-alias controls
+change only the recorded token text/segmentation; the human audio and surviving
+token timing intervals stay fixed. They are controlled rescorer cases, not
+additional ASR accuracy samples. A control that also joins the following ordinary
+word must remain unchanged because it is not one complete name span.
+
 - `quilter.wav`: LibriSpeech `1272-128104-0000`, “Mister Quilter is the apostle
   of the middle classes, and we are glad to welcome his gospel.” Protects the
   title from becoming a second copy of the already recognized name.
