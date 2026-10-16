@@ -19,6 +19,65 @@ public actor SlidingWindowAsrManager {
     // Transcription output stream
     private var updateContinuation: AsyncStream<SlidingWindowTranscriptionUpdate>.Continuation?
 
+    // Opt-in strict token stream; legacy text recovery remains unchanged.
+    private var tokenContinuation: AsyncThrowingStream<SlidingWindowTokenUpdate, Error>.Continuation?
+    private var tokenSubscriberID: UUID?
+    private var tokenCursor = SlidingWindowTokenCursor()
+    private var tokenSubscriptionClosed = false
+    private var hasAcceptedAudio = false
+
+    /// One subscriber per manager/job. Subscribe before feeding audio. Failures
+    /// terminate this stream rather than silently resuming across lost windows.
+    public var tokenUpdates: AsyncThrowingStream<SlidingWindowTokenUpdate, Error> {
+        AsyncThrowingStream { continuation in
+            guard tokenSubscriberID == nil else {
+                continuation.finish(throwing: SlidingWindowTokenStreamError.multipleSubscribers)
+                return
+            }
+            guard !tokenSubscriptionClosed, !hasAcceptedAudio else {
+                continuation.finish(throwing: SlidingWindowTokenStreamError.unavailableJob)
+                return
+            }
+            let id = UUID()
+            tokenSubscriberID = id
+            tokenContinuation = continuation
+            continuation.onTermination = { @Sendable _ in
+                Task { [weak self] in await self?.clearTokenSubscriber(id) }
+            }
+        }
+    }
+
+    private func clearTokenSubscriber(_ id: UUID) {
+        guard tokenSubscriberID == id else { return }
+        tokenContinuation = nil
+        tokenSubscriptionClosed = true
+        // Do not let a late subscriber reopen lineage without its prefix.
+    }
+
+    private func failTokenStream(_ error: Error) {
+        tokenSubscriptionClosed = true
+        tokenContinuation?.finish(throwing: error)
+        tokenContinuation = nil
+    }
+
+    // One publication boundary for the real inference path and model-free
+    // contract characterization. Failed publication permanently closes lineage.
+    func publishTokenUpdate(
+        tokens: [TokenTiming], previous: Int, retained: Int, stable: Int,
+        window: Range<Int>, center: Range<Int>, isConfirmed: Bool = false
+    ) throws {
+        guard let continuation = tokenContinuation else { return }
+        do {
+            continuation.yield(
+                try tokenCursor.next(
+                    tokens: tokens, previous: previous, retained: retained, stable: stable,
+                    window: window, center: center, isConfirmed: isConfirmed))
+        } catch {
+            failTokenStream(error)
+            throw error
+        }
+    }
+
     // ASR components
     private var asrManager: AsrManager?
     private var recognizerTask: Task<Void, Error>?
@@ -170,6 +229,7 @@ public actor SlidingWindowAsrManager {
         }
 
         // Reset sliding window state
+        tokenCursor = SlidingWindowTokenCursor()
         segmentIndex = 0
         lastProcessedFrame = 0
         accumulatedTokens.removeAll()
@@ -193,8 +253,10 @@ public actor SlidingWindowAsrManager {
                     await self.appendSamplesAndProcess(samples)
                 } catch {
                     if error is CancellationError || Task.isCancelled {
+                        failTokenStream(CancellationError())
                         return
                     }
+                    failTokenStream(error)
                     let streamingError = SlidingWindowAsrError.audioBufferProcessingFailed(error)
                     logger.error(
                         "Audio buffer processing error: \(streamingError.localizedDescription)")
@@ -216,6 +278,7 @@ public actor SlidingWindowAsrManager {
     /// Stream audio data for transcription
     /// - Parameter buffer: Audio buffer in any format (will be converted to 16kHz mono)
     public func streamAudio(_ buffer: AVAudioPCMBuffer) {
+        hasAcceptedAudio = true
         inputBuilder.yield(buffer)
     }
 
@@ -244,6 +307,7 @@ public actor SlidingWindowAsrManager {
         do {
             try await recognizerTask?.value
         } catch {
+            failTokenStream(error)
             logger.error("Recognition task failed: \(error)")
             throw error
         }
@@ -255,6 +319,7 @@ public actor SlidingWindowAsrManager {
             logger.error(
                 "All \(self.failedWindowCount) window(s) failed to process; throwing last error instead of returning an empty transcript"
             )
+            failTokenStream(windowError)
             throw windowError
         }
         if failedWindowCount > 0 {
@@ -284,12 +349,26 @@ public actor SlidingWindowAsrManager {
             finalText = parts.joined(separator: " ")
         }
 
+        if let continuation = tokenContinuation {
+            do {
+                continuation.yield(try tokenCursor.finish())
+                continuation.finish()
+                tokenContinuation = nil
+            } catch {
+                failTokenStream(error)
+                throw error
+            }
+        }
+        tokenSubscriptionClosed = true
         logger.info("Final transcription: \(finalText.count) characters")
         return finalText
     }
 
     /// Reset the transcriber for a new session
     public func reset() async throws {
+        failTokenStream(CancellationError())
+        // Strict streams are single-use: legacy reset must not reopen lineage
+        // while a previous window is still suspended inside inference.
         volatileTranscript = ""
         confirmedTranscript = ""
         processedChunks = 0
@@ -326,6 +405,7 @@ public actor SlidingWindowAsrManager {
 
     /// Cancel streaming without getting results
     public func cancel() async {
+        failTokenStream(CancellationError())
         inputBuilder.finish()
         recognizerTask?.cancel()
         updateContinuation?.finish()
@@ -440,7 +520,9 @@ public actor SlidingWindowAsrManager {
             // Start frame offset is now handled by decoder's timeJump mechanism
 
             // Call AsrManager directly with deduplication
+            let previousTokenCount = accumulatedTokens.count
             guard var state = decoderState else {
+                failTokenStream(SlidingWindowTokenStreamError.invalidNativeUpdate)
                 logger.error("Decoder state not initialized")
                 return
             }
@@ -455,7 +537,10 @@ public actor SlidingWindowAsrManager {
                     isLastChunk: isLastChunk,
                     language: config.language
                 )
-            else { return }
+            else {
+                failTokenStream(SlidingWindowTokenStreamError.invalidNativeUpdate)
+                return
+            }
 
             // Update stored decoder state
             self.decoderState = state
@@ -503,9 +588,13 @@ public actor SlidingWindowAsrManager {
                     audioSampleCount: windowSamples.count,
                     processingTime: processingTime
                 )
-            else { return }
+            else {
+                failTokenStream(SlidingWindowTokenStreamError.invalidNativeUpdate)
+                return
+            }
 
             // Update state only after all required async calls complete successfully
+            let retainedTokenCount = accumulatedTokens.count
             accumulatedTokens.append(contentsOf: tokens)
             // Keep global timestamps aligned 1:1 with accumulatedTokens for #787 dedup.
             // `tokens`/`adjustedTimestamps` are already post-dedup and same length; guard
@@ -583,12 +672,31 @@ public actor SlidingWindowAsrManager {
                 ctcAppliedTerms: displayResult.ctcAppliedTerms
             )
 
+            if tokenContinuation != nil {
+                guard let rawTimings = interim.tokenTimings,
+                    rawTimings.count == tokens.count,
+                    zip(rawTimings, tokens).allSatisfy({ $0.tokenId == $1 }),
+                    let manager = asrManager
+                else {
+                    throw SlidingWindowTokenStreamError.invalidNativeUpdate
+                }
+                let stable = await manager.stableStreamingTokenCount(accumulatedTokens)
+                let end = windowStartSample + windowSamples.count
+                let centerEnd = min(end, nextWindowCenterStart + config.chunkSamples)
+                try publishTokenUpdate(
+                    tokens: rawTimings, previous: previousTokenCount,
+                    retained: retainedTokenCount, stable: stable,
+                    window: windowStartSample..<end,
+                    center: nextWindowCenterStart..<centerEnd, isConfirmed: shouldConfirm)
+            }
             updateContinuation?.yield(update)
 
         } catch {
             if error is CancellationError || Task.isCancelled {
+                failTokenStream(CancellationError())
                 return
             }
+            failTokenStream(error)
             let streamingError = SlidingWindowAsrError.modelProcessingFailed(error)
             failedWindowCount += 1
             lastWindowError = streamingError

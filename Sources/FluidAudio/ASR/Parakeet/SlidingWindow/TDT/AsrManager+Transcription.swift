@@ -431,6 +431,13 @@ extension AsrManager {
         return (droppedPrevious, droppedCurrent)
     }
 
+    /// The decoder may retire only its trailing word. Use its exact boundary,
+    /// not confidence, text suffix guesses or timestamp tolerances. Holding all
+    /// tokens when no boundary exists is conservative until terminal drain.
+    func stableStreamingTokenCount(_ tokens: [Int]) -> Int {
+        Self.trailingWordStartIndex(pieces: tokens.map { vocabulary[$0] ?? "" }) ?? 0
+    }
+
     /// Chunk transcription that preserves decoder state between calls.
     /// Used by SlidingWindowAsrManager for overlapping-window processing with token deduplication.
     func transcribeChunk(
