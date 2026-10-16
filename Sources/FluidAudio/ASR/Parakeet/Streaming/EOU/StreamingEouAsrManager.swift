@@ -450,6 +450,8 @@ public actor StreamingEouAsrManager {
         // 2. Process chunks with 50% overlap (NeMo-style)
         // We accumulate encoder outputs and decode at the end
         while true {
+            try Task.checkCancellation()
+
             // Check buffer size before processing
             guard self.audioBuffer.count >= chunkSamples else { break }
 
@@ -473,6 +475,8 @@ public actor StreamingEouAsrManager {
     }
 
     public func finish() async throws -> String {
+        try Task.checkCancellation()
+
         // 1. Process remaining audio (padded) if any
         if !audioBuffer.isEmpty {
             let remaining = audioBuffer.count
@@ -706,6 +710,7 @@ extension StreamingEouAsrManager: StreamingAsrManager {
 
     public func processBufferedAudio() async throws {
         while audioBuffer.count >= chunkSamples {
+            try Task.checkCancellation()
             let chunk = Array(audioBuffer.prefix(chunkSamples))
             let samplesToShift = shiftSamples
             try await processChunkAndDecode(chunk)
