@@ -233,7 +233,58 @@ public actor UnifiedAsrManager {
         guard let tokenizer = tokenizer else { throw ASRError.notInitialized }
         let merged = try await decodedTokens(samples, tokenizer: tokenizer)
         let text = tokenizer.decode(ids: merged.map(\.token))
-        return await rescoreIfConfigured(text: text, merged: merged, samples: samples)
+        return await rescoreIfConfigured(text: text, merged: merged, samples: samples)?.text ?? text
+    }
+
+    /// Transcribe as `transcribe(_:)` does, returning the full ``ASRResult``
+    /// instead of only its text.
+    ///
+    /// This is the only batch entry point that reports vocabulary boosting:
+    /// `transcribe(_:)` returns a `String`, so the CTC metadata behind a
+    /// rescored transcript — which terms the spotter detected, which were
+    /// applied, and the decision behind each one — has nowhere to go. Callers
+    /// that need to explain a replacement to a user, or to tell a recognizer
+    /// error from a bad replacement, use this instead.
+    public func transcribeDetailed(_ samples: [Float]) async throws -> ASRResult {
+        guard let tokenizer = tokenizer else { throw ASRError.notInitialized }
+        let startTime = Date()
+        let merged = try await decodedTokens(samples, tokenizer: tokenizer)
+        let text = tokenizer.decode(ids: merged.map(\.token))
+        let duration = Double(samples.count) / Double(config.sampleRate)
+        // Rescored text can replace words, so token timings no longer decode
+        // to the text verbatim; they remain the raw emissions, as in
+        // `transcribeWithTimings(_:)`.
+        let timings = Self.tokenTimings(
+            from: merged,
+            secondsPerFrame: Double(config.frameSamples) / Double(config.sampleRate),
+            vocabulary: tokenizer.vocabulary,
+            clipDuration: duration
+        )
+        let rescored = await rescoreIfConfigured(text: text, tokenTimings: timings, samples: samples)
+        let result = ASRResult(
+            text: text,
+            confidence: Self.meanConfidence(
+                of: merged, isEmpty: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty),
+            duration: duration,
+            processingTime: Date().timeIntervalSince(startTime),
+            tokenTimings: timings
+        )
+        guard let rescored else { return result }
+        return Self.applying(rescored, to: result)
+    }
+
+    /// Fold a rescorer output into a decoded result, reporting the applied
+    /// terms alongside the decision behind each one. Pure, so the mapping is
+    /// testable without loading a 600M parameter model.
+    static func applying(_ rescored: VocabularyRescorer.RescoreOutput, to result: ASRResult) -> ASRResult {
+        let applied = rescored.replacements.filter { $0.shouldReplace }
+        let appliedTerms = applied.compactMap { $0.replacementWord }
+        return result.withRescoring(
+            text: rescored.text,
+            detected: rescored.detectedTerms,
+            applied: appliedTerms.isEmpty ? nil : appliedTerms,
+            replacements: applied.isEmpty ? nil : applied
+        )
     }
 
     /// Transcribe as `transcribe(_:)` does, additionally reporting the encoder
@@ -278,19 +329,42 @@ public actor UnifiedAsrManager {
     }
 
     /// Apply vocabulary rescoring to a finished transcript when boosting is
-    /// configured; otherwise return the transcript unchanged.
+    /// configured; otherwise return `nil`.
+    ///
+    /// Returns the rescorer's whole output, not just its text: the replacement
+    /// decisions behind it are what `transcribeDetailed(_:)` reports. Building
+    /// the token timings stays behind the boosting check, so callers that never
+    /// configured boosting pay nothing for them.
     private func rescoreIfConfigured(
         text: String, merged: [ChunkProcessor.TokenWindow], samples: [Float]
-    ) async -> String {
-        guard let boosting = vocabularyBoosting, let tokenizer = tokenizer else { return text }
+    ) async -> VocabularyRescorer.RescoreOutput? {
+        guard vocabularyBoosting != nil, let tokenizer = tokenizer else { return nil }
         let timings = Self.tokenTimings(
             from: merged,
             secondsPerFrame: Double(config.frameSamples) / Double(config.sampleRate),
             vocabulary: tokenizer.vocabulary,
             clipDuration: Double(samples.count) / Double(config.sampleRate)
         )
-        let rescored = await boosting.rescore(text: text, tokenTimings: timings, audioSamples: samples)
-        return rescored?.text ?? text
+        return await rescoreIfConfigured(text: text, tokenTimings: timings, samples: samples)
+    }
+
+    /// As above, for callers that already built the token timings.
+    private func rescoreIfConfigured(
+        text: String, tokenTimings: [TokenTiming], samples: [Float]
+    ) async -> VocabularyRescorer.RescoreOutput? {
+        guard let boosting = vocabularyBoosting else { return nil }
+        return await boosting.rescore(text: text, tokenTimings: tokenTimings, audioSamples: samples)
+    }
+
+    /// Mean token confidence for a decoded window, matching `AsrManager`'s
+    /// rule: an empty transcript scores 0.1, otherwise the mean softmax
+    /// probability clamped to [0.1, 1.0]. Pure, so it is testable without
+    /// loading a 600M parameter model.
+    static func meanConfidence(of emissions: [ChunkProcessor.TokenWindow], isEmpty: Bool) -> Float {
+        if isEmpty { return 0.1 }
+        guard !emissions.isEmpty else { return 0.5 }
+        let mean = emissions.reduce(Float(0)) { $0 + $1.confidence } / Float(emissions.count)
+        return max(0.1, min(1.0, mean))
     }
 
     /// Emission frames → seconds. Pure, so the back-fill rule can be tested

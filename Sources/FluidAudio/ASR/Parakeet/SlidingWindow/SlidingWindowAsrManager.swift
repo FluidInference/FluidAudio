@@ -564,7 +564,8 @@ public actor SlidingWindowAsrManager {
                 displayResult = interim.withRescoring(
                     text: rescored?.text ?? interim.text,
                     detected: rescored?.detectedTerms ?? [],
-                    applied: applied.isEmpty ? nil : applied
+                    applied: applied.isEmpty ? nil : applied,
+                    replacements: appliedReplacements.isEmpty ? nil : appliedReplacements
                 )
             }
 
@@ -580,7 +581,8 @@ public actor SlidingWindowAsrManager {
                 tokenIds: tokens,
                 tokenTimings: displayResult.tokenTimings ?? [],
                 ctcDetectedTerms: displayResult.ctcDetectedTerms,
-                ctcAppliedTerms: displayResult.ctcAppliedTerms
+                ctcAppliedTerms: displayResult.ctcAppliedTerms,
+                ctcReplacements: displayResult.ctcReplacements
             )
 
             updateContinuation?.yield(update)
@@ -959,6 +961,11 @@ public struct SlidingWindowTranscriptionUpdate: Sendable {
     public let ctcDetectedTerms: [String]?
     /// Vocabulary terms applied as replacements in this window's text.
     public let ctcAppliedTerms: [String]?
+    /// The rescoring decision behind each applied replacement, aligned 1:1 with
+    /// `ctcAppliedTerms`. Carries the decoded word each term displaced and the
+    /// scores the decision was made on, so callers can tell a recognizer error
+    /// from a bad vocabulary replacement. `nil` when nothing was replaced.
+    public let ctcReplacements: [VocabularyRescorer.RescoringResult]?
 
     public init(
         text: String,
@@ -968,7 +975,8 @@ public struct SlidingWindowTranscriptionUpdate: Sendable {
         tokenIds: [Int] = [],
         tokenTimings: [TokenTiming] = [],
         ctcDetectedTerms: [String]? = nil,
-        ctcAppliedTerms: [String]? = nil
+        ctcAppliedTerms: [String]? = nil,
+        ctcReplacements: [VocabularyRescorer.RescoringResult]? = nil
     ) {
         self.text = text
         self.isConfirmed = isConfirmed
@@ -978,5 +986,6 @@ public struct SlidingWindowTranscriptionUpdate: Sendable {
         self.tokenTimings = tokenTimings
         self.ctcDetectedTerms = ctcDetectedTerms
         self.ctcAppliedTerms = ctcAppliedTerms
+        self.ctcReplacements = ctcReplacements
     }
 }

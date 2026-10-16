@@ -212,7 +212,7 @@ public struct VocabularyRescorer: Sendable {
     // MARK: - Result Types
 
     /// Result of rescoring a word
-    public struct RescoringResult: Sendable {
+    public struct RescoringResult: Codable, Sendable {
         public let originalWord: String
         public let originalScore: Float
         public let replacementWord: String?

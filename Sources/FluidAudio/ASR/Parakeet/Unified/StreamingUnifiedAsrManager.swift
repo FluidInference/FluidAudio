@@ -84,6 +84,8 @@ public actor StreamingUnifiedAsrManager {
     /// Audio kept before the first pending token when a segment is released,
     /// so the next CTC pass sees the word's onset.
     private let vocabPreRollSeconds: Double = 1.0
+    // Replacement decisions from the segments rescored since the last drain.
+    private var pendingVocabReplacements: [VocabularyRescorer.RescoringResult] = []
 
     public private(set) var mlConfiguration: MLModelConfiguration
 
@@ -288,6 +290,17 @@ public actor StreamingUnifiedAsrManager {
         buildWordTimings(from: consumeTokenTimings())
     }
 
+    /// Returns the vocabulary replacements applied since the previous call and
+    /// clears them, draining the same way `consumeTokenTimings()` does so the
+    /// buffer stays bounded over long streams. Each decision carries the
+    /// decoded word the term displaced and the scores behind the replacement,
+    /// which `finish()`'s transcript cannot express. Empty when boosting is not
+    /// configured, or when no segment has been rescored since the last call.
+    public func consumeVocabularyReplacements() -> [VocabularyRescorer.RescoringResult] {
+        defer { pendingVocabReplacements.removeAll(keepingCapacity: true) }
+        return pendingVocabReplacements
+    }
+
     public func reset() async throws {
         samples.removeAll()
         samplesGlobalStart = 0
@@ -300,6 +313,7 @@ public actor StreamingUnifiedAsrManager {
         vocabTimings.removeAll()
         vocabAudio.removeAll()
         vocabAudioGlobalStart = 0
+        pendingVocabReplacements.removeAll()
         try rnntDecoder?.reset()
     }
 
@@ -478,6 +492,7 @@ public actor StreamingUnifiedAsrManager {
             // dropping the segment's leading separator — restore it so the
             // released text still butts cleanly against the rescored prefix.
             releasedText = (segmentText.hasPrefix(" ") ? " " : "") + rescored.text
+            pendingVocabReplacements.append(contentsOf: rescored.replacements.filter { $0.shouldReplace })
         }
         rescoredTranscript += releasedText
         vocabTimings.removeFirst(cut)
