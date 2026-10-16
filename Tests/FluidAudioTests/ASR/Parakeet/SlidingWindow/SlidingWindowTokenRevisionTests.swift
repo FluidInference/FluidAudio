@@ -3,7 +3,7 @@ import Foundation
 import XCTest
 @testable import FluidAudio
 
-final class TokenContractTests: XCTestCase {
+final class SlidingWindowTokenRevisionTests: XCTestCase {
     private func token(_ piece: String, _ start: Double = 0) -> TokenTiming {
         TokenTiming(token: piece, tokenId: 1, startTime: start, endTime: start + 0.08, confidence: 0.99)
     }
