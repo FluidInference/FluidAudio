@@ -598,6 +598,23 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         XCTAssertNil(AsrManager.redecodeWordStart(pieces: ["▁one", "word"], stableTokenFloor: 0))
     }
 
+    /// With the stable floor the seam can start mid-word (`'` after a stable
+    /// `▁it`). Reconciliation may retire only tokens from that start onwards.
+    func testReconcileFinalWindowSeam_MidWordStartNeverRetiresTheStablePrefix() {
+        let previousPieces = ["▁say", "▁it", "'", "s"]
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4],
+            previousTimestamps: [10, 20, 25, 28],
+            trailingWordStart: 2,
+            currentTokens: [3, 4, 5],
+            currentTimestamps: [25, 28, 40],
+            currentPieces: ["'", "s", "▁now"],
+            previousPieces: previousPieces
+        )
+        XCTAssertLessThanOrEqual(seam.droppedPrevious, previousPieces.count - 2)
+        XCTAssertLessThan(seam.droppedCurrent, 3, "the new word after the seam is kept")
+    }
+
     /// Clip 03 of the #855 fixtures: previous `▁c ode ▁and ▁an`, re-decode
     /// `, ▁and ▁anal y z ing`. `an` is a strict prefix of `analyzing`: retire it;
     /// the seam comma and the re-emitted `and` (dup of the kept `and`@153) go.
