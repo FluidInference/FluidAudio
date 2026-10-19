@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Inflect v2 symbol table + token encoder.
@@ -77,3 +78,4 @@ enum InflectSymbols {
         intersperse(sequence(for: phonemes))
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -250,8 +251,7 @@ final class KokoroAneV3Pipeline {
         }
         var newShape = shape
         newShape[newShape.count - 1] = target
-        let result = try MLMultiArray(shape: newShape.map(NSNumber.init), dataType: .float16)
-        memset(result.dataPointer, 0, result.count * 2)
+        let result = try KokoroAneArrays.makeArray(shape: newShape, dataType: .float16)
         let rows = shape.count == 3 ? shape[1] : 1
         let source = a.dataPointer.assumingMemoryBound(to: UInt16.self)
         let dest = result.dataPointer.assumingMemoryBound(to: UInt16.self)
@@ -264,3 +264,4 @@ final class KokoroAneV3Pipeline {
         return result
     }
 }
+#endif

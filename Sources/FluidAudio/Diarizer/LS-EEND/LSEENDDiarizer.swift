@@ -1,3 +1,4 @@
+#if Diarizer
 //
 //  LSEENDDiarizer.swift
 //  LS-EEND-Test
@@ -383,3 +384,4 @@ public final class LSEENDDiarizer: Diarizer {
         finalized = false
     }
 }
+#endif

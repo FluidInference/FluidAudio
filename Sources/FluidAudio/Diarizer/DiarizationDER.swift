@@ -1,3 +1,4 @@
+#if Diarizer
 //
 //  DiarizationDER.swift
 //  LS-EEND-Test
@@ -229,3 +230,4 @@ public enum DiarizationDER {
         return mask
     }
 }
+#endif

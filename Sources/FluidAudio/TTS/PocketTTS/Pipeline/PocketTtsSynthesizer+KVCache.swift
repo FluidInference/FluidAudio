@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -616,3 +617,4 @@ extension PocketTtsSynthesizer {
         return (transformerOut: transformerOut, eosLogit: eosLogit)
     }
 }
+#endif

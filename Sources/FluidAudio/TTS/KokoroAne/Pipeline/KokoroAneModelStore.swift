@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -183,7 +184,9 @@ public actor KokoroAneModelStore {
     static let lexiconRetryInterval: TimeInterval = 300
     private var mandarinCustomLexicon: MandarinCustomLexicon = .empty
 
-    private let directory: URL?
+    /// Models root every asset of this store resolves under (`nil` = the
+    /// default TTS cache root).
+    public nonisolated let directory: URL?
     private let computeUnits: KokoroAneComputeUnits
     private let variant: KokoroAneVariant
 
@@ -216,7 +219,7 @@ public actor KokoroAneModelStore {
 
     private func loadModels() async throws {
         if version == .v3 {
-            guard #available(macOS 15, iOS 18, *) else {
+            guard #available(macOS 15, iOS 18, tvOS 18, *) else {
                 throw KokoroAneError.inputProcessingFailed("ANE-v3 requires macOS 15 / iOS 18 or newer")
             }
             try KokoroAneV3Assets.validateVariant(variant)
@@ -433,11 +436,13 @@ public actor KokoroAneModelStore {
             throw KokoroAneError.inputProcessingFailed("French G2P requested on a non-french store")
         }
         let lexiconURL = try await KokoroAneResourceDownloader.ensureLexiconCache(
-            KokoroAneConstants.frenchLexiconCacheFile)
+            KokoroAneConstants.frenchLexiconCacheFile, directory: directory)
         let lexicon = try KokoroAneLexicon(contentsOf: lexiconURL)
+        let directory = self.directory
+        let multilingualG2P = MultilingualG2PModel.shared(directory: directory)
         let pipeline = FrenchG2P(lexicon: lexicon) { word in
-            try await KokoroAneResourceDownloader.ensureMultilingualG2PAssets(directory: nil)
-            return try await MultilingualG2PModel.shared.phonemize(word: word, language: .french)?.joined()
+            try await KokoroAneResourceDownloader.ensureMultilingualG2PAssets(directory: directory)
+            return try await multilingualG2P.phonemize(word: word, language: .french)?.joined()
         }
         frenchG2P = pipeline
         logger.info("Loaded French G2P (\(lexicon.count) lexicon entries)")
@@ -455,7 +460,7 @@ public actor KokoroAneModelStore {
         if let retryAfter = spanishLexiconRetryAfter, Date() < retryAfter { return .empty }
         do {
             let url = try await KokoroAneResourceDownloader.ensureLexiconCache(
-                KokoroAneConstants.spanishLexiconCacheFile)
+                KokoroAneConstants.spanishLexiconCacheFile, directory: directory)
             let lexicon = try KokoroAneLexicon(contentsOf: url)
             spanishLexiconCache = lexicon
             logger.info("Loaded Spanish lexicon (\(lexicon.count) exceptions)")
@@ -486,12 +491,19 @@ public actor KokoroAneModelStore {
             let tokenizer = try MandarinBertTokenizer.load(vocabURL: vocabURL)
             let catalog = try MandarinPolyphoneCatalog.load(fileURL: polyURL)
             let config = MLModelConfiguration()
-            config.computeUnits = .cpuAndNeuralEngine
+            // CPU only: the masked-softmax tail of this bundle comes back
+            // unnormalised on the ANE (candidate mass ≈ 0.01 instead of
+            // 1) and the GPU path pays a ~2.5 s per-process compile.
+            // fp32 CPU is exact at ~47 ms per polyphone query.
+            config.computeUnits = .cpuOnly
             let model = try MLModel(contentsOf: modelURL, configuration: config)
-            return MandarinG2pwModel(
+            return try MandarinG2pwModel(
                 model: model, tokenizer: tokenizer, catalog: catalog)
         } catch {
-            logger.info(
+            // Assets are on disk but unusable — louder than the
+            // missing-asset case so a stale bundle doesn't hide behind
+            // the dict fallback.
+            logger.warning(
                 "g2pW load failed (\(error.localizedDescription)) — "
                     + "Mandarin G2P will run dict-only")
             return nil
@@ -525,3 +537,4 @@ public actor KokoroAneModelStore {
         spanishLexiconRetryAfter = nil
     }
 }
+#endif

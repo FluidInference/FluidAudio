@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -94,11 +95,12 @@ public actor StyleTTS2Manager {
         // live under the kokoro cache dir; downloading them here is
         // idempotent.
         try await StyleTTS2ResourceDownloader.ensureG2PAssets(directory: directory)
-        let kokoroDir = try await StyleTTS2ResourceDownloader.ensureLexiconCache()
+        let kokoroDir = try await StyleTTS2ResourceDownloader.ensureLexiconCache(directory: directory)
 
         // Verify the BART G2P CoreML model can actually be loaded — fail
         // fast at init time rather than on the first OOV word.
-        try await G2PModel.shared.ensureModelsAvailable()
+        let g2p = G2PModel.shared(directory: directory)
+        try await g2p.ensureModelsAvailable()
 
         // Load the same preprocessed Misaki cache Kokoro consumes, filtered
         // to StyleTTS2's character vocab so any token returned by the
@@ -121,7 +123,8 @@ public actor StyleTTS2Manager {
 
         self.phonemizer = StyleTTS2Phonemizer(
             wordToPhonemes: lexicons.word,
-            caseSensitiveWordToPhonemes: lexicons.caseSensitive)
+            caseSensitiveWordToPhonemes: lexicons.caseSensitive,
+            g2p: g2p)
         self.melExtractor = StyleTTS2MelExtractor()
         self.synthesizer = StyleTTS2Synthesizer(store: store)
 
@@ -335,3 +338,4 @@ extension MLComputeUnits {
         }
     }
 }
+#endif

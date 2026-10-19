@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// GPT-2 byte-level BPE tokenizer for Chatterbox Nano/Turbo, loaded from the
@@ -221,3 +222,4 @@ final class ChatterboxNanoTokenizer: Sendable {
         return byteToScalar.map { String(UnicodeScalar($0)!) }
     }
 }
+#endif

@@ -11,6 +11,8 @@ public actor AsrManager {
 
     internal var preprocessorModel: MLModel?
     internal var encoderModel: MLModel?
+    /// Shorter-window encoder functions (see `AsrModels.encoderLadder`).
+    internal var encoderLadder: [EncoderLadderFunction] = []
     internal var decoderModel: MLModel?
     internal var jointModel: MLModel?
 
@@ -27,6 +29,18 @@ public actor AsrManager {
 
     internal var modelVersion: AsrModelVersion? {
         asrModels?.version
+    }
+
+    /// Whether windows shorter than 15 s cost less encoder time (a
+    /// multifunction encoder is loaded), which makes cutting a window at a
+    /// pause worth the lost overlap.
+    internal var hasEncoderLadder: Bool {
+        !encoderLadder.isEmpty
+    }
+
+    /// Window lengths of the encoder ladder, ascending (empty without one).
+    internal var encoderLadderSeconds: [Double] {
+        encoderLadder.map(\.seconds)
     }
 
     internal var parallelChunkConcurrency: Int {
@@ -86,6 +100,7 @@ public actor AsrManager {
             self.asrModels = models
             self.preprocessorModel = models.preprocessor
             self.encoderModel = models.encoder
+            self.encoderLadder = models.encoderLadder
             self.decoderModel = models.decoder
             self.jointModel = models.joint
             self.vocabulary = models.vocabulary
@@ -111,6 +126,36 @@ public actor AsrManager {
         Task {
             await emitter.ensureSession()
         }
+    }
+
+    /// One window of a long-form transcription as it finishes decoding, for
+    /// hosts that show text while the file is still being read. Windows can
+    /// finish out of order (they decode on several workers); `index` orders
+    /// them. The text is the window's own decode, before the seam merge and
+    /// repair pass that produce the final `ASRResult`.
+    public struct WindowProgress: Sendable {
+        public let index: Int
+        public let windowCount: Int
+        public let startSeconds: TimeInterval
+        public let endSeconds: TimeInterval
+        public let text: String
+    }
+
+    private var windowHandler: (@Sendable (WindowProgress) -> Void)?
+
+    /// Receive every finished window of a long-form transcription (see
+    /// `WindowProgress`). Single-window audio reports nothing here.
+    public func setWindowHandler(_ handler: (@Sendable (WindowProgress) -> Void)?) {
+        windowHandler = handler
+    }
+
+    internal func reportWindow(index: Int, windowCount: Int, startFrame: Int, endFrame: Int, tokenIds: [Int]) {
+        guard let windowHandler else { return }
+        let frame = ASRConstants.secondsPerEncoderFrame
+        windowHandler(
+            WindowProgress(
+                index: index, windowCount: windowCount, startSeconds: Double(startFrame) * frame,
+                endSeconds: Double(endFrame) * frame, text: convertTokensToText(tokenIds)))
     }
 
     internal func makeWorkerClone() -> AsrManager? {
@@ -147,6 +192,7 @@ public actor AsrManager {
         self.asrModels = models
         self.preprocessorModel = models.preprocessor
         self.encoderModel = models.encoder
+        self.encoderLadder = models.encoderLadder
         self.decoderModel = models.decoder
         self.jointModel = models.joint
         self.vocabulary = models.vocabulary
@@ -227,6 +273,7 @@ public actor AsrManager {
         asrModels = nil
         preprocessorModel = nil
         encoderModel = nil
+        encoderLadder = []
         decoderModel = nil
         jointModel = nil
         Task { await sharedMLArrayCache.clear() }

@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 
 // MARK: - Configuration
@@ -455,3 +456,4 @@ public enum SortformerError: Error, LocalizedError {
         }
     }
 }
+#endif

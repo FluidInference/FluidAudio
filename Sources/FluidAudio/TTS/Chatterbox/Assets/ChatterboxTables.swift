@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Host-side runtime tables for Chatterbox: T3 embedding / positional tables
@@ -261,3 +262,4 @@ private struct SafetensorsFile {
         return out
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 @preconcurrency import CoreML
 import Foundation
@@ -1110,3 +1111,5 @@ private actor OfflineSpanEmbedder {
         return try extractor.embedSpans(audioSource: audioSource, spans: spans)
     }
 }
+
+#endif

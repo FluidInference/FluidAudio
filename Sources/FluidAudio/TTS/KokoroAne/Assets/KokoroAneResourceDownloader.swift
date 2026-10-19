@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Downloads the laishere/kokoro 7-stage CoreML chain + auxiliary files
@@ -527,3 +528,4 @@ public enum KokoroAneResourceDownloader {
         return try TtsCacheDirectory.ensure().appendingPathComponent(modelsSubdirectory)
     }
 }
+#endif

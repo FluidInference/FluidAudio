@@ -283,6 +283,45 @@ extension ChunkProcessor {
             chosenDecisions = pathAStartsDecisions
         }
         let postProbeEnd = chosenDecisions.count
+        // The window each output was decoded in, re-derived from the chosen
+        // path's decisions with the same warm-up rule the decode used. A
+        // probe slot past the chosen path's last decision was filled from
+        // path A and has no window of its own in the chosen path.
+        func chosenWindow(_ chunkIndex: Int) -> WindowFrames? {
+            guard chunkIndex < chosenDecisions.count else { return nil }
+            let decision = chosenDecisions[chunkIndex]
+            let warmupSamples =
+                chunkIndex > 0 && usePathB && decision.useWarmupPrefix
+                ? min(config.pathBWarmupSamples, decision.start) : 0
+            return dualWindowLayout(
+                chunkStart: decision.start, chunkSamples: chunkSamples,
+                warmupSamples: warmupSamples, speechEndSamples: speechEnd
+            ).frames
+        }
+        // Every slot has a decoded window for host reporting; the path-A
+        // fallback covers probe slots the chosen path never planned.
+        func decodedWindow(_ chunkIndex: Int) -> WindowFrames {
+            if let frames = chosenWindow(chunkIndex) { return frames }
+            let decision = pathAStartsDecisions[min(chunkIndex, pathAStartsDecisions.count - 1)]
+            return dualWindowLayout(
+                chunkStart: decision.start, chunkSamples: chunkSamples,
+                warmupSamples: 0, speechEndSamples: speechEnd
+            ).frames
+        }
+        // Chunk 0 and the probes are only final once the path is chosen,
+        // so the host hears about them together.
+        let windowCount = max(probeEnd + 1, postProbeEnd)
+        func reportWindow(_ chunkIndex: Int) async {
+            let frames = decodedWindow(chunkIndex)
+            await manager.reportWindow(
+                index: chunkIndex, windowCount: windowCount,
+                startFrame: frames.decodeStart, endFrame: frames.end,
+                tokenIds: chunkOutputs[chunkIndex].map(\.token))
+        }
+        for chunkIndex in 0...probeEnd {
+            await reportWindow(chunkIndex)
+        }
+
         if probeEnd + 1 < postProbeEnd {
             for chunkIndex in (probeEnd + 1)..<postProbeEnd {
                 try Task.checkCancellation()
@@ -305,6 +344,7 @@ extension ChunkProcessor {
                 )
                 chunkOutputs.append(tokens)
                 await reportProgress(through: chunkIndex)
+                await reportWindow(chunkIndex)
             }
         }
 
@@ -324,24 +364,9 @@ extension ChunkProcessor {
             let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary)
             let caseVariantIds = Self.caseVariantCanonicalIds(vocabulary: vocabulary)
             let seamTimingRealignment = await manager.seamTimingRealignment
-            // The window each output was decoded in, re-derived from the
-            // chosen path's decisions with the same warm-up rule the decode
-            // used. A probe slot past the chosen path's last decision was
-            // filled from path A and has no window of its own.
-            func window(_ chunkIndex: Int) -> WindowFrames? {
-                guard chunkIndex < chosenDecisions.count else { return nil }
-                let decision = chosenDecisions[chunkIndex]
-                let warmupSamples =
-                    chunkIndex > 0 && usePathB && decision.useWarmupPrefix
-                    ? min(config.pathBWarmupSamples, decision.start) : 0
-                return dualWindowLayout(
-                    chunkStart: decision.start, chunkSamples: chunkSamples,
-                    warmupSamples: warmupSamples, speechEndSamples: speechEnd
-                ).frames
-            }
             for (index, chunk) in chunkOutputs.enumerated().dropFirst() {
                 var seam: SeamWindows?
-                if seamTimingRealignment, let left = window(index - 1), let right = window(index) {
+                if seamTimingRealignment, let left = chosenWindow(index - 1), let right = chosenWindow(index) {
                     seam = SeamWindows(left: left, right: right)
                 }
                 mergedTokens = mergeChunks(

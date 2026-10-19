@@ -393,7 +393,7 @@ public actor StreamingNemotronMultilingualAsrManager {
         )
         // Detect stateful encoder (cache_channel/cache_time as MLState rather
         // than I/O tensors). makeState() returns a fresh zero-initialized state.
-        if #available(macOS 15, iOS 18, *) {
+        if #available(macOS 15, iOS 18, tvOS 18, *) {
             if let enc = self.encoder, !enc.modelDescription.stateDescriptionsByName.isEmpty {
                 self.encoderState = enc.makeState()
                 logger.info("Loaded stateful encoder (MLState cache) — using ANE-resident cache path")
@@ -917,7 +917,7 @@ public actor StreamingNemotronMultilingualAsrManager {
         cacheLen = caches.len
         // Stateful encoder: a fresh state has zero-initialized buffers, which
         // matches what createInitialCaches produces. Recreate it on reset.
-        if #available(macOS 15, iOS 18, *) {
+        if #available(macOS 15, iOS 18, tvOS 18, *) {
             if let enc = encoder, !enc.modelDescription.stateDescriptionsByName.isEmpty {
                 encoderState = enc.makeState()
             }

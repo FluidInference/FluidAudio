@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Shared Misaki lexicon JSON cache loader.
@@ -72,3 +73,4 @@ public actor LexiconAssetCache {
         (wordToPhonemes, caseSensitiveWordToPhonemes)
     }
 }
+#endif

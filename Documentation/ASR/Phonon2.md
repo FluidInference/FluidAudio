@@ -18,6 +18,34 @@ plus fp16 palettes over the non-zeros (iOS 18 `constexpr_lut_to_sparse` + `const
 8 output rows), so nothing is re-quantized on our side; decoder and joint are re-exported from the checkpoint's int6
 tables. On iOS 17 / macOS 14 `AsrModels` throws before downloading anything and points to `.ultra`.
 
+### Encoder ladder (multifunction `Encoder.mlmodelc`)
+
+`Encoder.mlmodelc` is a Core ML **multifunction** model: three encoder programs — `enc_5040ms`, `enc_10160ms`,
+`enc_15000ms` (5.04 / 10.16 / 15 s windows) — over one shared weight blob (341 MB for the three; the extra functions
+cost ~10 MB each, mostly their constant-folded relative-position tables). `AsrModels.load` reads the function names
+(`MLModelAsset.functionNames`), loads each as its own `MLModel`, and `AsrManager` runs every window on the smallest
+function that holds its mel frames, slicing the 15 s preprocessor output to the function's length. Each function
+computes the same length-masked encoder, so transcripts do not change (LibriSpeech test-clean: 2.47 % WER with either
+build) — only the time does:
+
+| Function | Encoder frames | ANE, one call (M5 Pro) |
+|---|---:|---:|
+| `enc_5040ms` | 63 | ~6 ms |
+| `enc_10160ms` | 126 | 12.2 ms |
+| `enc_15000ms` | 188 | 19.3 ms |
+
+The lengths are not arbitrary: Neural Engine time for this encoder is quantized in **64-frame tiles** of the time
+axis — 11, 12, 13, 14 and 15 s windows (138–188 frames) all cost 18–21 ms, 10 s (126 frames) costs 12 ms. A finer
+ladder (1 s steps) was built and measured first and bought nothing; 64 / 128 / 188 frames are the three tiles the 15 s
+preprocessor can feed. Two consequences for the host, both in `ChunkProcessor` (see "Pause-Cut Windows" and
+"Post-Merge Repair Pass" in LongTranscription.md): long recordings are cut at the **latest pause** in each window with
+no overlap at that seam (fewer windows at the same per-window price), and seam-gap repair probes run on the 5 s
+function. A single-shape encoder loads exactly as before (`encoderLadder` is empty) and keeps the overlap chunker.
+
+Core ML compiles each function for the Neural Engine on first load (about 55 s each on an M5 Pro, cached afterwards),
+so the first launch takes roughly three minutes instead of one. Function names must not contain a `.` — Core ML's ANE
+compiler crashes on `enc_5.04s`, hence the millisecond spelling.
+
 ## Usage
 
 ```swift
@@ -66,8 +94,12 @@ audio divided by total processing time.
 |---|---|---|---|
 | test-clean (2620 files) WER | 2.27 % | **2.13 %** | 2.47 % |
 | test-other (2939 files) WER | 4.12 % | **3.81 %** | 4.62 % |
-| test-clean RTFx | 149–152× | 151× | **159×** |
-| test-other RTFx | 138× | 142× | **146×** |
+| test-clean RTFx | 149–152× | 151× | **193×** (ladder; 155–159× single-shape) |
+| test-other RTFx | 138× | 142× | **146×** (single-shape) |
+
+The ladder encoder's test-clean figure was measured back to back with the single-shape build in one session (193.3×
+vs 155.5×, 100.6 s vs 125.1 s for the 2620 files, corpus WER 2.47 % for both): most LibriSpeech utterances fit the
+10.16 s or 5.04 s function, so a 2620-file run stops paying for 2620 fifteen-second encoder passes.
 
 On LibriSpeech **v3 is the more accurate model** by 0.20 (clean) and 0.50 (other) points, which reproduces the upstream
 card's own deltas against its teacher (+0.20 / +0.79 under the Open ASR Leaderboard protocol; the card wins against v3
@@ -92,12 +124,26 @@ above. These are the same runs as the ANE column of the compute-unit table below
 |---|---:|---:|---:|
 | v3 | 10.7 s | 335× | 16.5 % |
 | Ultra | 7.9 s | 457× | **13.5 %** |
-| Phonon-2 default (sparse, 321 MB) | 7.5 s | **480×** | 17.2 % |
-| Phonon-2 `Encoder_lut6` (470 MB) | 7.4 s | 484× | 17.2 % |
+| Phonon-2 single-shape encoder (sparse, 321 MB), overlap chunker | 7.5 s | 480× | 17.2 % |
+| Phonon-2 `Encoder_lut6` (470 MB), overlap chunker | 7.4 s | 484× | 17.2 % |
+| **Phonon-2 ladder encoder (default), pause-cut chunker** | **5.55 s** | **649×** | 16.7 % |
 
-On conversational long-form audio Phonon-2 is the fastest model we ship (1.43× v3's throughput, ahead of Ultra) but the
-least accurate of the three: Ultra beats v3 here while Phonon-2 trails it by 0.8 points, consistent with the upstream
-card's Earnings-22 row (6.96 % vs its teacher's 5.85 %). All Phonon-2 encoder files produce the same transcript.
+On conversational long-form audio Phonon-2 is the fastest model we ship (1.9× v3's throughput, ahead of Ultra) but the
+least accurate of the three: Ultra beats v3 here while Phonon-2 trails it, consistent with the upstream card's
+Earnings-22 row (6.96 % vs its teacher's 5.85 %). All Phonon-2 encoder files produce the same transcript on the same
+chunk layout; the ladder row's lower WER comes from the pause-cut windows, which remove the seam merge wherever a
+pause exists.
+
+Where the ladder row's time goes (3 runs, 5.54–5.57 s): ~267 windows × 19.3 ms of Neural Engine time is 5.1 s of it,
+planning 0.1 s, the repair pass 0.35 s. The chunk loop is Neural Engine-bound at four workers (more workers do not
+help), so the remaining lever is encoding fewer windows, not host work.
+
+For reference, Fermion Research's own Core ML runtime for the same checkpoint
+([phonon-coreml](https://github.com/fermionresearch/phonon-coreml) 1.1.2 with
+[Phonon-2-CoreML](https://huggingface.co/FermionResearch/Phonon-2-CoreML): multifunction 5/10/15/35 s encoder, pause-cut
+15 s windows without overlap, C greedy-TDT decoder) transcribes the same file on the same machine, interleaved with the
+runs above, in **5.74 s (627×) at 17.26 % WER**; its 15 s encoder call costs the same 18.6–19.3 ms as ours. The
+difference is window packing (its 288 windows average 12.5 s, ours ~13.5 s) and the 5 s repair probes.
 
 Encoder compute units on the same 60-minute file (`transcribe --encoder-compute-units`, best of 2, processing time
 excludes model load):

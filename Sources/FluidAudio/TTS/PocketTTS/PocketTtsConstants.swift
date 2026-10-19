@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Constants for the PocketTTS flow-matching language model TTS backend.
@@ -104,7 +105,9 @@ public enum PocketTtsLanguage: String, Sendable, CaseIterable {
         "v2.1/\(rawValue)"
     }
 }
+#endif
 
+// Outside the `TTS` guard: `ModelNames.PocketTts` keys required-file sets on these.
 /// Precision variant of the PocketTTS CoreML models.
 ///
 /// Both variants live in the upstream `FluidInference/pocket-tts-coreml` repo

@@ -1,9 +1,12 @@
+#if TTS
 // Array conversions adapted from FluidAudio (MIT).
 import Accelerate
 @preconcurrency import CoreML
 import Foundation
 
 /// MLMultiArray builders + fp16 ↔ fp32 conversions used by the chain.
+/// Builders allocate through `KokoroAneArrays.makeArray` so inputs carry zeroed
+/// tail slack for the OS 27 BNNS overread (see `tailSlackBytes`; #1037).
 enum KokoroAneV3Arrays {
 
     private static func isContiguous(_ array: MLMultiArray) -> Bool {
@@ -60,8 +63,7 @@ enum KokoroAneV3Arrays {
         precondition(
             source.count == total,
             "float16Array: shape \(shape) (\(total)) ≠ source.count \(source.count)")
-        let nsShape = shape.map { NSNumber(value: $0) }
-        let arr = try MLMultiArray(shape: nsShape, dataType: .float16)
+        let arr = try KokoroAneArrays.makeArray(shape: shape, dataType: .float16)
         let dst = arr.dataPointer.bindMemory(to: UInt16.self, capacity: total)
         source.withUnsafeBufferPointer { srcBuf in
             guard let sourceBase = srcBuf.baseAddress else { return }
@@ -75,8 +77,7 @@ enum KokoroAneV3Arrays {
         if !isContiguous(source) { return try float16Array(shape: shape, from: readFloats(source)) }
         // Same shape + same dtype → just copy bytes.
         let total = shape.reduce(1, *)
-        let nsShape = shape.map { NSNumber(value: $0) }
-        let dst = try MLMultiArray(shape: nsShape, dataType: .float16)
+        let dst = try KokoroAneArrays.makeArray(shape: shape, dataType: .float16)
         precondition(
             source.count == total,
             "float16Array(from MLMultiArray): source has \(source.count) elements, shape implies \(total)")
@@ -101,8 +102,7 @@ enum KokoroAneV3Arrays {
         precondition(
             source.count == total,
             "float32Array: shape \(shape) (\(total)) ≠ source.count \(source.count)")
-        let nsShape = shape.map { NSNumber(value: $0) }
-        let arr = try MLMultiArray(shape: nsShape, dataType: .float32)
+        let arr = try KokoroAneArrays.makeArray(shape: shape, dataType: .float32)
         let dst = arr.dataPointer.bindMemory(to: Float.self, capacity: total)
         source.withUnsafeBufferPointer { src in
             guard let sourceBase = src.baseAddress else { return }
@@ -115,8 +115,7 @@ enum KokoroAneV3Arrays {
     static func float32Array(shape: [Int], from source: MLMultiArray) throws -> MLMultiArray {
         if !isContiguous(source) { return try float32Array(shape: shape, from: readFloats(source)) }
         let total = shape.reduce(1, *)
-        let nsShape = shape.map { NSNumber(value: $0) }
-        let dst = try MLMultiArray(shape: nsShape, dataType: .float32)
+        let dst = try KokoroAneArrays.makeArray(shape: shape, dataType: .float32)
         precondition(
             source.count == total,
             "float32Array(from MLMultiArray): source has \(source.count) elements, shape implies \(total)")
@@ -141,8 +140,7 @@ enum KokoroAneV3Arrays {
         precondition(
             source.count == total,
             "int32Array: shape \(shape) (\(total)) ≠ source.count \(source.count)")
-        let nsShape = shape.map { NSNumber(value: $0) }
-        let arr = try MLMultiArray(shape: nsShape, dataType: .int32)
+        let arr = try KokoroAneArrays.makeArray(shape: shape, dataType: .int32)
         let dst = arr.dataPointer.bindMemory(to: Int32.self, capacity: total)
         source.withUnsafeBufferPointer { src in
             guard let sourceBase = src.baseAddress else { return }
@@ -179,3 +177,4 @@ enum KokoroAneV3Arrays {
         return (0..<count).map { Float(truncating: arr[$0]) }
     }
 }
+#endif

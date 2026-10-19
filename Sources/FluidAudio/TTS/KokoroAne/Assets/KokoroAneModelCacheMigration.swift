@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Validates and transactionally repairs legacy Kokoro ANE model caches.
@@ -167,3 +168,4 @@ actor KokoroAneModelCacheMigrationCoordinator {
         }
     }
 }
+#endif

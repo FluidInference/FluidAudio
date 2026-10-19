@@ -1,3 +1,4 @@
+#if TTS
 import Accelerate
 @preconcurrency import CoreML
 import Foundation
@@ -217,3 +218,4 @@ enum KokoroAneArrays {
         return (0..<arr.count).map { Float(truncating: arr[$0]) }
     }
 }
+#endif

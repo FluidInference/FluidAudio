@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 
 internal struct Segment: Hashable {
@@ -24,3 +25,4 @@ internal struct SlidingWindowFeature {
     var data: [[[Float]]]
     var slidingWindow: SlidingWindow
 }
+#endif

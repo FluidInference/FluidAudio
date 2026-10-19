@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Grapheme BPE tokenizer for Chatterbox Multilingual, mirroring upstream
@@ -207,3 +208,4 @@ final class ChatterboxTokenizer: Sendable {
         return parts.map { vocab[$0] ?? unkId }
     }
 }
+#endif

@@ -973,6 +973,7 @@ public enum ModelNames {
                 }
             }
 
+            #if Diarizer
             public var defaultConfiguration: SortformerConfig {
                 switch self {
                 case .fastV2:
@@ -991,6 +992,7 @@ public enum ModelNames {
                     return .efficientV2_1
                 }
             }
+            #endif
 
             /// Compiled-model path for this variant at the default (`.fp16`) precision.
             public var fileName: String {
@@ -1002,9 +1004,11 @@ public enum ModelNames {
                 return "\(precision.subdirectory)/\(name).mlmodelc"
             }
 
+            #if Diarizer
             public func isCompatible(with config: SortformerConfig) -> Bool {
                 defaultConfiguration.isCompatible(with: config)
             }
+            #endif
         }
 
         /// Repo subdirectory holding the default (`.fp16`) model set. Both v3 sets are the
@@ -1027,6 +1031,7 @@ public enum ModelNames {
             return variant.fileName(precision: precision)
         }
 
+        #if Diarizer
         /// Bundle name for a given configuration (honors `config.precision`)
         public static func bundle(for config: SortformerConfig) -> String? {
             guard let variant = config.modelVariant else {
@@ -1035,6 +1040,7 @@ public enum ModelNames {
             assert(variant.isCompatible(with: config), "ERROR: Model variant and configuration are not compatible.")
             return variant.fileName(precision: config.precision)
         }
+        #endif
 
         /// Default bundle name
         public static var defaultBundle: String {
@@ -1455,10 +1461,13 @@ public enum ModelNames {
             "synthesizer_f\(frames).mlmodelc"
         }
 
+        /// Synthesizer frame buckets; `InflectConstants.frameBuckets` reads these.
+        public static let frameBuckets = [256, 384, 512, 640, 768, 896, 1024, 2048]
+
         /// Encoder + all 8 synthesizer buckets (downloaded up front; buckets
-        /// load lazily). Buckets mirror `InflectConstants.frameBuckets`.
+        /// load lazily).
         public static let requiredModels: Set<String> = Set(
-            [encoderFile] + InflectConstants.frameBuckets.map { synthesizerFile(frames: $0) })
+            [encoderFile] + frameBuckets.map { synthesizerFile(frames: $0) })
     }
 
     /// Paradee-8M model names. File names match
@@ -1561,21 +1570,33 @@ public enum ModelNames {
     ///     (`RangeDim(1, 108)`). CPU/GPU only — dynamic shapes block ANE.
     ///   - `decoderCacheExternalV2` — FP32, fixed `attention_mask` shape
     ///     `[1, 1, 1, 108]`. ANE-resident, ~1.6× faster decoder end-to-end
-    ///     on Apple Silicon. Drop-in replacement; `CoherePipeline`
-    ///     auto-detects the variant by inspecting the `attention_mask`
-    ///     input shape.
+    ///     on Apple Silicon.
+    ///   - `decoderCacheExternalV3` — same static graph as v2 with a 256-slot
+    ///     KV cache. Default. The 108-slot cache capped dense 35 s windows at
+    ///     ~99 output tokens and silently dropped the rest (#1013).
+    ///     `CoherePipeline` reads the cache length from the loaded model's
+    ///     `k_cache_0` shape, so all three variants load with the same code.
     public enum CohereTranscribe {
         public static let encoder = "cohere_encoder"
         public static let decoderCacheExternal = "cohere_decoder_cache_external"
         public static let decoderCacheExternalV2 = "cohere_decoder_cache_external_v2"
+        public static let decoderCacheExternalV3 = "cohere_decoder_cache_external_v3"
         public static let vocab = "vocab.json"
 
         public static let encoderCompiledFile = encoder + ".mlmodelc"
         public static let decoderCacheExternalCompiledFile = decoderCacheExternal + ".mlmodelc"
         public static let decoderCacheExternalV2CompiledFile = decoderCacheExternalV2 + ".mlmodelc"
+        public static let decoderCacheExternalV3CompiledFile = decoderCacheExternalV3 + ".mlmodelc"
 
-        /// Default required set — ships the ANE-friendly v2 decoder.
+        /// Default required set — ships the 256-slot static v3 decoder.
         public static let requiredModels: Set<String> = [
+            encoderCompiledFile,
+            decoderCacheExternalV3CompiledFile,
+            vocab,
+        ]
+
+        /// 108-slot static v2 decoder set (pre-v3).
+        public static let requiredModelsV2: Set<String> = [
             encoderCompiledFile,
             decoderCacheExternalV2CompiledFile,
             vocab,
@@ -1857,7 +1878,11 @@ public enum ModelNames {
         case .multilingualG2p:
             return ModelNames.MultilingualG2P.requiredModels
         case .cohereTranscribeCoreml:
-            return ModelNames.CohereTranscribe.requiredModels
+            switch variant {
+            case "v2": return ModelNames.CohereTranscribe.requiredModelsV2
+            case "v1": return ModelNames.CohereTranscribe.requiredModelsLegacy
+            default: return ModelNames.CohereTranscribe.requiredModels
+            }
         case .canary1bV2:
             return ModelNames.Canary.requiredModels(
                 precision: CanaryPrecision(rawValue: variant ?? "") ?? .int4)

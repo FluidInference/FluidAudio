@@ -12,17 +12,19 @@ import XCTest
 /// the mobius worktree; these tests pin representative behaviors.
 final class LuxTtsG2pTests: XCTestCase {
 
-    func testFixtureResourcesAreProcessedAtBundleRoot() {
+    func testFixtureResourcesAreProcessedAtBundleRoot() throws {
+        // `resourceURL` is the bundle root for flat bundles and `Contents/Resources`
+        // for macOS-style bundles (Xcode 27 `swift test` builds the latter).
+        let root = try XCTUnwrap(Bundle.module.resourceURL)
         XCTAssertFalse(
             FileManager.default.fileExists(
-                atPath: Bundle.module.bundleURL
-                    .appendingPathComponent("Resources", isDirectory: true).path
+                atPath: root.appendingPathComponent("Resources", isDirectory: true).path
             ),
             "LuxTTS test resources must not create a reserved top-level Resources directory"
         )
         XCTAssertTrue(
             FileManager.default.fileExists(
-                atPath: Bundle.module.bundleURL.appendingPathComponent("luxtts_fixtures.json").path
+                atPath: root.appendingPathComponent("luxtts_fixtures.json").path
             )
         )
     }

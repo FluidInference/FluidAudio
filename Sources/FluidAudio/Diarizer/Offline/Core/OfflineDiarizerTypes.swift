@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 
 /// Errors surfaced by the offline diarization pipeline.
@@ -769,3 +770,4 @@ extension OfflineDiarizerConfig {
         return copy
     }
 }
+#endif

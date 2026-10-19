@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Public API for Chatterbox Multilingual synthesis (ResembleAI, 24 kHz).
@@ -14,7 +15,7 @@ import Foundation
 ///     text: "Der schnelle braune Fuchs springt über den faulen Hund.",
 ///     language: "de")
 /// ```
-@available(macOS 15.0, iOS 18.0, *)
+@available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
 public actor ChatterboxManager {
 
     private static let logger = AppLogger(category: "ChatterboxManager")
@@ -74,3 +75,4 @@ public actor ChatterboxManager {
         return Audio(samples: result.samples, sampleRate: ChatterboxConstants.sampleRate)
     }
 }
+#endif

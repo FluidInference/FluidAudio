@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Errors thrown by the Chatterbox Multilingual backend.
@@ -38,3 +39,4 @@ public enum ChatterboxError: Error, LocalizedError {
         }
     }
 }
+#endif

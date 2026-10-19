@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Convert pypinyin's diacritic-form pinyin (`níhǎo`, `qiū`, `lǜ`) into
@@ -110,3 +111,4 @@ public enum MandarinPinyinNormalizer {
         return Syllable(base: base, tone: tone)
     }
 }
+#endif

@@ -64,7 +64,10 @@ is separate from legacy assets:
 `<Models>/kokoro-82m-coreml/ANE-v3/<release revision>/<en|ja|zh>/`.
 Passing `directory:` overrides the `<Models>` root. Voice packs download
 on demand; English JSON voice rows are converted to the runtime's binary
-layout. Text frontends retain their existing shared asset caches.
+layout. The text-frontend assets (English BART G2P + Misaki lexicon cache,
+French CharsiuG2P + lexicon, Spanish lexicon) follow the same root, under
+`<Models>/kokoro/`, so an app that passes `directory:` keeps every
+Kokoro file under it (#1023).
 
 The SDK adopts `KokoroProsody_v2` (fp32 prosody) and `KokoroTail_v2`
 (COLA-corrected output level) from the pinned base revision instead of reverting
@@ -409,12 +412,17 @@ Asset footprint (downloaded on first synthesis, cached at
 |-----------------------|--------|-----------------------------------------|
 | `pinyin_phrases.bin`  | 9.5 MB | `kokoro-82m-coreml/ANE-zh/assets/`      |
 | `pinyin_single.bin`   | 480 KB | same                                    |
+| `jieba_hmm_*.bin`     | 3 MB   | same (HMM word segmentation for OOV runs) |
+| `g2pw/g2pw.mlmodelc`  | 152 MB | `kokoro-82m-coreml/ANE-zh/g2pw/` (int8 BERT polyphone classifier) |
+| `g2pw/vocab.txt`, `g2pw/POLYPHONIC_CHARS.txt` | 210 KB | same (`bert-base-chinese` vocab + 3582-char Traditional inventory) |
 
-What the Mandarin G2P intentionally does **not** ship: jieba HMM
-fallback, POS-aware tone sandhi, neural polyphone disambiguation
-(g2pW-style), erhua handling, number/date verbalization. These are all
-viable upgrades — the current pipeline trades them for a zero-network
-~10 MB footprint that handles short conversational text well.
+On top of the dict lookup the pipeline runs jieba-HMM segmentation for
+out-of-vocabulary runs, tone sandhi, erhua folding and g2pW polyphone
+disambiguation. g2pW only fires on single-char dict fallbacks whose
+Hanzi exists in its Traditional inventory (e.g. `行`, `重`, `好`);
+simplified-only polyphones such as `还` / `长` / `发` keep the dict's
+first reading. Every g2pW asset is optional — if the bundle or its text
+files are missing, synthesis continues dict-only.
 
 ## Japanese G2P
 

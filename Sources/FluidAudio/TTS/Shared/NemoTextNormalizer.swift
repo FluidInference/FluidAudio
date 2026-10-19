@@ -1,3 +1,4 @@
+#if TTS
 #if canImport(CNemoTextProcessing)
 import CNemoTextProcessing
 #endif
@@ -52,3 +53,4 @@ public enum NemoTextNormalizer {
         #endif
     }
 }
+#endif
