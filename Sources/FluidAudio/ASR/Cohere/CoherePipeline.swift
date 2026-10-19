@@ -342,6 +342,10 @@ public actor CoherePipeline {
         public let cacheLength: Int
         /// Element type the decoder was compiled with for its caches and masks.
         public let cacheDataType: MLMultiArrayDataType
+        /// Compute units the encoder was loaded with.
+        public let encoderComputeUnits: MLComputeUnits
+        /// Compute units the decoder was loaded with.
+        public let decoderComputeUnits: MLComputeUnits
     }
 
     private let melExtractor: CohereMelSpectrogram
@@ -385,6 +389,27 @@ public actor CoherePipeline {
         }
     }
 
+    /// Compute units the encoder loads with unless the caller picks some.
+    ///
+    /// The INT8 encoder stays INT8 on the Neural Engine. Under `.all`,
+    /// Core ML may route it to the GPU instead, where the 1.8 GB of INT8
+    /// weights are materialised at full precision: the process keeps ~10 GB
+    /// more memory resident after the first `transcribe` (12.4 GB footprint
+    /// in #1045, M5 Pro, macOS 26.6) and that first call takes over a
+    /// minute. On the ANE the footprint stays near 130 MB for the whole
+    /// run, at the cost of a slower warm encoder (~1.2 s vs ~0.5 s per 35 s
+    /// window on M5 Pro). Pass `encoderComputeUnits: .all` or `.cpuAndGPU`
+    /// to opt into the GPU on machines that can afford the memory. See
+    /// Documentation/ASR/Cohere.md, "Compute units and memory".
+    public static let defaultEncoderComputeUnits: MLComputeUnits = .cpuAndNeuralEngine
+
+    /// Compute units the decoder loads with unless the caller picks some.
+    ///
+    /// The FP16 cache-external decoder is 291 MB and ANE-resident with its
+    /// static shapes. Moving it to `.all` changes its time by a few percent
+    /// and adds ~100 MB, so it shares the encoder's default.
+    public static let defaultDecoderComputeUnits: MLComputeUnits = .cpuAndNeuralEngine
+
     /// Load encoder, decoder and vocabulary from (potentially different) directories.
     ///
     /// This supports mixed-precision — e.g. INT8 encoder + FP16 decoder. Pass
@@ -396,15 +421,27 @@ public actor CoherePipeline {
     /// static build and `.v1` the legacy FP16 dynamic-shape decoder. The
     /// runtime reads the cache length from the loaded model and adapts the
     /// `attention_mask` build to whichever variant is loaded.
+    ///
+    /// Compute units are resolved per model: `encoderComputeUnits` /
+    /// `decoderComputeUnits` win, then the shared `computeUnits`, then
+    /// `defaultEncoderComputeUnits` / `defaultDecoderComputeUnits` (both
+    /// `.cpuAndNeuralEngine`). Keep the encoder off the GPU unless you can
+    /// spare ~10 GB; see `defaultEncoderComputeUnits`.
     public static func loadModels(
         encoderDir: URL,
         decoderDir: URL,
         vocabDir: URL,
         decoderVariant: DecoderVariant = .v3,
-        computeUnits: MLComputeUnits = .all
+        computeUnits: MLComputeUnits? = nil,
+        encoderComputeUnits: MLComputeUnits? = nil,
+        decoderComputeUnits: MLComputeUnits? = nil
     ) async throws -> LoadedModels {
-        let config = MLModelConfiguration()
-        config.computeUnits = computeUnits
+        let units = resolveComputeUnits(
+            shared: computeUnits, encoder: encoderComputeUnits, decoder: decoderComputeUnits)
+        let encoderConfig = MLModelConfiguration()
+        encoderConfig.computeUnits = units.encoder
+        let decoderConfig = MLModelConfiguration()
+        decoderConfig.computeUnits = units.decoder
 
         let encoderURL = encoderDir.appendingPathComponent(
             ModelNames.CohereTranscribe.encoderCompiledFile)
@@ -415,10 +452,12 @@ public actor CoherePipeline {
                 "Decoder not found at \(decoderURL.path) (variant: \(decoderVariant)).")
         }
 
-        pipelineLogger.info("Loading encoder from \(encoderURL.path)")
-        let encoder = try await MLModel.load(contentsOf: encoderURL, configuration: config)
-        pipelineLogger.info("Loading decoder from \(decoderURL.path)")
-        let decoder = try await MLModel.load(contentsOf: decoderURL, configuration: config)
+        pipelineLogger.info(
+            "Loading encoder from \(encoderURL.path) (\(describe(units.encoder)))")
+        let encoder = try await MLModel.load(contentsOf: encoderURL, configuration: encoderConfig)
+        pipelineLogger.info(
+            "Loading decoder from \(decoderURL.path) (\(describe(units.decoder)))")
+        let decoder = try await MLModel.load(contentsOf: decoderURL, configuration: decoderConfig)
 
         let cacheLength = try Self.probeCacheLength(
             decoder: decoder, variant: decoderVariant, path: decoderURL.path)
@@ -434,7 +473,31 @@ public actor CoherePipeline {
             vocabulary: vocab,
             decoderVariant: decoderVariant,
             cacheLength: cacheLength,
-            cacheDataType: cacheDataType)
+            cacheDataType: cacheDataType,
+            encoderComputeUnits: units.encoder,
+            decoderComputeUnits: units.decoder)
+    }
+
+    /// Per-model compute units for `loadModels`: the per-model value wins,
+    /// then the shared value, then the model's default.
+    static func resolveComputeUnits(
+        shared: MLComputeUnits?, encoder: MLComputeUnits?, decoder: MLComputeUnits?
+    ) -> (encoder: MLComputeUnits, decoder: MLComputeUnits) {
+        return (
+            encoder: encoder ?? shared ?? defaultEncoderComputeUnits,
+            decoder: decoder ?? shared ?? defaultDecoderComputeUnits
+        )
+    }
+
+    /// Log label for a compute-unit choice.
+    public static func describe(_ units: MLComputeUnits) -> String {
+        switch units {
+        case .cpuOnly: return "cpu-only"
+        case .cpuAndGPU: return "cpu-gpu"
+        case .cpuAndNeuralEngine: return "cpu-ane"
+        case .all: return "all"
+        @unknown default: return "unknown"
+        }
     }
 
     /// Read the KV-cache length from the decoder's `k_cache_0` input shape
