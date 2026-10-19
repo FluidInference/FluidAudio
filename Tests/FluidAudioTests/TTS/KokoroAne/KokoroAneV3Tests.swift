@@ -53,6 +53,42 @@ final class KokoroAneV3Tests: XCTestCase {
         XCTAssertFalse(KokoroAneV3Assets.matches(Data("ab".utf8), file: file))
     }
 
+    func testCompiledBundleMapsSourcePackageFiles() throws {
+        // #1043: ensure() skips a source-package file once the pipeline has
+        // compiled its sibling .mlmodelc. Pure path mapping; the gated
+        // real-model test covers the filesystem behavior end to end.
+        let root = URL(fileURLWithPath: "/models/en", isDirectory: true)
+        func bundle(_ path: String) -> String? {
+            KokoroAneV3Assets.compiledBundleURL(forSourceFile: path, root: root)?.path
+        }
+        XCTAssertEqual(
+            bundle("fast/KokoroAlbert_32.mlpackage/Manifest.json"), "/models/en/fast/KokoroAlbert_32.mlmodelc")
+        XCTAssertEqual(
+            bundle("fast/KokoroAlbert_32.mlpackage/Data/com.apple.CoreML/weights/weight.bin"),
+            "/models/en/fast/KokoroAlbert_32.mlmodelc")
+        XCTAssertEqual(
+            bundle("decoder/KokoroDecoderPre_120.mlpackage/Manifest.json"),
+            "/models/en/decoder/KokoroDecoderPre_120.mlmodelc")
+        XCTAssertEqual(
+            bundle("base/KokoroAlbert.mlpackage/Data/com.apple.CoreML/model.mlmodel"),
+            "/models/en/base/KokoroAlbert.mlmodelc")
+        // Loose assets and the published compiled bundles have no source
+        // package, so they are always verified.
+        for path in [
+            "vocab.json", "af_heart.bin", "fast/native-source.json",
+            "base/KokoroProsody_v2.mlmodelc/model.mil", "base/KokoroTail_v2.mlmodelc/weights/weight.bin",
+        ] {
+            XCTAssertNil(bundle(path), path)
+            XCTAssertFalse(KokoroAneV3Assets.hasCompiledBundle(forSourceFile: path, root: root), path)
+        }
+        // No bundle on disk: the source is still checked.
+        XCTAssertFalse(
+            KokoroAneV3Assets.isCompiledBundle(at: root.appendingPathComponent("fast/KokoroAlbert_32.mlmodelc")))
+        XCTAssertFalse(
+            KokoroAneV3Assets.hasCompiledBundle(
+                forSourceFile: "fast/KokoroAlbert_32.mlpackage/Manifest.json", root: root))
+    }
+
     func testUnsupportedLanguagesFailBeforeDownloading() async throws {
         for variant in [KokoroAneVariant.spanish, .french] {
             let store = KokoroAneModelStore(variant: variant, version: .v3)
@@ -82,6 +118,26 @@ final class KokoroAneV3Tests: XCTestCase {
         XCTAssertEqual(total.totalMs, 21)
         XCTAssertEqual(total.generator, 4)
         XCTAssertEqual(total.vocoder, 5)
+    }
+
+    /// Locally compiled stages under `fast/`, `decoder/` and `base/` that have
+    /// (or had) a source package; the published compiled bundles are excluded.
+    private func compiledStagesWithSource(under root: URL) throws -> [URL] {
+        var bundles: [URL] = []
+        for folder in ["fast", "decoder", "base"] {
+            let directory = root.appendingPathComponent(folder)
+            guard FileManager.default.fileExists(atPath: directory.path) else { continue }
+            bundles += try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+                .filter {
+                    $0.pathExtension == "mlmodelc" && KokoroAneV3Assets.isCompiledBundle(at: $0)
+                        && !["KokoroProsody_v2", "KokoroTail_v2"].contains($0.deletingPathExtension().lastPathComponent)
+                }
+        }
+        return bundles
+    }
+
+    private func sourcePackage(for compiled: URL) -> URL {
+        compiled.deletingPathExtension().appendingPathExtension("mlpackage")
     }
 
     func testRealSDKInputsAndFallbacks() async throws {
@@ -123,6 +179,41 @@ final class KokoroAneV3Tests: XCTestCase {
         let reloaded = try await english.synthesizeFromPhonemesDetailed(hello)
         try check(reloaded, fast: true)
         XCTAssertEqual(try Data(contentsOf: vocabURL), vocabData)
+        // #1043: with every stage compiled, the .mlpackage sources are dead
+        // weight. Deleting them must not trigger a re-download on the next
+        // load, and synthesis must keep running from the compiled bundles.
+        // Idempotent: on a cache that was already stripped, this only checks
+        // that nothing comes back.
+        await english.cleanup()
+        let compiledStages = try compiledStagesWithSource(under: root)
+        XCTAssertFalse(compiledStages.isEmpty)
+        for bundle in compiledStages {
+            try? FileManager.default.removeItem(at: sourcePackage(for: bundle))
+        }
+        let afterRemoval = try await english.synthesizeFromPhonemesDetailed(hello)
+        try check(afterRemoval, fast: true)
+        for bundle in compiledStages {
+            XCTAssertFalse(
+                FileManager.default.fileExists(atPath: sourcePackage(for: bundle).path),
+                "\(bundle.lastPathComponent) source was re-downloaded although the compiled bundle exists")
+        }
+        // Recovery with the source gone: a compiled bundle that no longer
+        // loads is dropped, the load fails once, and the next load re-fetches
+        // and recompiles that stage's source.
+        await english.cleanup()
+        let damaged = root.appendingPathComponent("fast/KokoroAlbert_32.mlmodelc")
+        XCTAssertTrue(KokoroAneV3Assets.isCompiledBundle(at: damaged))
+        try Data("x".utf8).write(to: damaged.appendingPathComponent("coremldata.bin"), options: .atomic)
+        do {
+            _ = try await english.synthesizeFromPhonemesDetailed(hello)
+            XCTFail("Expected the damaged compiled bundle to fail to load")
+        } catch {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: damaged.path), "damaged bundle must be dropped")
+        }
+        let recovered = try await english.synthesizeFromPhonemesDetailed(hello)
+        try check(recovered, fast: true)
+        XCTAssertTrue(KokoroAneV3Assets.isCompiledBundle(at: damaged))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sourcePackage(for: damaged).path))
         try await english.initialize()
         try check(try await english.synthesizeDetailed(text: "Hello world."), fast: true)
         await english.cleanup()
