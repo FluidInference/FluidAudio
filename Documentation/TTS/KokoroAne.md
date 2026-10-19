@@ -242,7 +242,11 @@ dictionary and Cutlet word list (about 115 MB) on first use. IPA bypass
 calls do not download them. Spanish and French fetch `es_lexicon_cache.json`
 (4 MB) / `fr_lexicon_cache.json` (13 MB) from the repo root at
 `initialize()`, next to the English `us_lexicon_cache.json`; French also
-fetches the CharsiuG2P CoreML pair.
+fetches the CharsiuG2P CoreML pair. The English frontend (and StyleTTS2 /
+Inflect, which share the phonemizer) fetches the BART G2P assets from the
+repo root (`G2PEncoder.mlmodelc`, `G2PDecoder.mlmodelc`, `g2p_vocab.json`,
+about 1.5 MB); that download takes only those three items, not the other
+root-level lexicon JSONs, which are fetched per language as above (#1044).
 
 ### Swift
 
