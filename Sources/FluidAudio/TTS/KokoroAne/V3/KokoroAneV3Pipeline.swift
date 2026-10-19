@@ -32,8 +32,21 @@ final class KokoroAneV3Pipeline {
             let configuration = MLModelConfiguration()
             configuration.computeUnits = units
             configuration.allowLowPrecisionAccumulationOnGPU = lowPrecision
-            if FileManager.default.fileExists(atPath: compiled.path) {
-                return try MLModel(contentsOf: compiled, configuration: configuration)
+            // Same "compiled" test KokoroAneV3Assets.ensure uses to skip the
+            // source package (#1043), so the two never disagree about a bundle.
+            if KokoroAneV3Assets.isCompiledBundle(at: compiled) {
+                do {
+                    return try MLModel(contentsOf: compiled, configuration: configuration)
+                } catch {
+                    // Corrupt or no-longer-loadable compiled bundle. Drop it so
+                    // the verified source is recompiled now, or, when the app
+                    // deleted the source, re-fetched by the next ensure().
+                    try? FileManager.default.removeItem(at: compiled)
+                    guard FileManager.default.fileExists(atPath: package.path) else { throw error }
+                }
+            } else if FileManager.default.fileExists(atPath: compiled.path) {
+                // Directory without coremldata.bin: never loadable, recompile.
+                try? FileManager.default.removeItem(at: compiled)
             }
             guard FileManager.default.fileExists(atPath: package.path) else {
                 throw KokoroAneV3Error.missingModel(name)

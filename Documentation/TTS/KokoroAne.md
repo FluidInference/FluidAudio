@@ -59,7 +59,12 @@ The SDK downloads the following immutable release from
 V3 checks the pinned manifest and model-file hashes, fetches its pinned
 seven-stage dependencies, and compiles source `.mlpackage` files on the
 target device. The first load includes downloads and compilation. Later
-loads reuse the downloaded packages and locally compiled models. Its cache
+loads use the locally compiled `.mlmodelc` bundles only: once a stage is
+compiled, its source `.mlpackage` is neither re-hashed nor re-downloaded, so
+an app may delete the `.mlpackage` sources after the first load to roughly
+halve the on-disk footprint (#1043). A compiled bundle that later fails to
+load is discarded: the source is recompiled on the spot, or, if it was
+deleted, fetched and compiled again on the next load. Its cache
 is separate from legacy assets:
 `<Models>/kokoro-82m-coreml/ANE-v3/<release revision>/<en|ja|zh>/`.
 Passing `directory:` overrides the `<Models>` root. Voice packs download

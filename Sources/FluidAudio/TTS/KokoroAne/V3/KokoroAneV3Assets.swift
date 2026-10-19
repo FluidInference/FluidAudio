@@ -99,6 +99,61 @@ enum KokoroAneV3Assets {
         data.count == file.bytes && SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() == file.sha256
     }
 
+    /// Same rule as `ModelCache.validateCompiledModelLayout`, without its error
+    /// logging: a compiled bundle is load-ready when its directory holds
+    /// `coremldata.bin`. `KokoroAneV3Pipeline` publishes each bundle with a
+    /// single atomic rename, so the marker alone proves the compile landed;
+    /// a `<name>.mlmodelc.<uuid>` staging copy or an empty directory does not.
+    static func isCompiledBundle(at url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue
+        else { return false }
+        return FileManager.default.fileExists(atPath: url.appendingPathComponent("coremldata.bin").path)
+    }
+
+    /// For a file inside a source package (`fast/KokoroAlbert_32.mlpackage/Manifest.json`,
+    /// `base/KokoroAlbert.mlpackage/Data/...`), the sibling compiled bundle the
+    /// pipeline writes (`<root>/fast/KokoroAlbert_32.mlmodelc`). `nil` for any
+    /// file outside a `.mlpackage`: loose assets, and the published compiled
+    /// bundles (Prosody_v2, Tail_v2, zh Noise_v2) that have no source.
+    static func compiledBundleURL(forSourceFile path: String, root: URL) -> URL? {
+        guard let range = path.range(of: ".mlpackage/") else { return nil }
+        return root.appendingPathComponent(String(path[..<range.lowerBound]) + ".mlmodelc")
+    }
+
+    /// `KokoroAneV3Pipeline` compiles each source `.mlpackage` once and loads
+    /// only the sibling `.mlmodelc` on every later launch; the source is never
+    /// read again. Once that bundle exists, `ensure` skips hashing and
+    /// refetching the source (#1043), which also lets an app delete the
+    /// `.mlpackage` sources after the first load. Deleting the compiled bundle
+    /// instead makes the next load fetch and compile the source again.
+    static func hasCompiledBundle(forSourceFile path: String, root: URL) -> Bool {
+        guard let bundle = compiledBundleURL(forSourceFile: path, root: root) else { return false }
+        return isCompiledBundle(at: bundle)
+    }
+
+    /// Keep `<root>/<relative>` matching its pinned hash: reuse a verified local
+    /// copy, otherwise fetch, verify and write it atomically. Files inside a
+    /// source package whose compiled bundle already exists are skipped.
+    private static func ensureFile(
+        _ relative: String, root: URL,
+        fetch: () async throws -> Data, matches: (Data) -> Bool
+    ) async throws {
+        try Task.checkCancellation()
+        if hasCompiledBundle(forSourceFile: relative, root: root) { return }
+        let target = root.appendingPathComponent(relative)
+        if let cached = try? Data(contentsOf: target, options: .mappedIfSafe), matches(cached) {
+            return
+        }
+        let bytes = try await fetch()
+        guard matches(bytes) else {
+            throw KokoroAneError.downloadFailed("Checksum mismatch: \(relative)")
+        }
+        try FileManager.default.createDirectory(
+            at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try bytes.write(to: target, options: .atomic)
+    }
+
     static func selectedFiles(_ manifest: Manifest) throws -> [File] {
         guard manifest.schemaVersion == 1 else { throw KokoroAneError.downloadFailed("Unsupported v3 manifest") }
         for file in manifest.files { try validatePath(file.path) }
@@ -143,36 +198,17 @@ enum KokoroAneV3Assets {
             manifest.base.directory == (variant == .mandarin ? "ANE-zh" : "ANE"),
             Set(manifest.base.models) == originalBaseModels
         else { throw KokoroAneError.downloadFailed("Unexpected v3 checkpoint dependencies") }
-        let files = try selectedFiles(manifest)
-        for file in files {
-            try Task.checkCancellation()
-            let target = root.appendingPathComponent(file.path)
-            if let cached = try? Data(contentsOf: target, options: .mappedIfSafe), matches(cached, file: file) {
-                continue
-            }
-            let bytes = try await fetch("\(prefix(variant))/\(file.path)", revision: revision)
-            guard matches(bytes, file: file) else {
-                throw KokoroAneError.downloadFailed("Checksum mismatch: \(file.path)")
-            }
-            try FileManager.default.createDirectory(
-                at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try bytes.write(to: target, options: .atomic)
+        for file in try selectedFiles(manifest) {
+            try await ensureFile(
+                file.path, root: root,
+                fetch: { try await fetch("\(prefix(variant))/\(file.path)", revision: revision) },
+                matches: { matches($0, file: file) })
         }
-        let baseFiles = try await baseIndex(manifest: manifest, root: root)
-        for file in baseFiles {
-            try Task.checkCancellation()
-            let relative = String(file.path.dropFirst(manifest.base.directory.count + 1))
-            let target = root.appendingPathComponent("base/\(relative)")
-            if let cached = try? Data(contentsOf: target, options: .mappedIfSafe), matches(cached, treeFile: file) {
-                continue
-            }
-            let bytes = try await fetch(file.path, revision: baseRevision)
-            guard matches(bytes, treeFile: file) else {
-                throw KokoroAneError.downloadFailed("Checksum mismatch: \(file.path)")
-            }
-            try FileManager.default.createDirectory(
-                at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try bytes.write(to: target, options: .atomic)
+        for file in try await baseIndex(manifest: manifest, root: root) {
+            try await ensureFile(
+                "base/" + String(file.path.dropFirst(manifest.base.directory.count + 1)), root: root,
+                fetch: { try await fetch(file.path, revision: baseRevision) },
+                matches: { matches($0, treeFile: file) })
         }
         if variant == .english {
             let file = File(
