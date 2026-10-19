@@ -63,7 +63,8 @@ private struct OfflineChunkBatchInfo: Sendable {
 struct OfflineEmbeddingExtractor {
     private let fbankModel: MLModel
     private let embeddingModel: MLModel
-    private let pldaTransform: PLDATransform
+    /// Only `extractEmbeddings` needs it; span embedding (`embedSpan`, `embedSpans`) doesn't.
+    private let pldaTransform: PLDATransform?
     private let config: OfflineDiarizerConfig
     private let logger = AppLogger(category: "OfflineEmbedding")
     private let memoryOptimizer = ANEMemoryOptimizer()
@@ -81,7 +82,7 @@ struct OfflineEmbeddingExtractor {
     init(
         fbankModel: MLModel,
         embeddingModel: MLModel,
-        pldaTransform: PLDATransform,
+        pldaTransform: PLDATransform?,
         config: OfflineDiarizerConfig
     ) {
         self.fbankModel = fbankModel
@@ -290,15 +291,43 @@ struct OfflineEmbeddingExtractor {
         }
     }
 
-    /// Sample range of a time span, clamped to the audio; throws when nothing is left.
+    /// Sample range of a time span, clamped to the audio.
     private func sampleRange(
         audioSource: AudioSampleSource,
         startSeconds: Double,
         endSeconds: Double
     ) throws -> Range<Int> {
-        let sampleRate = Double(config.sampleRate)
-        let startSample = max(0, Int((startSeconds * sampleRate).rounded()))
-        let endSample = min(audioSource.sampleCount, Int((endSeconds * sampleRate).rounded()))
+        try Self.sampleRange(
+            startSeconds: startSeconds, endSeconds: endSeconds,
+            sampleRate: config.sampleRate, sampleCount: audioSource.sampleCount)
+    }
+
+    /// Sample range of a time span, clamped to `0..<sampleCount`. Spans come from callers' timestamps, so a
+    /// non-finite, reversed or out-of-range one throws `invalidSpan` instead of trapping in `Int(_:)`, and a
+    /// span with no samples left throws `processingFailed`.
+    static func sampleRange(
+        startSeconds: Double,
+        endSeconds: Double,
+        sampleRate: Int,
+        sampleCount: Int
+    ) throws -> Range<Int> {
+        guard startSeconds.isFinite, endSeconds.isFinite else {
+            throw OfflineDiarizationError.invalidSpan("span [\(startSeconds)s, \(endSeconds)s) is not finite")
+        }
+        guard endSeconds >= startSeconds else {
+            throw OfflineDiarizationError.invalidSpan("span [\(startSeconds)s, \(endSeconds)s) ends before it starts")
+        }
+        let rate = Double(sampleRate)
+        let audioSeconds = Double(sampleCount) / rate
+        guard startSeconds < audioSeconds else {
+            throw OfflineDiarizationError.invalidSpan(
+                "span [\(startSeconds)s, \(endSeconds)s) starts after the audio ends (\(audioSeconds)s)"
+            )
+        }
+        // Clamped as Doubles first: `Int(_:)` traps outside its range.
+        let total = Double(sampleCount)
+        let startSample = Int(min(max((startSeconds * rate).rounded(), 0), total))
+        let endSample = Int(min(max((endSeconds * rate).rounded(), 0), total))
         guard endSample > startSample else {
             throw OfflineDiarizationError.processingFailed(
                 "embedSpan: empty span [\(startSeconds)s, \(endSeconds)s)"
@@ -314,6 +343,11 @@ struct OfflineEmbeddingExtractor {
         pieces: [(span: Int, samples: Range<Int>)],
         spanCount: Int
     ) throws -> [[Float]] {
+        guard config.samplesPerWindow > 0 else {
+            throw OfflineDiarizationError.invalidConfiguration(
+                "segmentation.windowDurationSeconds must be positive to embed spans"
+            )
+        }
         // Every frame holds the span's own audio, so the mask covers the whole window.
         let weightsArray = try prepareWeightsInput(
             weights: [Float](repeating: 1, count: weightFrameCount)
@@ -456,6 +490,9 @@ struct OfflineEmbeddingExtractor {
         func flushPending() async throws {
             guard !pendingEmbeddings.isEmpty else { return }
             let pldaStart = clock.now
+            guard let pldaTransform else {
+                throw OfflineDiarizationError.modelNotLoaded("PLDA transform")
+            }
             let rhoBatch = try await pldaTransform.transform(pendingEmbeddings)
             pldaDuration += pldaStart.duration(to: clock.now)
             pldaOutputCount += rhoBatch.count
@@ -962,25 +999,11 @@ struct OfflineEmbeddingExtractor {
         fbankFeatures: MLMultiArray,
         weightsArray: MLMultiArray
     ) throws -> [Float] {
-        let provider = ZeroCopyDiarizerFeatureProvider(
-            features: [
-                fbankFeatureName: MLFeatureValue(multiArray: fbankFeatures),
-                weightInputName: MLFeatureValue(multiArray: weightsArray),
-            ]
-        )
-        let options = MLPredictionOptions()
-        if #available(macOS 14.0, iOS 17.0, *) {
-            fbankFeatures.prefetchToNeuralEngine()
-            weightsArray.prefetchToNeuralEngine()
+        guard let embedding = try runEmbeddingBatch(fbankFeatures: [fbankFeatures], weightsArray: weightsArray).first
+        else {
+            throw OfflineDiarizationError.processingFailed("Embedding model produced no output")
         }
-
-        let output = try embeddingModel.prediction(from: provider, options: options)
-        guard let embeddingArray = output.featureValue(for: embeddingOutputName)?.multiArrayValue else {
-            throw OfflineDiarizationError.processingFailed("Embedding model missing \(embeddingOutputName) output")
-        }
-
-        let pointer = embeddingArray.dataPointer.assumingMemoryBound(to: Float.self)
-        return Array(UnsafeBufferPointer(start: pointer, count: embeddingArray.count))
+        return embedding
     }
 
     /// Runs the embedding model once per FBANK feature array, with the same frame weights for all.
@@ -996,6 +1019,12 @@ struct OfflineEmbeddingExtractor {
                     weightInputName: MLFeatureValue(multiArray: weightsArray),
                 ]
             )
+        }
+        if #available(macOS 14.0, iOS 17.0, *) {
+            for features in fbankFeatures {
+                features.prefetchToNeuralEngine()
+            }
+            weightsArray.prefetchToNeuralEngine()
         }
         let outputBatch = try embeddingModel.predictions(
             from: MLArrayBatchProvider(array: providers),

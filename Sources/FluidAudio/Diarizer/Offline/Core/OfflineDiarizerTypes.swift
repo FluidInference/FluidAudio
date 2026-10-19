@@ -8,6 +8,8 @@ public enum OfflineDiarizationError: Error, LocalizedError {
     case processingFailed(String)
     case noSpeechDetected
     case exportFailed(String)
+    /// A time span passed to `embedSpans` is not finite, ends before it starts, or starts after the audio ends.
+    case invalidSpan(String)
 
     public var errorDescription: String? {
         switch self {
@@ -23,6 +25,8 @@ public enum OfflineDiarizationError: Error, LocalizedError {
             return "No speech detected in audio"
         case .exportFailed(let message):
             return "Failed to export data: \(message)"
+        case .invalidSpan(let message):
+            return "Invalid span: \(message)"
         }
     }
 }
