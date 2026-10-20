@@ -3,13 +3,21 @@ import Foundation
 /// Producer-owned edit positions in one sliding-window job. Confidence is not
 /// an immutability promise: only tokens before `stableTokenCount` are irrevocable.
 public struct SlidingWindowTokenRevision: Sendable {
+    /// Identifies one native job; revisions from different jobs never share lineage.
     public let jobID: UUID
+    /// Contiguous publication number within the job, starting at 1.
     public let ordinal: Int
+    /// Token count the consumer held before applying this revision.
     public let previousTokenCount: Int
+    /// Leading tokens kept from the previous count; the rest are retired.
     public let retainedTokenCount: Int
+    /// Leading tokens that are irrevocable; this count never decreases.
     public let stableTokenCount: Int
+    /// Audio samples the decoder read for this revision.
     public let window: Range<Int>
+    /// Samples this revision is authoritative for, within `window`.
     public let center: Range<Int>
+    /// The final revision of the job; every token is stable.
     public let isTerminal: Bool
 
     public init(
@@ -30,7 +38,9 @@ public struct SlidingWindowTokenRevision: Sendable {
 /// Raw decoder tokens, not vocabulary-rescored display text. An empty event can
 /// retire a suffix or finalize a job and must not be discarded.
 public struct SlidingWindowTokenUpdate: Sendable {
+    /// Tokens appended after the retained prefix.
     public let tokens: [TokenTiming]
+    /// Where `tokens` attach and which prefix is now stable.
     public let revision: SlidingWindowTokenRevision
     /// Legacy display-confidence flag, not token immutability authority.
     public let isConfirmed: Bool
@@ -43,7 +53,14 @@ public struct SlidingWindowTokenUpdate: Sendable {
 }
 
 public enum SlidingWindowTokenStreamError: Error, Sendable {
-    case multipleSubscribers, unavailableJob, invalidNativeUpdate, invalidLineage
+    /// Another subscriber already owns this job's token stream.
+    case multipleSubscribers
+    /// The job already accepted audio, finished or was cancelled.
+    case unavailableJob
+    /// The decoder produced an update that cannot be published.
+    case invalidNativeUpdate
+    /// A revision would break ordering or shrink the stable prefix.
+    case invalidLineage
 }
 
 /// Shared by real publication and contract tests; no text/timestamp deduplication.
