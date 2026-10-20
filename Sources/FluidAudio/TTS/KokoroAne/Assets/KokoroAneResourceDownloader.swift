@@ -387,6 +387,12 @@ public enum KokoroAneResourceDownloader {
             return
         }
         logger.info("Downloading shared kokoro G2P assets from HuggingFace...")
+        // Fetches exactly `ModelNames.G2P.requiredModels` (the required set
+        // for `.kokoro` regardless of variant). `Repo.kokoro` opts out of
+        // ModelHub's loose root `.json` sweep, so the per-language lexicon
+        // caches beside these assets are not pulled here; each frontend
+        // fetches its own via `ensureLexiconCache` / `ensureEnglishLexicon`
+        // (#1044).
         try await ModelHub.download(
             .kokoro,
             to: modelsDirectory,

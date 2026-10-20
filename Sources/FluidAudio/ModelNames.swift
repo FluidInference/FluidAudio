@@ -340,6 +340,31 @@ public enum Repo: String, CaseIterable, Sendable {
         }
     }
 
+    /// Whether a repo-root download (no `subPath`) also sweeps in every loose
+    /// `.json`/`.txt` file at the repository root, beyond the required-model
+    /// patterns. Most root-level repos rely on this allowance for tokenizer
+    /// and config files their required set does not name. Download-policy
+    /// detail consumed only by `ModelHub.download`; not public API.
+    ///
+    /// The kokoro root opts out. Its required set (`ModelNames.G2P.requiredModels`,
+    /// returned for every variant) already names `g2p_vocab.json`, and the
+    /// root also carries ~40 MB of per-language lexicon caches
+    /// (`us_`/`es_`/`fr_lexicon_cache.json`, `us_`/`gb_gold.json`,
+    /// `us_`/`gb_silver.json`) that the sweep pulled for every caller — most
+    /// of it never read by an English-only setup (#1044). Each language
+    /// frontend fetches its own lexicon on demand via
+    /// `KokoroAneResourceDownloader.ensureLexiconCache` /
+    /// `ensureEnglishLexicon` instead, so a bare `ModelHub.download(.kokoro)`
+    /// no longer leaves `us_lexicon_cache.json` in the cache.
+    var sweepsRootMetadata: Bool {
+        switch self {
+        case .kokoro:
+            return false
+        default:
+            return true
+        }
+    }
+
     /// Local folder name used for caching
     public var folderName: String {
         switch self {

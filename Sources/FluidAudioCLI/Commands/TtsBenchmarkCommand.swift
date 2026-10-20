@@ -55,14 +55,14 @@ public enum TtsBenchmarkCommand {
     fileprivate enum AsrChoice {
         case skip
         case parakeet
-        case cohere(modelDir: URL, language: CohereAsrConfig.Language, computeUnits: MLComputeUnits)
+        case cohere(modelDir: URL, language: CohereAsrConfig.Language, computeUnits: MLComputeUnits?)
 
         var label: String {
             switch self {
             case .skip: return "skip"
             case .parakeet: return "parakeet-tdt"
             case .cohere(_, let lang, let cu):
-                return "cohere-transcribe-\(lang.rawValue)/\(Self.computeLabel(cu))"
+                return "cohere-transcribe-\(lang.rawValue)/\(cu.map(Self.computeLabel) ?? "default")"
             }
         }
 
@@ -1422,20 +1422,23 @@ public enum TtsBenchmarkCommand {
         return .english
     }
 
-    /// Parse `--cohere-compute-units` into `MLComputeUnits`. Defaults to
-    /// `.all` (CoreML decides). Use `cpu-and-gpu` to skip the ANE compile
-    /// attempt when the q8 encoder fails ANE compilation (observed:
-    /// `MILCompilerForANE error: failed to compile ANE model using ANEF`,
-    /// CoreML falls back to CPU+GPU but pays a multi-minute compile cost
-    /// on the first call).
+    /// Parse `--cohere-compute-units` into `MLComputeUnits`. Unset (or
+    /// `default`) returns `nil` so `CoherePipeline.loadModels` applies its
+    /// per-model defaults (encoder and decoder on the ANE; `.all` can put
+    /// the INT8 encoder on the GPU at a ~10 GB memory cost, #1045). Use
+    /// `cpu-and-gpu` to skip the ANE compile attempt when the q8 encoder
+    /// fails ANE compilation (observed: `MILCompilerForANE error: failed to
+    /// compile ANE model using ANEF`, CoreML falls back to CPU+GPU but pays
+    /// a multi-minute compile cost on the first call).
     private static func resolveCohereComputeUnits(
         _ flag: String?
     ) throws
-        -> MLComputeUnits
+        -> MLComputeUnits?
     {
-        guard let raw = flag?.lowercased(), !raw.isEmpty else { return .all }
+        guard let raw = flag?.lowercased(), !raw.isEmpty else { return nil }
         switch raw {
-        case "all", "default": return .all
+        case "default": return nil
+        case "all": return .all
         case "all-ane", "ane", "neural-engine", "cpu-and-ane":
             return .cpuAndNeuralEngine
         case "cpu-and-gpu", "cpuandgpu", "gpu": return .cpuAndGPU
@@ -1493,13 +1496,16 @@ public enum TtsBenchmarkCommand {
             }
             logger.info(
                 "Loading Cohere Transcribe (lang=\(language.englishName), "
-                    + "compute=\(describeComputeUnits(computeUnits))) from \(modelDir.path)")
+                    + "compute=\(computeUnits.map(describeComputeUnits) ?? "default")) from \(modelDir.path)")
             let models = try await CoherePipeline.loadModels(
                 encoderDir: modelDir,
                 decoderDir: modelDir,
                 vocabDir: modelDir,
                 decoderVariant: .v3,
                 computeUnits: computeUnits)
+            logger.info(
+                "Cohere compute: encoder=\(CoherePipeline.describe(models.encoderComputeUnits)), "
+                    + "decoder=\(CoherePipeline.describe(models.decoderComputeUnits))")
             let pipeline = CoherePipeline()
             let converter = AudioConverter()
             return AsrLoop(
@@ -1565,8 +1571,10 @@ public enum TtsBenchmarkCommand {
                                         en, zh, ja, ko, vi, fr, de, es, it, pt,
                                         nl, pl, el, ar
               --cohere-compute-units <p>  Cohere ASR compute mapping:
-                                        all (default; CoreML decides) |
-                                        cpu-and-gpu | cpu-only | all-ane.
+                                        default (encoder + decoder on ANE) |
+                                        all | cpu-and-gpu | cpu-only | all-ane.
+                                        `all` may put the INT8 encoder on the
+                                        GPU (+~10 GB memory, #1045).
                                         Use cpu-and-gpu when q8 ANE compile
                                         fails (`MILCompilerForANE error: …`)
                                         — avoids the multi-minute fallback
