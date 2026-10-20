@@ -368,8 +368,11 @@ punctuation-only pieces. Splices are then repaired at word granularity:
   head.
 
 The repair inspects only the tokenizer's own word-boundary marker, never
-transcript text, so it is language-agnostic. Without a vocabulary the merge
-is byte-for-byte unchanged.
+transcript text, so it is language-agnostic for scripts that mark word
+starts. The guard is off for unspaced scripts (`tdtJa`): no piece is
+word-initial there, so it would treat every piece as a mid-word continuation
+and drop tokens up to the next punctuation mark. Without a vocabulary the
+merge is byte-for-byte unchanged.
 
 A follow-up (PR #759) closed three residual *drop* paths in these repairs,
 where a seam with no splice-safe token available could silently discard
@@ -680,7 +683,8 @@ window:
   directly on the dropped speech — with a gap-centred placement as
   fallback; each placement recovers spans the other misses.
 - Only tokens strictly inside the gap are spliced in (`spliceCandidate`),
-  starting at a word-initial piece (same rule as the seam merge, #683),
+  starting at a word-initial piece (same rule as the seam merge, #683;
+  except `tdtJa`, where the guard is off),
   with punctuation-aware, case-insensitive edge dedupe against the words
   bordering the gap. The probe can re-hear a bordering word at a slightly
   shifted frame, sometimes re-capitalized ("▁for" vs "▁For") — the merged
@@ -986,6 +990,7 @@ Useful focused checks:
 swift test --filter ChunkProcessorTests
 swift test --filter ChunkProcessorSeamResidualTests   # PR #759 drop-path fallbacks
 swift test --filter SeamGapRepairTests                # issue #758 gap splice + energy gate
+swift test --filter ChunkProcessorUnspacedScriptTests # tdtJa: splice guard off
 swift test --filter EndAlignedFinalWindowTests        # issue #747 final-window backfill
 swift test --filter TdtRefactoredComponentsTests
 swift test --filter TdtDecoderV2Tests
