@@ -122,6 +122,45 @@ differs and ships in `constants_bin/`). Conversion code and the full trial log
 (ANE faults in `conv_transpose`, time concat, fp16 RoPE, integer compares) live in
 the private model-lab repo, `models/pocket-tts-small-coreml/`.
 
+## Phonon 31m (Gradium)
+
+[Phonon](https://gradium.ai/phonon) (Gradium, 2026-10-20) is the Pocket TTS recipe trained by
+the Kyutai founders' spin-off. `phonon-31m-en` is Apache-2.0. It has the 100M architecture at
+half width: 512-d, 6 layers, a one-step LSD flow head and the 100M's Mimi decoder. FluidAudio
+runs it on the small-model host above:
+
+```swift
+let tts = PocketTtsSmallManager(model: .phonon31m)
+try await tts.initialize()                          // FluidInference/pocket-tts-coreml phonon/phonon-31m-en
+let wav = try await tts.synthesize(text: "Email support@gradium.ai for 24/7 help.", voice: "en_us_Zoey")
+```
+
+```bash
+fluidaudiocli tts "Hello from Phonon." --backend pocket-small --model phonon --voice en_us_Easton -o out.wav
+```
+
+- **Voices.** 103 in all, listed by `availableVoices()`: 25 English voices named `en_us_<Name>` and
+  `en_gb_<Name>`, 12 characters named `characters_<Name>`, the checkpoint `default`, and Gradium's
+  French, German, Spanish and Portuguese catalogue voices. The released model speaks English only.
+  Voices ship as flow-LM conditioning rows (`voices/*.safetensors`). The first use of a voice
+  prefills it once and caches the result. `default`, `en_us_Easton`, `en_us_Zoey` and `en_gb_Maeve`
+  also ship as KV snapshots.
+- **Text.** Text goes through `PhononTextNormalizer`, a Swift port of Gradium's English normalizer
+  covering numbers, currency, emails, URLs, abbreviations and symbols. It matches the Rust original
+  on 907 test inputs.
+- **Pack contract.** `arch.json` carries Phonon's differences:
+  - EOS threshold +4.0, with no minimum frame count and a tail of 1 frame (`eos_tail_extra`)
+  - a 25 ms raised-cosine fade at each chunk start (`fade_in_*`), which removes the Mimi decoder's
+    −40 dBFS cold-start click, present in Gradium's own runtime too
+  - the 251-wide Mimi window and the summed-conditioner input bias, which are baked into the graphs
+- **Quality.** The fp32 Mimi stays the default. The fp16 Mimi adds near-white noise at about
+  −80 dBFS in pauses. Against Gradium's `ptts` runtime at temperature 0, frame counts match, and
+  Whisper transcripts are identical for the fp32 and Neural Engine paths.
+- **Speed** (M5 Pro): about 20 ms to first audio, 3.3–4.2 ms per 80 ms frame, 19–25x real time.
+- **Demo.** `Examples/PhononDemo` is a SwiftUI app with a ring that follows the live spectrum.
+- **Conversion code**, parity tools and noise measurements live in model-lab,
+  `models/gradium-phonon-coreml/`.
+
 ## Model Files & Precision
 
 The four CoreML submodels (plus the optional Mimi encoder) and their
