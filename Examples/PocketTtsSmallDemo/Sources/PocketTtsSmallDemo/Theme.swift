@@ -18,6 +18,11 @@ enum Nord {
     static let orange = Color(red: 0xD0 / 255, green: 0x87 / 255, blue: 0x70 / 255)  // nord12
     static let yellow = Color(red: 0xEB / 255, green: 0xCB / 255, blue: 0x8B / 255)  // nord13
     static let green = Color(red: 0xA3 / 255, green: 0xBE / 255, blue: 0x8C / 255)  // nord14
+    /// Three shades of the same frost blue (hue of nord9/nord10) for the sea
+    /// layers: dark depth, mid swell, pale surface.
+    static let seaDeep = Color(red: 0x3F / 255, green: 0x5A / 255, blue: 0x7E / 255)
+    static let seaMid = Color(red: 0x6F / 255, green: 0x91 / 255, blue: 0xB5 / 255)
+    static let seaLight = Color(red: 0xA8 / 255, green: 0xC3 / 255, blue: 0xDC / 255)
     static let purple = Color(red: 0xB4 / 255, green: 0x8E / 255, blue: 0xAD / 255)  // nord15
 }
 
