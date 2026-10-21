@@ -49,7 +49,6 @@ struct ContentView: View {
                 .padding(.vertical, 3)
                 .background(active == nil ? Color.clear : Nord.panelRaised)
                 .clipShape(RoundedRectangle(cornerRadius: 5))
-                .animation(.easeInOut(duration: 0.2), value: active == nil)
             }
         }
     }
