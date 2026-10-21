@@ -27,6 +27,7 @@ final class AsrTranscriptionTests: XCTestCase {
             100: "test",
             200: "▁token",
             300: "!",
+            0: "<unk>",
         ]
         await manager.setVocabularyForTesting(mockVocabulary)
     }
@@ -161,6 +162,24 @@ final class AsrTranscriptionTests: XCTestCase {
             XCTAssertEqual(tokenTimings[1].tokenId, 200)
             XCTAssertEqual(tokenTimings[2].tokenId, 300)
         }
+    }
+
+    func testProcessTranscriptionResultDropsUnknownTokens() async {
+        await setupMockVocabulary()
+        // Bark-style output: <unk> where the source text had quotation marks.
+        let result = await manager.processTranscriptionResult(
+            tokenIds: [1, 0, 2, 5, 0],
+            timestamps: [1, 2, 3, 4, 5],
+            confidences: [0.9, 0.1, 0.9, 0.9, 0.1],
+            tokenDurations: [1, 1, 1, 1, 1],
+            encoderSequenceLength: 100,
+            audioSampleCount: 16_000,
+            processingTime: 0.1
+        )
+
+        XCTAssertEqual(result.text, "hello world.")
+        XCTAssertEqual(result.tokenTimings?.map(\.tokenId), [1, 2, 5])
+        XCTAssertEqual(result.confidence, 0.9, accuracy: 0.001)
     }
 
     // MARK: - Chunk Processing Logic Tests

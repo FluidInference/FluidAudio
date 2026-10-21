@@ -137,11 +137,13 @@ public struct ASRBenchmarkConfig: Sendable {
     public let testStreaming: Bool
     public let streamingChunkDuration: Double
     public let useStreamingEou: Bool
+    /// Seconds of digital silence prepended to every file (Bark 3.0 is evaluated with 0.25 s). 0 = off.
+    public let leadingSilenceSeconds: Double
 
     public init(
         dataset: String = "librispeech", subset: String = "test-clean", maxFiles: Int? = nil, debugMode: Bool = false,
         longAudioOnly: Bool = false, testStreaming: Bool = false, streamingChunkDuration: Double = 0.1,
-        useStreamingEou: Bool = false
+        useStreamingEou: Bool = false, leadingSilenceSeconds: Double = 0
     ) {
         self.dataset = dataset
         self.subset = subset
@@ -151,6 +153,7 @@ public struct ASRBenchmarkConfig: Sendable {
         self.testStreaming = testStreaming
         self.streamingChunkDuration = streamingChunkDuration
         self.useStreamingEou = useStreamingEou
+        self.leadingSilenceSeconds = leadingSilenceSeconds
     }
 }
 

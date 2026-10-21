@@ -43,6 +43,8 @@ public enum CtcEarningsBenchmark {
         case .redux: return "redux"
         case .ultra: return "ultra"
         case .phonon2: return "phonon2"
+        case .bark3: return "bark3"
+        case .bark3Clean: return "bark3-clean"
         case .tdtCtc110m: return "110m"
         case .tdtJa: return "tdt-ja"
         }
@@ -121,6 +123,10 @@ public enum CtcEarningsBenchmark {
                         tdtVersion = .ultra
                     case "phonon2", "phonon-2":
                         tdtVersion = .phonon2
+                    case "bark3", "bark-3", "bark":
+                        tdtVersion = .bark3
+                    case "bark3-clean", "bark-3-clean", "bark-clean":
+                        tdtVersion = .bark3Clean
                     case "110m", "ctc-110m", "tdt-ctc-110m":
                         tdtVersion = .tdtCtc110m
                     default:

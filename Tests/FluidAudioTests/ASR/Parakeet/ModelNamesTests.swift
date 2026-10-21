@@ -204,6 +204,19 @@ final class ModelNamesTests: XCTestCase {
         XCTAssertTrue(required.contains(ModelNames.ASR.jointV3File))
     }
 
+    func testBarkReposShareOneHubRepoWithAFolderEach() {
+        for (repo, folder) in [(Repo.bark3, "bark-3.0"), (Repo.bark3Clean, "bark-3.0-clean")] {
+            XCTAssertEqual(repo.remotePath, "FluidInference/bark-3.0-coreml")
+            XCTAssertEqual(repo.name, "bark-3.0-coreml")
+            XCTAssertEqual(repo.subPath, folder)
+            // One path component: AsrModels resolves `<parent>/<folderName>` from the cache directory.
+            XCTAssertEqual(repo.folderName, folder)
+            XCTAssertFalse(repo.folderName.contains("/"))
+            // Single encoder build: the GPU `Encoder_lut3.mlmodelc` next to it is never downloaded.
+            XCTAssertEqual(ModelNames.getRequiredModelNames(for: repo, variant: nil), ModelNames.ASR.requiredModelsV3())
+        }
+    }
+
     func testPhonon2RepoProperties() {
         let repo = Repo.phonon2
         XCTAssertEqual(repo.remotePath, "FluidInference/phonon-2-coreml")
