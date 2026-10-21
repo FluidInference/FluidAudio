@@ -29,15 +29,34 @@ struct OceanWaveView: View {
         let w = size.width
         let h = size.height
         let baseline = h * 0.58
-        let n = history.count
         // Envelope along x: oldest level at the left, what plays now at the right.
+        // The 20 ms RMS blocks are smoothed with a Hann window over ±4 blocks and
+        // cosine-interpolated between blocks, then soft-compressed with tanh, so
+        // the outline has no kinks or flat tops.
+        let n = history.count
+        var smooth = [CGFloat](repeating: 0, count: n)
+        let radius = 4
+        var weights = [CGFloat]()
+        for k in -radius...radius {
+            let phase = Double.pi * Double(k) / Double(radius + 1)
+            weights.append(CGFloat(0.5 * (1.0 + cos(phase))))
+        }
+        let weightSum = weights.reduce(0, +)
+        for i in 0..<n {
+            var acc: CGFloat = 0
+            for (j, k) in (-radius...radius).enumerated() {
+                let idx = min(n - 1, max(0, i + k))
+                acc += CGFloat(history[idx]) * weights[j]
+            }
+            smooth[i] = CGFloat(tanh(Double(acc / weightSum) * 9))
+        }
         func envelope(_ x: CGFloat) -> CGFloat {
             guard n > 1 else { return 0 }
             let pos = Double(x / w) * Double(n - 1)
             let i = min(n - 2, max(0, Int(pos)))
-            let f = CGFloat(pos - Double(i))
-            let v = CGFloat(history[i]) * (1 - f) + CGFloat(history[i + 1]) * f
-            return min(1, v * 7)  // speech RMS 0.03–0.15 -> 0.2–1
+            let f = pos - Double(i)
+            let t = CGFloat(0.5 * (1.0 - cos(Double.pi * f)))  // cosine interpolation between blocks
+            return smooth[i] * (1 - t) + smooth[i + 1] * t
         }
         let layers:
             [(wavelength: CGFloat, speed: Double, phase: Double, height: CGFloat, color: Color, alpha: Double)] = [
@@ -55,7 +74,7 @@ struct OceanWaveView: View {
                 let ripple = sin(angle) + 0.35 * sin(angle * 2.1 + t * 0.7)
                 let y = baseline - CGFloat(ripple) * swell * h * 0.55
                 path.addLine(to: CGPoint(x: x, y: y))
-                x += 3
+                x += 2
             }
             path.addLine(to: CGPoint(x: w, y: h))
             path.closeSubpath()
