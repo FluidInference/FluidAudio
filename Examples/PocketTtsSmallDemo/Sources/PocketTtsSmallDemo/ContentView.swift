@@ -7,8 +7,6 @@ struct ContentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            header
-            Divider()
             controls
             statusLine
             textEntry
@@ -23,17 +21,6 @@ struct ContentView: View {
         .background(Nord.bg)
         .preferredColorScheme(.dark)
         .onReceive(ticker) { _ in model.tick() }
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Pocket TTS small models on the Neural Engine").font(.title3).bold().foregroundStyle(Nord.textBright)
-            Text(
-                "kyutai pocket-tts 4.0.0 · 18m / 7m / 2m · FlowLM on the ANE (MLState), Mimi fp32 on the CPU "
-                    + "or fused fp16 on the ANE (faster, hisses). Frames play as generated; the sea follows the speaker."
-            )
-            .font(.caption).foregroundStyle(Nord.textDim)
-        }
     }
 
     private var controls: some View {
