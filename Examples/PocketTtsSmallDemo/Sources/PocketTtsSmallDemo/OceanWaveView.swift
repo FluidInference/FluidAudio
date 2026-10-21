@@ -60,9 +60,9 @@ struct OceanWaveView: View {
         }
         let layers:
             [(wavelength: CGFloat, speed: Double, phase: Double, height: CGFloat, color: Color, alpha: Double)] = [
-                (w / 2.2, 0.9, 0.0, 0.42, Nord.frost3, 0.6),
-                (w / 3.6, -1.4, 1.7, 0.32, Nord.frost2, 0.55),
-                (w / 5.5, 2.3, 3.1, 0.22, Nord.frost1, 0.55),
+                (w / 2.2, 0.9, 0.0, 0.42, Nord.frost3, 0.95),
+                (w / 3.6, -1.4, 1.7, 0.32, Nord.frost0, 0.85),
+                (w / 5.5, 2.3, 3.1, 0.22, Nord.frost1, 0.9),
             ]
         for layer in layers {
             var path = Path()
@@ -79,7 +79,7 @@ struct OceanWaveView: View {
             path.addLine(to: CGPoint(x: w, y: h))
             path.closeSubpath()
             context.fill(path, with: .color(layer.color.opacity(layer.alpha)))
-            context.stroke(path, with: .color(layer.color.opacity(min(1, layer.alpha + 0.3))), lineWidth: 1)
+            context.stroke(path, with: .color(Nord.textBright.opacity(0.35)), lineWidth: 1.2)
         }
         // Foam at the current level, right edge.
         let glow = CGFloat(min(1, level * 7))
