@@ -25,6 +25,16 @@ public enum Repo: String, CaseIterable, Sendable {
     /// five-value weights as a sparsity mask plus fp16 palettes (321 MB,
     /// iOS 18+). Loaded through `AsrModelVersion.phonon2`.
     case phonon2 = "FluidInference/phonon-2-coreml"
+    /// Underdog Bark 3.0 (Conway Research): post-training of parakeet-tdt-0.6b-v3
+    /// (via moondream/parakeet-ultra), English, verbatim. Same tokenizer, window and
+    /// decoder/joint contract as v3; the encoder keeps the checkpoint's exact
+    /// five-value weights as a sparsity mask plus palettes per 8 rows (399 MB,
+    /// iOS 18+). One repo with a folder per Bark model. Loaded through `AsrModelVersion.bark3`.
+    case bark3 = "FluidInference/bark-3.0-coreml/bark-3.0"
+    /// Underdog Bark 3.0 Clean: Bark 3.0 Plus trained to drop fillers, false starts
+    /// and repeated words. Same contract and encoder encoding as `.bark3` (410 MB).
+    /// Loaded through `AsrModelVersion.bark3Clean`.
+    case bark3Clean = "FluidInference/bark-3.0-coreml/bark-3.0-clean"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
     case parakeetCtc110m = "FluidInference/parakeet-ctc-110m-coreml"
     case parakeetCtc06b = "FluidInference/parakeet-ctc-0.6b-coreml"
@@ -166,6 +176,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-ultra-coreml"
         case .phonon2:
             return "phonon-2-coreml"
+        case .bark3, .bark3Clean:
+            return "bark-3.0-coreml"
         case .parakeetV2:
             return "parakeet-tdt-0.6b-v2-coreml"
         case .parakeetCtc110m:
@@ -274,6 +286,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/inflect-v2-coreml"
         case .paradeeInt8, .paradeeFp32:
             return "FluidInference/paradee-8m-coreml"
+        case .bark3, .bark3Clean:
+            return "FluidInference/bark-3.0-coreml"
         default:
             return "FluidInference/\(name)"
         }
@@ -335,6 +349,10 @@ public enum Repo: String, CaseIterable, Sendable {
             return "int8"
         case .paradeeFp32:
             return "fp32"
+        case .bark3:
+            return "bark-3.0"
+        case .bark3Clean:
+            return "bark-3.0-clean"
         default:
             return nil
         }
@@ -422,6 +440,11 @@ public enum Repo: String, CaseIterable, Sendable {
             return "paradee-8m-coreml/int8"
         case .paradeeFp32:
             return "paradee-8m-coreml/fp32"
+        // Single path component: AsrModels resolves `<parent>/<folderName>` from the cache directory.
+        case .bark3:
+            return "bark-3.0"
+        case .bark3Clean:
+            return "bark-3.0-clean"
         default:
             return name.replacingOccurrences(of: "-coreml", with: "")
         }
@@ -1841,7 +1864,7 @@ public enum ModelNames {
         case .parakeetV3:
             let precision = ParakeetEncoderPrecision(rawValue: variant ?? "") ?? .int8
             return ModelNames.ASR.requiredModelsV3(precision: precision)
-        case .parakeetRedux, .parakeetUltra, .phonon2:
+        case .parakeetRedux, .parakeetUltra, .phonon2, .bark3, .bark3Clean:
             // Single encoder build; no precision variants.
             return ModelNames.ASR.requiredModelsV3()
         case .parakeetV2:

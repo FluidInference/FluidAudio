@@ -302,12 +302,17 @@ final class AsrModelsTests: XCTestCase {
         if #available(macOS 15, iOS 18, tvOS 18, *) {
             XCTAssertNoThrow(try AsrModels.checkPlatformSupport(for: .redux))
             XCTAssertNoThrow(try AsrModels.checkPlatformSupport(for: .phonon2))
+            XCTAssertNoThrow(try AsrModels.checkPlatformSupport(for: .bark3))
+            XCTAssertNoThrow(try AsrModels.checkPlatformSupport(for: .bark3Clean))
         } else {
             XCTAssertThrowsError(try AsrModels.checkPlatformSupport(for: .redux)) { error in
                 XCTAssertTrue(error.localizedDescription.contains("ultra"))
             }
             XCTAssertThrowsError(try AsrModels.checkPlatformSupport(for: .phonon2)) { error in
                 XCTAssertTrue(error.localizedDescription.contains("Phonon-2"))
+            }
+            XCTAssertThrowsError(try AsrModels.checkPlatformSupport(for: .bark3Clean)) { error in
+                XCTAssertTrue(error.localizedDescription.contains("Bark 3.0 Clean"))
             }
         }
         XCTAssertNoThrow(try AsrModels.checkPlatformSupport(for: .ultra))
@@ -323,6 +328,20 @@ final class AsrModelsTests: XCTestCase {
         XCTAssertFalse(phonon2.hasFusedEncoder)
         XCTAssertTrue(phonon2.isV3Family)
         XCTAssertEqual(AsrModels.defaultCacheDirectory(for: .phonon2).lastPathComponent, "phonon-2")
+    }
+
+    func testBarkMirrorsV3Contract() {
+        for (version, repo, folder) in [
+            (AsrModelVersion.bark3, Repo.bark3, "bark-3.0"), (.bark3Clean, .bark3Clean, "bark-3.0-clean"),
+        ] {
+            XCTAssertEqual(version.repo, repo)
+            XCTAssertEqual(version.blankId, AsrModelVersion.v3.blankId)
+            XCTAssertEqual(version.decoderLayers, AsrModelVersion.v3.decoderLayers)
+            XCTAssertEqual(version.encoderHiddenSize, AsrModelVersion.v3.encoderHiddenSize)
+            XCTAssertFalse(version.hasFusedEncoder)
+            XCTAssertTrue(version.isV3Family)
+            XCTAssertEqual(AsrModels.defaultCacheDirectory(for: version).lastPathComponent, folder)
+        }
     }
 
     func testUltraMirrorsV3Contract() {
