@@ -124,6 +124,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Orca One](https://orcaone.com/)** | — | Private Mac dictation and meeting transcription with on-device processing. Uses FluidAudio's Parakeet ASR and Silero VAD. |
 | **[Banter](https://github.com/arvindvenkataramani/banter)** | ✓ | Open-source (Apache-2.0), self-hosted voice interface for OpenClaw, adaptable to other agent harnesses. Runs in the browser on desktop or phone. Its two Swift servers put FluidAudio behind OpenAI-compatible HTTP and streaming WebSocket APIs: Parakeet TDT v3, Parakeet Unified and Nemotron streaming ASR, and Pocket TTS, Kokoro and LuxTTS for speech, all on Apple Silicon. |
 | **[Wisp](https://smw.ai/projects/wisp)** | — | FREE, ultrafast English dictation for Mac that puts cleaned-up text in your app in 200-300ms after you stop talking. 3-10× faster than Wispr Flow, Superwhisper, MacWhisper, or OpenAI's GPT Transcribe, and nothing leaves your Mac. Uses Parakeet Unified ASR. |
+| **[Barkenson](https://ziz11.github.io/Barkenson-Meeting-recorder-for-Mac/)** | [✓](https://github.com/ziz11/Barkenson-Meeting-recorder-for-Mac) | Free macOS meeting recorder with separate microphone and system-audio tracks, local transcription, and speaker diarization. Uses FluidAudio for on-device speech recognition and diarization. |
 
 More apps built with FluidAudio are listed in [Documentation/Showcase.md](Documentation/Showcase.md).
 
