@@ -70,6 +70,11 @@ final class DemoModel: ObservableObject {
     /// −72 dBFS hiss — switch live to hear the difference. Needs a reload.
     @Published private(set) var mimiPrecision: PocketTtsSmallMimiPrecision = .fp32
     private var nextUtterance = 0
+    /// Row index of the live session's utterance 0: sessions number their
+    /// utterances from 0, rows keep counting across sessions.
+    private var sessionBase = 0
+    /// Rows kept on screen (older ones are dropped).
+    private let maxRows = 4
     private var logCounter = 0
 
     /// `--model 7m` picks the model, `--mimi fp16-fused` (or `--mimi-fp16`) the fused all-ANE decoder,
@@ -189,6 +194,7 @@ final class DemoModel: ObservableObject {
                     try player.begin()
                     let s = try await manager.makeSession(voice: selectedVoice)
                     session = s
+                    sessionBase = nextUtterance
                     startConsumer(s)
                     appendLog("── session opened (voice \(selectedVoice))")
                 }
@@ -196,6 +202,7 @@ final class DemoModel: ObservableObject {
                 nextUtterance += 1
                 pending[idx] = (Date(), nil, nil, 0)
                 utterances.append(UtteranceStats(id: idx, text: line))
+                if utterances.count > maxRows { utterances.removeFirst(utterances.count - maxRows) }
                 isSpeaking = true
                 session?.enqueue(line)
                 appendLog("[\(idx)] enqueued: \(line)")
@@ -214,7 +221,7 @@ final class DemoModel: ObservableObject {
                     guard let self else { return }
                     if self.playAudio { self.player.enqueue(frame.samples) }
                     let now = Date()
-                    let idx = frame.utteranceIndex ?? 0
+                    let idx = self.sessionBase + (frame.utteranceIndex ?? 0)
                     if var p = self.pending[idx] {
                         if p.firstFrameAt == nil {
                             p.firstFrameAt = now

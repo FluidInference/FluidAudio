@@ -9,7 +9,6 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             controls
             statusLine
-            textEntry
             OceanWaveView(meter: model.player.meter)
             if !model.references.isEmpty { referenceStrip }
             statsTable
@@ -33,13 +32,6 @@ struct ContentView: View {
                 }
             }
             .frame(width: 190)
-            Button(model.isReady ? "Reload" : "Load") { model.load() }
-                .disabled(model.isLoading)
-            Picker("Voice", selection: Binding(get: { model.selectedVoice }, set: { model.changeVoice($0) })) {
-                ForEach(model.voices, id: \.self) { Text($0).tag($0) }
-            }
-            .frame(width: 130)
-            .disabled(!model.isReady)
             Picker(
                 "Mimi", selection: Binding(get: { model.mimiPrecision }, set: { model.setMimiPrecision($0) })
             ) {
@@ -48,6 +40,10 @@ struct ContentView: View {
             }
             .frame(width: 190)
             .disabled(model.isLoading)
+            Button(model.isReady ? "Reload" : "Load") { model.load() }
+                .disabled(model.isLoading)
+            Button("Stop") { model.stop() }
+                .disabled(!model.isSpeaking && model.player.scheduledFrames == 0)
             Spacer()
             if model.isLoading { ProgressView().controlSize(.small) }
         }
@@ -55,35 +51,6 @@ struct ContentView: View {
 
     private var statusLine: some View {
         Text(model.status).font(.caption).foregroundStyle(Nord.green).lineLimit(1).truncationMode(.middle)
-    }
-
-    private var textEntry: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            TextEditor(text: $model.text)
-                .font(.body)
-                .foregroundStyle(Nord.textBright)
-                .frame(height: 70)
-                .nordPanel()
-            HStack {
-                Button("Speak (⌘↩)") { model.speak() }
-                    .keyboardShortcut(.return, modifiers: [.command])
-                    .disabled(!model.isReady || model.text.trimmingCharacters(in: .whitespaces).isEmpty)
-                Button("Stop") { model.stop() }.disabled(!model.isSpeaking && model.player.scheduledFrames == 0)
-                Button("Clear") { model.clearStats() }
-                Spacer()
-                if let arch = model.arch {
-                    Text(
-                        "d_model \(arch.dModel) · \(arch.numLayers) layers · \(arch.numHeads)/\(arch.numKvHeads) heads · "
-                            + "flow \(arch.flowType) · EOS > \(String(format: "%.1f", arch.eosThreshold))"
-                    )
-                    .font(.caption2).foregroundStyle(Nord.purple).lineLimit(1)
-                }
-                Text("buffered \(max(0, model.player.scheduledFrames - model.player.playedFrames)) frames")
-                    .font(.caption.monospacedDigit()).foregroundStyle(Nord.textDim)
-            }
-            Text("Press Speak again while audio plays: sentences queue on the same warm session.")
-                .font(.caption2).foregroundStyle(Nord.textDim)
-        }
     }
 
     /// Bundled upstream PyTorch takes next to a Core ML render of the same
@@ -107,7 +74,7 @@ struct ContentView: View {
                     }
                     Button("▶ PyTorch") { model.playReference(clip) }
                         .tint(active == .pytorch ? Nord.orange : Nord.frost1)
-                    Button("▶ Core ML") { model.speakReference(clip) }.disabled(!model.isReady)
+                    Button("▶ Core ML") { model.speakReference(clip) }.disabled(!model.isReady || model.isSpeaking)
                         .tint(active == .coreml ? Nord.green : Nord.frost1)
                 }
                 .controlSize(.small)
