@@ -21,7 +21,6 @@ struct OceanWaveView: View {
             LinearGradient(colors: [Nord.bg, Nord.panel], startPoint: .top, endPoint: .bottom)
         )
         .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Nord.border))
         .accessibilityLabel("Speech level as ocean waves")
     }
 
@@ -64,9 +63,13 @@ struct OceanWaveView: View {
                 (w / 3.6, -1.4, 1.7, 0.32, Nord.seaMid, 1.0),
                 (w / 5.5, 2.3, 3.1, 0.22, Nord.seaDeep, 1.0),
             ]
+        // Solid water below the lowest trough so nothing but sea shows at the bottom.
+        context.fill(
+            Path(CGRect(x: 0, y: baseline + h * 0.25, width: w, height: h)),
+            with: .color(layers[layers.count - 1].color))
         for layer in layers {
             var path = Path()
-            path.move(to: CGPoint(x: 0, y: h))
+            path.move(to: CGPoint(x: 0, y: h + 2))
             var x: CGFloat = 0
             while x <= w {
                 let swell = 0.035 + envelope(x) * layer.height  // idle swell keeps the sea alive
@@ -76,7 +79,7 @@ struct OceanWaveView: View {
                 path.addLine(to: CGPoint(x: x, y: y))
                 x += 2
             }
-            path.addLine(to: CGPoint(x: w, y: h))
+            path.addLine(to: CGPoint(x: w, y: h + 2))
             path.closeSubpath()
             context.fill(path, with: .color(layer.color.opacity(layer.alpha)))
             context.stroke(path, with: .color(Nord.textBright.opacity(0.35)), lineWidth: 1.2)
