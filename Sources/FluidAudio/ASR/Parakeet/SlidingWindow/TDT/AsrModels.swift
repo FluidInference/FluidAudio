@@ -16,6 +16,13 @@ public enum AsrModelVersion: Sendable {
     /// English only. Same architecture and contract as v3; the encoder ships
     /// as exact five-value palettes (iOS 18+).
     case phonon2
+    /// Underdog Bark 3.0 (Conway Research): post-training of v3, English, verbatim.
+    /// Same architecture and contract as v3; the encoder ships as exact five-value
+    /// palettes (iOS 18+). The model emits `<unk>` for quotation marks; transcripts drop it.
+    case bark3
+    /// Underdog Bark 3.0 Clean: drops fillers, false starts and repeated words.
+    /// Same contract and encoder encoding as `.bark3`.
+    case bark3Clean
     /// 110M parameter hybrid TDT-CTC model with fused preprocessor+encoder
     case tdtCtc110m
     /// 600M parameter TDT model for Japanese (ja) - hybrid CTC preprocessor/encoder + TDT decoder/joint v2
@@ -28,6 +35,8 @@ public enum AsrModelVersion: Sendable {
         case .redux: return .parakeetRedux
         case .ultra: return .parakeetUltra
         case .phonon2: return .phonon2
+        case .bark3: return .bark3
+        case .bark3Clean: return .bark3Clean
         case .tdtCtc110m: return .parakeetTdtCtc110m
         case .tdtJa: return .parakeetJa
         }
@@ -54,7 +63,7 @@ public enum AsrModelVersion: Sendable {
     public var blankId: Int {
         switch self {
         case .v2, .tdtCtc110m: return 1024
-        case .v3, .redux, .ultra, .phonon2: return 8192
+        case .v3, .redux, .ultra, .phonon2, .bark3, .bark3Clean: return 8192
         case .tdtJa: return 3072
         }
     }
@@ -67,12 +76,12 @@ public enum AsrModelVersion: Sendable {
         }
     }
 
-    /// v3 and its weight-compatible derivatives (Redux, Ultra, Phonon-2). Gates the v3-only
+    /// v3 and its weight-compatible derivatives (Redux, Ultra, Phonon-2, Bark). Gates the v3-only
     /// decode behaviours: `TdtDecoderV3`, silence-aligned chunking, blank
     /// recovery and the JointDecisionv3 top-K contract.
     public var isV3Family: Bool {
         switch self {
-        case .v3, .redux, .ultra, .phonon2: return true
+        case .v3, .redux, .ultra, .phonon2, .bark3, .bark3Clean: return true
         default: return false
         }
     }
@@ -233,13 +242,15 @@ extension AsrModels {
         ]
     }
 
-    /// Redux's 2-bit and Phonon-2's five-value encoders use iOS 18 Core ML ops,
+    /// Redux's 2-bit and Phonon-2's / Bark's five-value encoders use iOS 18 Core ML ops,
     /// so they have no iOS 17 build. Fails fast there and points at `.ultra`.
     static func checkPlatformSupport(for version: AsrModelVersion) throws {
         let name: String
         switch version {
         case .redux: name = "Parakeet Redux"
         case .phonon2: name = "Phonon-2"
+        case .bark3: name = "Bark 3.0"
+        case .bark3Clean: name = "Bark 3.0 Clean"
         default: return
         }
         if #available(macOS 15, iOS 18, tvOS 18, *) { return }
@@ -256,7 +267,9 @@ extension AsrModels {
 
     private static func inferredVersion(from directory: URL) -> AsrModelVersion? {
         let directoryPath = directory.path.lowercased()
-        let knownVersions: [AsrModelVersion] = [.tdtCtc110m, .v2, .v3, .redux, .ultra, .phonon2, .tdtJa]
+        let knownVersions: [AsrModelVersion] = [
+            .tdtCtc110m, .v2, .v3, .redux, .ultra, .phonon2, .bark3Clean, .bark3, .tdtJa,
+        ]
 
         for version in knownVersions {
             if directoryPath.contains(version.repo.folderName.lowercased()) {
@@ -294,7 +307,7 @@ extension AsrModels {
                 joint: Names.jointV3File,
                 vocabulary: Names.vocabularyFile
             )
-        case .redux, .ultra, .phonon2:
+        case .redux, .ultra, .phonon2, .bark3, .bark3Clean:
             // Same contract as v3 with a single encoder build.
             return (
                 encoder: Names.encoderFile,
@@ -321,7 +334,7 @@ extension AsrModels {
             return ModelNames.TDTJa.requiredModels
         case .v3:
             return Names.requiredModelsV3(precision: encoderPrecision)
-        case .redux, .ultra, .phonon2:
+        case .redux, .ultra, .phonon2, .bark3, .bark3Clean:
             return Names.requiredModelsV3()
         default:
             return version.hasFusedEncoder ? Names.requiredModelsFused : Names.requiredModels
