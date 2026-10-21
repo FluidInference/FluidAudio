@@ -15,7 +15,7 @@ struct ContentView: View {
             OceanWaveView(meter: model.player.meter)
             if !model.references.isEmpty { referenceStrip }
             statsTable
-            logView
+            Spacer(minLength: 0)
         }
         .padding(16)
         .foregroundStyle(Nord.text)
@@ -157,23 +157,5 @@ struct ContentView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-    }
-
-    private var logView: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(model.log) { line in
-                        Text(line.text).font(.system(.caption, design: .monospaced)).foregroundStyle(Nord.text).id(
-                            line.id)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .nordPanel()
-            .onChange(of: model.log.count) { _, _ in
-                if let last = model.log.last { proxy.scrollTo(last.id, anchor: .bottom) }
-            }
-        }
     }
 }

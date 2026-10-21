@@ -5,7 +5,7 @@ voice, type a sentence and press Speak: each 80 ms frame is handed to an `AVAudi
 comes off the Neural Engine, so audio starts on the first frame and you hear the model keep ahead of
 playback. Press Speak again while it talks — further sentences are enqueued on the same warm session.
 The table shows, per sentence, time to first audio, frames, audio length, ms per frame and the
-real-time factor; the log mirrors to stdout.
+real-time factor; the log goes to stdout (run it from a terminal to see it).
 
 - **The sea** between the text box and the table is the speech envelope of what the speaker is
   playing (an audio tap on the player node, 20 ms blocks), drawn as three frost-blue swells at display
