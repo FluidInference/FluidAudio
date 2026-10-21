@@ -1,9 +1,10 @@
 # Pocket TTS small models demo (macOS 15+)
 
-SwiftUI app for the 18m / 7m / 2m Pocket TTS models (`PocketTtsSmallManager`). Pick a model and a
-voice, type a sentence and press Speak: each 80 ms frame is handed to an `AVAudioPlayerNode` as it
-comes off the Neural Engine, so audio starts on the first frame and you hear the model keep ahead of
-playback. Press Speak again while it talks — further sentences are enqueued on the same warm session.
+SwiftUI app for the 18m / 7m / 2m Pocket TTS models (`PocketTtsSmallManager`), reduced to an A/B
+showcase: three reference sentences, each playable from the bundled upstream PyTorch take or rendered
+live by Core ML. Each 80 ms frame is handed to an `AVAudioPlayerNode` as it comes off the Neural
+Engine, so audio starts on the first frame and the model keeps ahead of playback. The model and Mimi
+mode are chosen with launch flags (`--model`, `--mimi`); the model loads on launch.
 The table shows, per sentence, time to first audio, frames, audio length, ms per frame and the
 real-time factor; the log goes to stdout (run it from a terminal to see it).
 
