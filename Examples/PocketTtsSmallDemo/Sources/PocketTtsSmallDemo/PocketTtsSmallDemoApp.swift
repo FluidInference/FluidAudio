@@ -21,5 +21,6 @@ struct PocketTtsSmallDemoApp: App {
                 .task { model.applyLaunchArguments(CommandLine.arguments) }
         }
         .defaultSize(width: 700, height: 600)
+        .windowStyle(.hiddenTitleBar)
     }
 }

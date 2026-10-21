@@ -99,8 +99,9 @@ final class DemoModel: ObservableObject {
             }
             i += 1
         }
-        guard autorun else { return }
+        // Always load the selected model on launch; `--autorun` also speaks the text box.
         load()
+        guard autorun else { return }
         Task {
             while !isReady && isLoading { try? await Task.sleep(for: .milliseconds(100)) }
             if isReady { speak() }

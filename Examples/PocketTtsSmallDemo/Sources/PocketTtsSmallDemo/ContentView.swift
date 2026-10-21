@@ -15,7 +15,9 @@ struct ContentView: View {
             statsTable
             Spacer(minLength: 0)
         }
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.top, 28)  // room for the traffic lights with the title bar hidden
+        .padding(.bottom, 12)
         .foregroundStyle(Nord.text)
         .tint(Nord.frost1)
         .background(Nord.bg)
