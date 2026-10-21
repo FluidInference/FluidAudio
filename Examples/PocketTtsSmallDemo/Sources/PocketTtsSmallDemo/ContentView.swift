@@ -91,15 +91,29 @@ struct ContentView: View {
             Text("Reference takes — upstream PyTorch fp32 on the CPU (18m) vs Core ML, same voice and text")
                 .font(.caption).foregroundStyle(Nord.textDim)
             ForEach(model.references) { clip in
+                let active = model.activeReference?.file == clip.file ? model.activeReference?.source : nil
                 HStack(alignment: .top, spacing: 8) {
                     Text(clip.voice).font(.caption.bold()).foregroundStyle(Nord.purple).frame(
                         width: 60, alignment: .leading)
-                    Text(clip.text).font(.caption).fixedSize(horizontal: false, vertical: true)
+                    Text(clip.text).font(.caption)
+                        .foregroundStyle(active == nil ? Nord.text : Nord.yellow)
+                        .fixedSize(horizontal: false, vertical: true)
                     Spacer()
+                    if let active {
+                        Text("◉ \(active.rawValue)").font(.caption2.bold())
+                            .foregroundStyle(active == .pytorch ? Nord.orange : Nord.green)
+                    }
                     Button("▶ PyTorch") { model.playReference(clip) }
+                        .tint(active == .pytorch ? Nord.orange : Nord.frost1)
                     Button("▶ Core ML") { model.speakReference(clip) }.disabled(!model.isReady)
+                        .tint(active == .coreml ? Nord.green : Nord.frost1)
                 }
                 .controlSize(.small)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(active == nil ? Color.clear : Nord.panelRaised)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+                .animation(.easeInOut(duration: 0.2), value: active == nil)
             }
         }
     }
