@@ -334,7 +334,8 @@ public struct PocketTtsSmallConstants: Sendable {
         data.withUnsafeBytes { raw in
             guard let base = raw.baseAddress else { return }
             rows.withUnsafeMutableBytes { dst in
-                dst.copyMemory(from: UnsafeRawBufferPointer(start: base.advanced(by: emb.byteOffset), count: emb.byteCount))
+                dst.copyMemory(
+                    from: UnsafeRawBufferPointer(start: base.advanced(by: emb.byteOffset), count: emb.byteCount))
             }
         }
         return (rows, count / arch.dModel)

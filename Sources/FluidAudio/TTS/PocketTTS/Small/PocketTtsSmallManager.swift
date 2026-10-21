@@ -101,9 +101,14 @@ public actor PocketTtsSmallManager {
             snapshot = try await engine.captureSnapshot()
             voiceCache[name] = snapshot
         }
+        var textNormalizer: (@Sendable (String) -> String)?
+        if model == .phonon31m {
+            textNormalizer = { @Sendable text in PhononTextNormalizer.normalize(text) }
+        }
         let session = PocketTtsSmallSession(
             engine: engine, constants: constants, voiceSnapshot: snapshot,
-            temperature: temperature, seed: seed ?? UInt64.random(in: 0...UInt64.max))
+            temperature: temperature, seed: seed ?? UInt64.random(in: 0...UInt64.max),
+            textNormalizer: textNormalizer)
         await session.start()
         return session
     }
