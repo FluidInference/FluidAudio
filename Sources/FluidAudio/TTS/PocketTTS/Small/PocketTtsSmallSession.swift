@@ -129,8 +129,9 @@ public actor PocketTtsSmallSession {
         let cacheLen = constants.state.kvCacheLen
         let maxGenLen = PocketTtsSynthesizer.boundedGenerationFrameCount(
             text: normalized, cachePosition: prefilled, cacheLen: cacheLen)
-        let totalFramesAfterEos = framesAfterEos + PocketTtsConstants.extraFramesAfterDetection
         let arch = constants.arch
+        let totalFramesAfterEos = framesAfterEos + arch.framesAfterEosExtra
+        let fadeRamp = arch.fadeInRamp
         var sequence = constants.bosEmbedding
         var eosStep: Int?
         let scale = sqrtf(temperature)
@@ -153,9 +154,14 @@ public actor PocketTtsSmallSession {
             if let eos = eosStep, step >= eos + totalFramesAfterEos {
                 break
             }
+            var samples = frame.samples
+            if step == 0, !fadeRamp.isEmpty {
+                // every chunk starts a fresh Mimi state; fade its cold-start click
+                for i in 0..<min(fadeRamp.count, samples.count) { samples[i] *= fadeRamp[i] }
+            }
             frameContinuation.yield(
                 PocketTtsSynthesizer.AudioFrame(
-                    samples: frame.samples, frameIndex: step, chunkIndex: chunkIndex,
+                    samples: samples, frameIndex: step, chunkIndex: chunkIndex,
                     chunkCount: chunkCount, utteranceIndex: utteranceIndex))
             sequence = frame.latent
         }

@@ -33,12 +33,12 @@ public actor PocketTtsSmallManager {
 
     public init(
         model: PocketTtsSmallModel = .english7m,
-        defaultVoice: String = PocketTtsConstants.defaultVoice,
+        defaultVoice: String? = nil,
         computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
         mimiPrecision: PocketTtsSmallMimiPrecision = .fp32
     ) {
         self.model = model
-        self.defaultVoice = defaultVoice
+        self.defaultVoice = defaultVoice ?? model.defaultVoice
         self.computeUnits = computeUnits
         self.mimiPrecision = mimiPrecision
     }
@@ -72,8 +72,7 @@ public actor PocketTtsSmallManager {
     /// Shipped voices available in the loaded pack.
     public func availableVoices() throws -> [String] {
         guard let constants else { throw PocketTTSError.modelNotFound("PocketTTS small model not initialized") }
-        let files = try FileManager.default.contentsOfDirectory(atPath: constants.constantsBinDirectory.path)
-        return files.filter { $0.hasSuffix(".safetensors") }.map { String($0.dropLast(".safetensors".count)) }.sorted()
+        return constants.voiceNames()
     }
 
     /// Open a streaming session with a shipped voice.
@@ -90,8 +89,16 @@ public actor PocketTtsSmallManager {
         let snapshot: PocketTtsSmallEngine.Fp16Snapshot
         if let cached = voiceCache[name] {
             snapshot = cached
-        } else {
+        } else if constants.hasKVSnapshot(name) {
             snapshot = try await engine.fp16Snapshot(from: constants.loadVoice(name))
+            voiceCache[name] = snapshot
+        } else {
+            // A voice shipped as conditioning rows: prefill it into an empty cache
+            // once and keep the resulting KV state as this voice's snapshot.
+            let voice = try constants.loadVoiceConditioning(name)
+            try await engine.resetToZero()
+            try await engine.prefill(flatConditioning: voice.rows, tokenCount: voice.count)
+            snapshot = try await engine.captureSnapshot()
             voiceCache[name] = snapshot
         }
         let session = PocketTtsSmallSession(
@@ -172,8 +179,12 @@ public enum PocketTtsSmallDownloader {
         "arch.json", "pocket_state.json",
         ModelNames.PocketTTS.constantsBinDir + "/tokenizer.model",
         ModelNames.PocketTTS.constantsBinDir + "/text_embed_table.bin",
-        ModelNames.PocketTTS.constantsBinDir + "/\(PocketTtsConstants.defaultVoice).safetensors",
     ]
+
+    /// `requiredFiles` plus the model's default voice (a KV snapshot in `constants_bin/`).
+    static func requiredFiles(for model: PocketTtsSmallModel) -> [String] {
+        requiredFiles + [ModelNames.PocketTTS.constantsBinDir + "/\(model.defaultVoice).safetensors"]
+    }
 
     public static func ensurePack(
         _ model: PocketTtsSmallModel, directory: URL? = nil, progressHandler: ProgressHandler? = nil
@@ -182,7 +193,9 @@ public enum PocketTtsSmallDownloader {
         let repoDir = base.appendingPathComponent(PocketTtsConstants.defaultModelsSubdirectory)
             .appendingPathComponent(Repo.pocketTts.folderName)
         let pack = repoDir.appendingPathComponent(model.repoSubdirectory)
-        if requiredFiles.allSatisfy({ FileManager.default.fileExists(atPath: pack.appendingPathComponent($0).path) }) {
+        if requiredFiles(for: model).allSatisfy({
+            FileManager.default.fileExists(atPath: pack.appendingPathComponent($0).path)
+        }) {
             logger.info("PocketTTS \(model.rawValue) pack found in cache")
             return pack
         }

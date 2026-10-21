@@ -18,7 +18,12 @@ final class PocketTtsSmallTests: XCTestCase {
         XCTAssertEqual(PocketTtsSmallModel(name: "2m_refl"), .english2mRefl)
         XCTAssertNil(PocketTtsSmallModel(name: "100m"))
         XCTAssertEqual(PocketTtsSmallModel.english2m.repoSubdirectory, "v4/english_2m_2026-10")
-        XCTAssertEqual(PocketTtsSmallModel.allCases.count, 6)
+        XCTAssertEqual(PocketTtsSmallModel.allCases.count, 7)
+        XCTAssertEqual(PocketTtsSmallModel(name: "phonon"), .phonon31m)
+        XCTAssertEqual(PocketTtsSmallModel(name: "phonon-31m-en"), .phonon31m)
+        XCTAssertEqual(PocketTtsSmallModel.phonon31m.repoSubdirectory, "phonon/phonon-31m-en")
+        XCTAssertEqual(PocketTtsSmallModel.phonon31m.defaultVoice, "default")
+        XCTAssertEqual(PocketTtsSmallModel.english7m.defaultVoice, "alba")
     }
 
     func testArchAndStateInfoDecode() throws {
@@ -35,6 +40,24 @@ final class PocketTtsSmallTests: XCTestCase {
         XCTAssertEqual(arch.textRank, 64)
         XCTAssertEqual(arch.eosThreshold, -1.0)
         XCTAssertEqual(arch.frameSize, 1920)
+        // kyutai packs carry no fade / tail keys: unchanged behaviour
+        XCTAssertTrue(arch.fadeInRamp.isEmpty)
+        XCTAssertEqual(arch.framesAfterEosExtra, PocketTtsConstants.extraFramesAfterDetection)
+
+        // Phonon: EOS tail +1, 25 ms raised-cosine fade
+        var dict = try JSONSerialization.jsonObject(with: Data(archJSON.utf8)) as! [String: Any]
+        dict["eos_tail_extra"] = 1
+        dict["fade_in"] = true
+        dict["fade_in_ms"] = 25.0
+        dict["fade_in_shape"] = "cosine"
+        let phonon = try JSONDecoder().decode(
+            PocketTtsSmallArch.self, from: JSONSerialization.data(withJSONObject: dict))
+        XCTAssertEqual(phonon.framesAfterEosExtra, 1)
+        let ramp = phonon.fadeInRamp
+        XCTAssertEqual(ramp.count, 600)
+        XCTAssertEqual(ramp[0], 0, accuracy: 1e-7)
+        XCTAssertEqual(ramp[300], 0.5, accuracy: 1e-3)
+        XCTAssertLessThan(ramp[24], 0.01)  // first ms is near silent (cosine, not linear)
 
         let stateJSON = """
             {"functions":["prefill","generate","generate_decode"],"state":{"k_cache0":[1,512,2,64]},
@@ -123,9 +146,10 @@ final class PocketTtsSmallTests: XCTestCase {
         let repoDir = base.appendingPathComponent(PocketTtsConstants.defaultModelsSubdirectory)
             .appendingPathComponent(Repo.pocketTts.folderName)
         // Prefer the smallest pack: its first-time ANE compile is ~10 s vs ~150 s for 18m.
-        let preferred: [PocketTtsSmallModel] = [.english2m, .english7m, .english18m] + PocketTtsSmallModel.allCases
+        let preferred: [PocketTtsSmallModel] =
+            [.english2m, .english7m, .english18m] + PocketTtsSmallModel.allCases.filter { $0 != .phonon31m }
         return preferred.map { repoDir.appendingPathComponent($0.repoSubdirectory) }.first { pack in
-            PocketTtsSmallDownloader.requiredFiles.allSatisfy {
+            PocketTtsSmallDownloader.requiredFiles(for: .english7m).allSatisfy {
                 FileManager.default.fileExists(atPath: pack.appendingPathComponent($0).path)
             }
         }
@@ -137,10 +161,11 @@ final class PocketTtsSmallTests: XCTestCase {
         let repoDir = base.appendingPathComponent(PocketTtsConstants.defaultModelsSubdirectory)
             .appendingPathComponent(Repo.pocketTts.folderName)
         // Prefer the smallest pack: its first-time ANE compile is ~10 s vs ~150 s for 18m.
-        let preferred: [PocketTtsSmallModel] = [.english2m, .english7m, .english18m] + PocketTtsSmallModel.allCases
+        let preferred: [PocketTtsSmallModel] =
+            [.english2m, .english7m, .english18m] + PocketTtsSmallModel.allCases.filter { $0 != .phonon31m }
         guard
             let model = preferred.first(where: { m in
-                PocketTtsSmallDownloader.requiredFiles.allSatisfy {
+                PocketTtsSmallDownloader.requiredFiles(for: m).allSatisfy {
                     FileManager.default.fileExists(
                         atPath: repoDir.appendingPathComponent(m.repoSubdirectory).appendingPathComponent($0).path)
                 }
@@ -169,6 +194,52 @@ final class PocketTtsSmallTests: XCTestCase {
             XCTAssertGreaterThan(peak, 0.05, "\(precision): silent output")
             let wav = try await manager.synthesize(text: "Hello world.", voice: "alba", seed: 1)
             XCTAssertGreaterThan(wav.count, 44 + 2 * 1920 * 10)
+        }
+    }
+
+    /// Phonon 31m end to end: a KV-snapshot voice and a conditioning-row voice
+    /// (prefilled on the fly), fp32 Mimi, chunk fade-in. Uses the cached
+    /// `phonon/phonon-31m-en` pack or `PHONON_PACK=<dir>`; skips otherwise.
+    func testPhononSynthesizeWithCachedPack() async throws {
+        guard #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) else { throw XCTSkip("MLState requires macOS 15+") }
+        let pack: URL
+        if let env = ProcessInfo.processInfo.environment["PHONON_PACK"] {
+            pack = URL(fileURLWithPath: env)
+        } else {
+            let base = try TtsCacheDirectory.ensure()
+            pack = base.appendingPathComponent(PocketTtsConstants.defaultModelsSubdirectory)
+                .appendingPathComponent(Repo.pocketTts.folderName)
+                .appendingPathComponent(PocketTtsSmallModel.phonon31m.repoSubdirectory)
+        }
+        guard
+            PocketTtsSmallDownloader.requiredFiles(for: .phonon31m).allSatisfy({
+                FileManager.default.fileExists(atPath: pack.appendingPathComponent($0).path)
+            })
+        else { throw XCTSkip("no Phonon pack (set PHONON_PACK)") }
+        let manager = PocketTtsSmallManager(model: .phonon31m)
+        try await manager.load(from: pack)
+        let voices = try await manager.availableVoices()
+        XCTAssertTrue(voices.contains("default"))
+        XCTAssertGreaterThan(voices.count, 100, "voices/ conditioning rows should be listed")
+        let archOrNil = await manager.arch
+        let arch = try XCTUnwrap(archOrNil)
+        XCTAssertEqual(arch.eosThreshold, 4.0)
+        XCTAssertEqual(arch.minFramesBeforeEos, 0)
+        for voice in ["default", "en_us_Juniper"] {  // KV snapshot, then conditioning rows
+            var frames: [[Float]] = []
+            for try await frame in try await manager.synthesizeStreaming(
+                text: "Hello world. I am Phonon.", voice: voice, temperature: 0, seed: 0)
+            {
+                XCTAssertEqual(frame.samples.count, 1920)
+                frames.append(frame.samples)
+            }
+            XCTAssertGreaterThan(frames.count, 15, voice)
+            XCTAssertLessThan(frames.count, 80, voice)
+            let peak = frames.flatMap { $0 }.map(abs).max() ?? 0
+            XCTAssertGreaterThan(peak, 0.05, "\(voice): silent output")
+            // the onset click (-40 dBFS raw) is faded: first 2 ms well under -60 dBFS
+            let onset = frames[0].prefix(48).map(abs).max() ?? 1
+            XCTAssertLessThan(onset, 1e-3, "\(voice): onset \(onset)")
         }
     }
 }

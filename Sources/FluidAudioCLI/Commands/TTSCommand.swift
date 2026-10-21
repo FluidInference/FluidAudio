@@ -381,7 +381,7 @@ public struct TTS {
                         logger.error(
                             "Unknown small Pocket TTS model '\(arguments[i + 1])'. Supported: "
                                 + PocketTtsSmallModel.allCases.map(\.rawValue).joined(separator: ", ")
-                                + " (aliases 18m, 7m, 2m, 18m-refl, 7m-refl, 2m-refl)")
+                                + " (aliases 18m, 7m, 2m, 18m-refl, 7m-refl, 2m-refl, phonon)")
                         return
                     }
                     pocketSmallModel = parsed
@@ -892,7 +892,7 @@ public struct TTS {
         }
         do {
             let tStart = Date()
-            let pocketVoice = voice == TtsConstants.recommendedVoice ? PocketTtsConstants.defaultVoice : voice
+            let pocketVoice = voice == TtsConstants.recommendedVoice ? model.defaultVoice : voice
             // --compute-units steers the MLState functions (prefill / generate / generate_decode);
             // the fp32 Mimi decoder of the default mode is always CPU.
             let units: MLComputeUnits = computeUnits.flowLM ?? .cpuAndNeuralEngine
@@ -1800,6 +1800,7 @@ public struct TTS {
             PocketTTS small models (--backend pocket-small, macOS 15+/iOS 18+, FlowLM on the Neural Engine):
               --model ID           english_18m_2026-10 | english_7m_2026-10 (default) | english_2m_2026-10
                                    or their *_refl_2026-10 twins; aliases 18m, 7m, 2m, 18m-refl, 7m-refl, 2m-refl
+                                   phonon-31m-en (alias phonon): Gradium Phonon 31m, 103 voices (default, en_us_Easton, ...)
               --mimi MODE          fp32 (default: Mimi decoder fp32 on the CPU, clean noise floor) or
                                    fp16-fused (one ANE dispatch per frame, faster, -72 dBFS hiss in pauses)
               --voice, --seed, --temperature, --compute-units apply; voice cloning not yet supported

@@ -18,9 +18,28 @@ public enum PocketTtsSmallModel: String, Sendable, CaseIterable {
     case english7mRefl = "english_7m_refl_2026-10"
     case english2m = "english_2m_2026-10"
     case english2mRefl = "english_2m_refl_2026-10"
+    /// Gradium's Phonon 31m (2026-10-20, Apache-2.0): the same recipe trained by the
+    /// Kyutai founders' spin-off, at half the 100M width. Converted with the same
+    /// tools; its differences (erf GELU, input bias, 251-wide Mimi window, voices as
+    /// conditioning rows, EOS +4, chunk fade-in) are baked into the graphs or read
+    /// from `arch.json`.
+    case phonon31m = "phonon-31m-en"
 
     /// Pack directory under the `FluidInference/pocket-tts-coreml` repo root.
-    public var repoSubdirectory: String { "v4/\(rawValue)" }
+    public var repoSubdirectory: String {
+        switch self {
+        case .phonon31m: return "phonon/\(rawValue)"
+        default: return "v4/\(rawValue)"
+        }
+    }
+
+    /// Voice used when none is given: the pack's own default.
+    public var defaultVoice: String {
+        switch self {
+        case .phonon31m: return "default"
+        default: return PocketTtsConstants.defaultVoice
+        }
+    }
 
     /// Parse a CLI / config string: the upstream id, or a short alias
     /// (`18m`, `7m`, `2m`, `18m-refl`, ...).
@@ -37,6 +56,7 @@ public enum PocketTtsSmallModel: String, Sendable, CaseIterable {
         case "7m-refl", "english-7m-refl": self = .english7mRefl
         case "2m", "english-2m": self = .english2m
         case "2m-refl", "english-2m-refl": self = .english2mRefl
+        case "phonon", "phonon-31m", "phonon31m", "phonon-31m-en": self = .phonon31m
         default: return nil
         }
     }
@@ -77,6 +97,30 @@ public struct PocketTtsSmallArch: Codable, Sendable, Equatable {
     public let mimiDecoderHeads: Int
     public let mimiDecoderHeadDim: Int
     public let mimiDecoderContext: Int
+    /// Frames emitted after EOS = text-length guess + this. Absent in the kyutai
+    /// packs, which use `PocketTtsConstants.extraFramesAfterDetection` (2).
+    public let eosTailExtra: Int?
+    /// Fade-in at the start of every chunk, hiding the Mimi decoder's cold-start
+    /// click. Absent in the kyutai packs (no fade, unchanged behaviour).
+    public let fadeIn: Bool?
+    public let fadeInMs: Double?
+    /// `linear` or `cosine` (raised cosine `0.5 * (1 - cos(pi t / T))`).
+    public let fadeInShape: String?
+
+    /// Extra frames after the EOS frame's text-length guess.
+    public var framesAfterEosExtra: Int { eosTailExtra ?? PocketTtsConstants.extraFramesAfterDetection }
+
+    /// Per-sample gains of the chunk-onset fade, empty when the pack asks for none.
+    public var fadeInRamp: [Float] {
+        guard fadeIn == true, let ms = fadeInMs, ms > 0 else { return [] }
+        let n = min(Int(Double(sampleRate) * ms / 1000), frameSize)
+        guard n > 0 else { return [] }
+        let cosine = fadeInShape == "cosine"
+        return (0..<n).map { i in
+            let t = Float(i) / Float(n)
+            return cosine ? 0.5 * (1 - cosf(Float.pi * t)) : t
+        }
+    }
 
     enum CodingKeys: String, CodingKey {
         case modelId = "model_id"
@@ -106,6 +150,10 @@ public struct PocketTtsSmallArch: Codable, Sendable, Equatable {
         case mimiDecoderHeads = "mimi_decoder_heads"
         case mimiDecoderHeadDim = "mimi_decoder_head_dim"
         case mimiDecoderContext = "mimi_decoder_context"
+        case eosTailExtra = "eos_tail_extra"
+        case fadeIn = "fade_in"
+        case fadeInMs = "fade_in_ms"
+        case fadeInShape = "fade_in_shape"
     }
 
     public static func load(from packDirectory: URL) throws -> PocketTtsSmallArch {
@@ -180,7 +228,8 @@ public struct PocketTtsSmallStateInfo: Decodable, Sendable {
 /// Where the Mimi decoder of a small model runs.
 ///
 /// The fp16 Mimi decoder (`generate_decode` / `decode` in `pocket_state.mlmodelc`)
-/// renders a white noise floor at about −72 dBFS: its SEANet activations are
+/// renders a white noise floor (about −72 dBFS for the kyutai small models, −80 dBFS
+/// for Phonon, roughly doubling its pause floor): its SEANet activations are
 /// O(1) while the audio in pauses is O(1e-3), so fp16 rounding of the
 /// activations lands directly in the output (the same graph in fp16 on the CPU
 /// has the same floor, and the Core ML planner rejects mixed precision in
@@ -216,11 +265,17 @@ public struct PocketTtsSmallConstants: Sendable {
     /// `[textVocab, dModel]`, low-rank projection already folded in.
     public let textEmbedTable: [Float]
     public let tokenizer: SentencePieceTokenizer
-    /// `[dModel]`: prepended to a cloned voice's conditioning block.
+    /// `[dModel]`: prepended to a cloned voice's conditioning block. Empty for
+    /// packs without one (Phonon).
     public let bosBeforeVoice: [Float]
-    /// `[dModel, ldim]`: Mimi latent -> voice conditioning (cloning).
+    /// `[dModel, k]`: speaker latent -> voice conditioning (`k` = 32 for the kyutai
+    /// packs' Mimi latents, 512 for Phonon's speaker-Mimi latents). Empty if absent.
     public let speakerProjWeight: [Float]
     public let constantsBinDirectory: URL
+    /// `voices/` of the pack: voices shipped as flow-LM conditioning rows
+    /// (`emb [1, T, dModel]`), prefilled into an empty cache instead of injected
+    /// as a KV snapshot.
+    public let voicesDirectory: URL
 
     public static func load(from packDirectory: URL) throws -> PocketTtsSmallConstants {
         let arch = try PocketTtsSmallArch.load(from: packDirectory)
@@ -229,10 +284,14 @@ public struct PocketTtsSmallConstants: Sendable {
         let bos = try loadFloats(bin.appendingPathComponent("bos_emb.bin"), expected: arch.ldim)
         let table = try loadFloats(
             bin.appendingPathComponent("text_embed_table.bin"), expected: arch.textVocab * arch.dModel)
-        let bosBeforeVoice = try loadFloats(
-            bin.appendingPathComponent("bos_before_voice.bin"), expected: arch.dModel)
-        let speakerProj = try loadFloats(
-            bin.appendingPathComponent("speaker_proj_weight.bin"), expected: arch.dModel * arch.ldim)
+        let bosURL = bin.appendingPathComponent("bos_before_voice.bin")
+        let bosBeforeVoice =
+            FileManager.default.fileExists(atPath: bosURL.path)
+            ? try loadFloats(bosURL, expected: arch.dModel) : []
+        let projURL = bin.appendingPathComponent("speaker_proj_weight.bin")
+        let speakerProj =
+            FileManager.default.fileExists(atPath: projURL.path)
+            ? try loadFloats(projURL, multipleOf: arch.dModel) : []
         let tokenizerURL = bin.appendingPathComponent("tokenizer.model")
         guard FileManager.default.fileExists(atPath: tokenizerURL.path) else {
             throw PocketTtsConstantsLoader.LoadError.fileNotFound("tokenizer.model")
@@ -240,7 +299,54 @@ public struct PocketTtsSmallConstants: Sendable {
         let tokenizer = try SentencePieceTokenizer(modelData: Data(contentsOf: tokenizerURL))
         return PocketTtsSmallConstants(
             arch: arch, state: state, bosEmbedding: bos, textEmbedTable: table, tokenizer: tokenizer,
-            bosBeforeVoice: bosBeforeVoice, speakerProjWeight: speakerProj, constantsBinDirectory: bin)
+            bosBeforeVoice: bosBeforeVoice, speakerProjWeight: speakerProj, constantsBinDirectory: bin,
+            voicesDirectory: packDirectory.appendingPathComponent("voices"))
+    }
+
+    /// Whether `voice` ships as a KV snapshot in `constants_bin/`.
+    public func hasKVSnapshot(_ voice: String) -> Bool {
+        let sanitized = voice.replacingOccurrences(of: "/", with: "")
+        return FileManager.default.fileExists(
+            atPath: constantsBinDirectory.appendingPathComponent("\(sanitized).safetensors").path)
+    }
+
+    /// Load `voices/<voice>.safetensors`: one F32 tensor (`emb`) of shape
+    /// `[1, T, dModel]` or `[T, dModel]`. Returns the rows flat and their count.
+    public func loadVoiceConditioning(_ voice: String) throws -> (rows: [Float], count: Int) {
+        let sanitized = voice.replacingOccurrences(of: "/", with: "")
+        let url = voicesDirectory.appendingPathComponent("\(sanitized).safetensors")
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw PocketTtsConstantsLoader.LoadError.fileNotFound("voices/\(sanitized).safetensors")
+        }
+        let data = try Data(contentsOf: url)
+        let tensors = try PocketTtsConstantsLoader.parseSafetensors(data, fileLabel: sanitized)
+        guard let emb = tensors["emb"] ?? (tensors.count == 1 ? tensors.values.first : nil) else {
+            throw PocketTtsConstantsLoader.LoadError.malformed("voices/\(sanitized).safetensors: no emb tensor")
+        }
+        guard emb.dtype == "F32", let width = emb.shape.last, width == arch.dModel,
+            emb.byteOffset + emb.byteCount <= data.count
+        else {
+            throw PocketTtsConstantsLoader.LoadError.malformed(
+                "voices/\(sanitized).safetensors: emb \(emb.shape) \(emb.dtype), expected [..., \(arch.dModel)] F32")
+        }
+        let count = emb.byteCount / MemoryLayout<Float>.size
+        var rows = [Float](repeating: 0, count: count)
+        data.withUnsafeBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            rows.withUnsafeMutableBytes { dst in
+                dst.copyMemory(from: UnsafeRawBufferPointer(start: base.advanced(by: emb.byteOffset), count: emb.byteCount))
+            }
+        }
+        return (rows, count / arch.dModel)
+    }
+
+    /// Every shipped voice: KV snapshots and conditioning rows.
+    public func voiceNames() -> [String] {
+        func names(_ dir: URL) -> [String] {
+            ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
+                .filter { $0.hasSuffix(".safetensors") }.map { String($0.dropLast(".safetensors".count)) }
+        }
+        return Array(Set(names(constantsBinDirectory) + names(voicesDirectory))).sorted()
     }
 
     /// Load `<voice>.safetensors` (upstream KV snapshot computed with this
@@ -322,6 +428,17 @@ public struct PocketTtsSmallConstants: Sendable {
             out.append(contentsOf: textEmbedTable[row..<(row + arch.dModel)])
         }
         return out
+    }
+
+    /// A float file whose length must be a positive multiple of `multipleOf`.
+    private static func loadFloats(_ url: URL, multipleOf: Int) throws -> [Float] {
+        let data = try Data(contentsOf: url)
+        let count = data.count / MemoryLayout<Float>.size
+        guard count > 0, count % multipleOf == 0 else {
+            throw PocketTtsConstantsLoader.LoadError.invalidSize(
+                url.lastPathComponent, expected: multipleOf, actual: count)
+        }
+        return data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
     }
 
     private static func loadFloats(_ url: URL, expected: Int) throws -> [Float] {
