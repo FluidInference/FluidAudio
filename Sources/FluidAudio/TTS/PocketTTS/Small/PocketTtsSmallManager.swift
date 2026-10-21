@@ -24,7 +24,7 @@ public actor PocketTtsSmallManager {
     public private(set) var defaultVoice: String
 
     private var constants: PocketTtsSmallConstants?
-    private var engine: PocketTtsSmallEngine?
+    private var models: PocketTtsSmallModels?
     private var packDirectory: URL?
     private var voiceCache: [String: PocketTtsSmallEngine.Fp16Snapshot] = [:]
 
@@ -38,7 +38,7 @@ public actor PocketTtsSmallManager {
         self.computeUnits = computeUnits
     }
 
-    public var isInitialized: Bool { engine != nil }
+    public var isInitialized: Bool { models != nil }
     public var arch: PocketTtsSmallArch? { constants?.arch }
 
     /// Download (if needed) and load the pack.
@@ -57,8 +57,7 @@ public actor PocketTtsSmallManager {
                 "\(ModelNames.PocketTTS.pocketStateFile) missing in \(packDirectory.path)")
         }
         let t0 = Date()
-        self.engine = try PocketTtsSmallEngine(
-            packageURL: package, constants: constants, computeUnits: computeUnits)
+        self.models = try PocketTtsSmallModels(packageURL: package, computeUnits: computeUnits)
         self.constants = constants
         self.packDirectory = packDirectory
         self.voiceCache = [:]
@@ -80,9 +79,12 @@ public actor PocketTtsSmallManager {
     public func makeSession(
         voice: String? = nil, temperature: Float? = nil, seed: UInt64? = nil
     ) async throws -> PocketTtsSmallSession {
-        guard let engine, let constants else {
+        guard let models, let constants else {
             throw PocketTTSError.modelNotFound("PocketTTS small model not initialized")
         }
+        // One engine (one MLState) per session: concurrent sessions must not
+        // share the mutable KV / Mimi state. The MLModel handles are shared.
+        let engine = try PocketTtsSmallEngine(models: models, constants: constants)
         let name = voice ?? defaultVoice
         let snapshot: PocketTtsSmallEngine.Fp16Snapshot
         if let cached = voiceCache[name] {
@@ -157,10 +159,17 @@ public actor PocketTtsSmallManager {
 public enum PocketTtsSmallDownloader {
     private static let logger = AppLogger(category: "PocketTtsSmallDownloader")
 
-    /// Files a small-model pack needs on disk.
+    /// Files a small-model pack needs on disk. The compiled bundle and the
+    /// constants directory are checked through files INSIDE them, because
+    /// `ModelHub.download` creates the directories as soon as their first file
+    /// lands and an interrupted download must not look complete.
     static let requiredFiles: [String] = [
-        ModelNames.PocketTTS.pocketStateFile, "arch.json", "pocket_state.json",
-        ModelNames.PocketTTS.constantsBinDir,
+        ModelNames.PocketTTS.pocketStateFile + "/coremldata.bin",
+        ModelNames.PocketTTS.pocketStateFile + "/model.mil",
+        "arch.json", "pocket_state.json",
+        ModelNames.PocketTTS.constantsBinDir + "/tokenizer.model",
+        ModelNames.PocketTTS.constantsBinDir + "/text_embed_table.bin",
+        ModelNames.PocketTTS.constantsBinDir + "/\(PocketTtsConstants.defaultVoice).safetensors",
     ]
 
     public static func ensurePack(

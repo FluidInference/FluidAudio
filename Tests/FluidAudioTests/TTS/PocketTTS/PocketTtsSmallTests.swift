@@ -70,7 +70,7 @@ final class PocketTtsSmallTests: XCTestCase {
     }
 
     @available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
-    func testFp16BufferRoundsAndPads() {
+    private func assertFp16BufferRoundsAndPads() {
         let src: [Float] = [0, 1, -1, 0.1, 65504, 3.14159265]
         let buf = PocketTtsSmallEngine.fp16Buffer(from: src, totalCount: 16)
         XCTAssertEqual(buf.count, 16)
@@ -82,7 +82,7 @@ final class PocketTtsSmallTests: XCTestCase {
 
     func testFp16Buffer() throws {
         guard #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) else { throw XCTSkip("MLState requires macOS 15+") }
-        testFp16BufferRoundsAndPads()
+        assertFp16BufferRoundsAndPads()
     }
 
     /// End to end on a cached pack: shipped voice, short sentence, expects EOS

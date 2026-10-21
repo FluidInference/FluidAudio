@@ -87,16 +87,14 @@ public actor PocketTtsSmallSession {
                 if Task.isCancelled { break }
                 let text = Self.replaceUntrainedCharacters(raw).trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !text.isEmpty else { continue }
-                let maxTokens = max(
-                    1,
-                    min(
-                        PocketTtsConstants.maxTokensPerChunk,
-                        constants.state.kvCacheLen - voicePosition
-                            - PocketTtsSynthesizer.estimateRequiredCacheFrames(text: " ")))
+                let cacheLen = constants.state.kvCacheLen
+                let maxTokens = try PocketTtsSynthesizer.effectiveMaxTokensPerChunk(
+                    requested: PocketTtsConstants.maxTokensPerChunk, voiceCachePosition: voicePosition,
+                    cacheLen: cacheLen)
                 let chunks = PocketTtsSynthesizer.chunkTextWithMetadata(
                     text, tokenizer: constants.tokenizer, maxTokens: maxTokens,
                     preferredMaxTokens: min(PocketTtsConstants.preferredTokensPerChunk, maxTokens),
-                    voiceCachePosition: voicePosition, language: .english)
+                    voiceCachePosition: voicePosition, language: .english, cacheLen: cacheLen)
                 Self.logger.info("Small session enqueued '\(text)', \(chunks.count) chunk(s)")
                 // Fresh Mimi decoder per utterance (upstream semantics).
                 try await engine.beginUtterance()
@@ -127,8 +125,9 @@ public actor PocketTtsSmallSession {
         let prefilled = Int(await engine.position)
         Self.logger.info("Small chunk \(chunkIndex): '\(normalized)' (\(tokenIds.count) tokens, KV at \(prefilled))")
 
-        let remaining = max(0, constants.state.kvCacheLen - prefilled)
-        let maxGenLen = min(PocketTtsSynthesizer.estimateMaxFrames(text: normalized), remaining)
+        let cacheLen = constants.state.kvCacheLen
+        let maxGenLen = PocketTtsSynthesizer.boundedGenerationFrameCount(
+            text: normalized, cachePosition: prefilled, cacheLen: cacheLen)
         let totalFramesAfterEos = framesAfterEos + PocketTtsConstants.extraFramesAfterDetection
         let arch = constants.arch
         var sequence = constants.bosEmbedding
@@ -160,9 +159,16 @@ public actor PocketTtsSmallSession {
             sequence = frame.latent
         }
 
-        if !Task.isCancelled, eosStep == nil {
-            Self.logger.warning(
-                "Small chunk \(chunkIndex) reached the frame limit (\(maxGenLen)) without EOS")
+        if !Task.isCancelled {
+            // Same contract as the 100M session: hitting the cache boundary
+            // without EOS is an error, not a silently truncated utterance.
+            try PocketTtsSynthesizer.validateGenerationCompleted(
+                generatedFrameLimit: maxGenLen, cachePosition: prefilled, eosStep: eosStep,
+                framesAfterEos: totalFramesAfterEos, cacheLen: cacheLen)
+            if eosStep == nil {
+                Self.logger.warning(
+                    "Small chunk \(chunkIndex) reached the frame limit (\(maxGenLen)) without EOS")
+            }
         }
     }
 }

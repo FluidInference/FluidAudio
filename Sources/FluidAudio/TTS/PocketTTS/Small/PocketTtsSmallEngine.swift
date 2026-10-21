@@ -1,11 +1,32 @@
 #if TTS
-import Accelerate
 @preconcurrency import CoreML
 import Foundation
 
+/// The two `MLModel` handles of a small-model `pocket_state.mlmodelc`, loaded
+/// once per manager and shared by every engine (sessions each own an `MLState`).
+@available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
+struct PocketTtsSmallModels: Sendable {
+    let prefill: MLModel
+    let generateDecode: MLModel
+
+    init(packageURL: URL, computeUnits: MLComputeUnits) throws {
+        func config(_ function: String) -> MLModelConfiguration {
+            let c = MLModelConfiguration()
+            c.computeUnits = computeUnits
+            c.functionName = function
+            return c
+        }
+        prefill = try MLModel(
+            contentsOf: packageURL, configuration: config(ModelNames.PocketTTS.StateFunction.prefill))
+        generateDecode = try MLModel(
+            contentsOf: packageURL, configuration: config(ModelNames.PocketTTS.StateFunction.generateDecode))
+    }
+}
+
 /// Drives a small-model `pocket_state.mlmodelc`: one `MLState` (made from
 /// `generate_decode`, the union of the FlowLM and Mimi buffers) shared by
-/// `prefill` and `generate_decode`.
+/// `prefill` and `generate_decode`. One engine per session: the state is
+/// mutable and every prediction writes it.
 ///
 /// Per utterance: zero the Mimi buffers and conv state, reset the frame
 /// counter. Per chunk: write the voice KV snapshot over the FlowLM buffers
@@ -15,13 +36,9 @@ import Foundation
 @available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
 actor PocketTtsSmallEngine {
 
-    /// A voice snapshot in the state's at-rest format: fp16 bit patterns,
-    /// zero-padded to full `[1, L, Hkv, D]` buffers.
-    struct Fp16Snapshot: Sendable {
-        let kBuffers: [[UInt16]]
-        let vBuffers: [[UInt16]]
-        let position: Float
-    }
+    /// A voice snapshot in the state's at-rest format (fp16 bit patterns,
+    /// zero-padded to full `[1, L, Hkv, D]` buffers) — the 100M engine's type.
+    typealias Fp16Snapshot = PocketTtsStateEngine.Fp16Snapshot
 
     struct Frame: Sendable {
         let latent: [Float]
@@ -29,16 +46,28 @@ actor PocketTtsSmallEngine {
         let samples: [Float]
     }
 
-    enum EngineError: Error {
+    enum EngineError: Error, LocalizedError {
         case missingOutput(String)
         case stateBufferMismatch(name: String, expected: Int, actual: Int)
         case unsupportedStateLayout(name: String)
         case fusedFunctionMissing
+        case phaseOutOfRange(Int, phases: Int)
+
+        var errorDescription: String? {
+            switch self {
+            case .missingOutput(let name): return "PocketTTS small: model output '\(name)' missing"
+            case .stateBufferMismatch(let name, let expected, let actual):
+                return "PocketTTS small: state buffer '\(name)' has \(actual) elements, expected \(expected)"
+            case .unsupportedStateLayout(let name): return "PocketTTS small: state buffer '\(name)' is not fp16"
+            case .fusedFunctionMissing:
+                return "PocketTTS small: pocket_state.mlmodelc has no generate_decode function"
+            case .phaseOutOfRange(let p, let phases): return "PocketTTS small: Mimi phase \(p) outside [0, \(phases))"
+            }
+        }
     }
 
     let constants: PocketTtsSmallConstants
-    private let prefillModel: MLModel
-    private let generateDecodeModel: MLModel
+    private let models: PocketTtsSmallModels
     private let mlState: MLState
     /// Next FlowLM KV write slot.
     private(set) var position: Float = 0
@@ -53,22 +82,14 @@ actor PocketTtsSmallEngine {
         constants.state.kvCacheLen * arch.numKvHeads * arch.headDim
     }
 
-    init(packageURL: URL, constants: PocketTtsSmallConstants, computeUnits: MLComputeUnits = .cpuAndNeuralEngine) throws
-    {
+    init(models: PocketTtsSmallModels, constants: PocketTtsSmallConstants) throws {
         guard constants.state.hasFusedGenerateDecode else {
             throw EngineError.fusedFunctionMissing
         }
         self.constants = constants
-        func config(_ function: String) -> MLModelConfiguration {
-            let c = MLModelConfiguration()
-            c.computeUnits = computeUnits
-            c.functionName = function
-            return c
-        }
-        self.prefillModel = try MLModel(contentsOf: packageURL, configuration: config("prefill"))
-        self.generateDecodeModel = try MLModel(
-            contentsOf: packageURL, configuration: config("generate_decode"))
-        self.mlState = generateDecodeModel.makeState()
+        self.models = models
+        // The union state (FlowLM + Mimi buffers); `prefill` accepts it too.
+        self.mlState = models.generateDecode.makeState()
         self.convNames = constants.state.mimiConvIO.keys.sorted()
         self.convState = try Self.makeZeroConvState(constants.state.mimiConvIO)
     }
@@ -143,7 +164,7 @@ actor PocketTtsSmallEngine {
             let input = try MLDictionaryFeatureProvider(dictionary: [
                 "conditioning": conditioning, "valid_len": validLen, "position": pos,
             ])
-            let output = try await prefillModel.prediction(
+            let output = try await models.prefill.prediction(
                 from: input, using: mlState, options: MLPredictionOptions())
             if let newPosition = output.featureValue(for: "new_position")?.multiArrayValue {
                 position = newPosition[0].floatValue
@@ -173,10 +194,15 @@ actor PocketTtsSmallEngine {
         }
         let pos = try MLMultiArray(shape: [1], dataType: .float32)
         pos[0] = NSNumber(value: position)
-        let phase = try MLMultiArray(shape: [1, NSNumber(value: constants.state.mimiPhases)], dataType: .float32)
-        let phasePtr = phase.dataPointer.bindMemory(to: Float.self, capacity: constants.state.mimiPhases)
-        phasePtr.initialize(repeating: 0, count: constants.state.mimiPhases)
-        phasePtr[constants.state.mimiPhase(frame: mimiFrame)] = 1
+        let phases = constants.state.mimiPhases
+        let phaseIndex = constants.state.mimiPhase(frame: mimiFrame)
+        guard phaseIndex >= 0, phaseIndex < phases else {
+            throw EngineError.phaseOutOfRange(phaseIndex, phases: phases)
+        }
+        let phase = try MLMultiArray(shape: [1, NSNumber(value: phases)], dataType: .float32)
+        let phasePtr = phase.dataPointer.bindMemory(to: Float.self, capacity: phases)
+        phasePtr.initialize(repeating: 0, count: phases)
+        phasePtr[phaseIndex] = 1
 
         var features: [String: MLFeatureValue] = [
             "sequence": MLFeatureValue(multiArray: seq),
@@ -184,10 +210,10 @@ actor PocketTtsSmallEngine {
             "position": MLFeatureValue(multiArray: pos),
             "phase": MLFeatureValue(multiArray: phase),
         ]
-        for name in convNames {
-            features[name] = MLFeatureValue(multiArray: convState[name]!)
+        for (name, array) in convState {
+            features[name] = MLFeatureValue(multiArray: array)
         }
-        let output = try await generateDecodeModel.prediction(
+        let output = try await models.generateDecode.prediction(
             from: try MLDictionaryFeatureProvider(dictionary: features),
             using: mlState, options: MLPredictionOptions())
 
@@ -233,25 +259,11 @@ actor PocketTtsSmallEngine {
             position: Float(voice.promptLength))
     }
 
-    /// fp32 -> fp16 (IEEE round-to-nearest-even via vImage), zero-padded.
+    /// fp32 -> fp16 (IEEE round-to-nearest-even via vImage), zero-padded to
+    /// `totalCount`; the 100M engine's converter with this pack's buffer size.
     static func fp16Buffer(from source: [Float], totalCount: Int) -> [UInt16] {
-        var dst = [UInt16](repeating: 0, count: totalCount)
-        let count = min(source.count, totalCount)
-        guard count > 0 else { return dst }
-        source.withUnsafeBufferPointer { src in
-            guard let srcBase = src.baseAddress else { return }
-            dst.withUnsafeMutableBufferPointer { dstBuf in
-                guard let dstBase = dstBuf.baseAddress else { return }
-                var s = vImage_Buffer(
-                    data: UnsafeMutableRawPointer(mutating: srcBase), height: 1,
-                    width: vImagePixelCount(count), rowBytes: count * MemoryLayout<Float>.size)
-                var d = vImage_Buffer(
-                    data: dstBase, height: 1, width: vImagePixelCount(count),
-                    rowBytes: count * MemoryLayout<UInt16>.size)
-                vImageConvert_PlanarFtoPlanar16F(&s, &d, vImage_Flags(kvImageNoFlags))
-            }
-        }
-        return dst
+        PocketTtsStateEngine.fp16Buffer(
+            from: source, offset: 0, count: min(source.count, totalCount), totalCount: totalCount)
     }
 
     // MARK: - State buffer access

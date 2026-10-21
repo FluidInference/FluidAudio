@@ -268,8 +268,10 @@ actor PocketTtsStateEngine {
 
     /// Convert `count` floats starting at `offset` into a full-length,
     /// zero-padded fp16 state buffer (IEEE round-to-nearest-even via vImage).
-    static func fp16Buffer(from source: [Float], offset: Int, count: Int) -> [UInt16] {
-        var dst = [UInt16](repeating: 0, count: bufferElementCount)
+    static func fp16Buffer(
+        from source: [Float], offset: Int, count: Int, totalCount: Int? = nil
+    ) -> [UInt16] {
+        var dst = [UInt16](repeating: 0, count: totalCount ?? bufferElementCount)
         guard count > 0 else { return dst }
         source.withUnsafeBufferPointer { src in
             guard let srcBase = src.baseAddress else { return }

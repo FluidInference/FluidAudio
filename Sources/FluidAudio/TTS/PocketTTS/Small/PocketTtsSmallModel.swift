@@ -164,7 +164,16 @@ public struct PocketTtsSmallStateInfo: Decodable, Sendable {
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw PocketTTSError.modelNotFound("pocket_state.json missing in \(packDirectory.path)")
         }
-        return try JSONDecoder().decode(PocketTtsSmallStateInfo.self, from: Data(contentsOf: url))
+        let info = try JSONDecoder().decode(PocketTtsSmallStateInfo.self, from: Data(contentsOf: url))
+        guard info.mimiTokensPerFrame > 0, info.mimiCapacity % info.mimiTokensPerFrame == 0,
+            info.mimiPhases == 2 * (info.mimiCapacity / info.mimiTokensPerFrame),
+            info.kvCacheLen > 0, info.condPrefillTMax > 0
+        else {
+            throw PocketTTSError.processingFailed(
+                "pocket_state.json is inconsistent: capacity \(info.mimiCapacity), tokens/frame "
+                    + "\(info.mimiTokensPerFrame), phases \(info.mimiPhases), L \(info.kvCacheLen)")
+        }
+        return info
     }
 }
 
@@ -243,6 +252,20 @@ public struct PocketTtsSmallConstants: Sendable {
                         + "does not match [2,1,n,\(arch.numKvHeads),\(arch.headDim)] F32")
             }
             let n = cache.shape[2]
+            let perKV = n * arch.numKvHeads * arch.headDim
+            guard cache.byteCount == 2 * perKV * MemoryLayout<Float>.size,
+                cache.byteOffset + cache.byteCount <= data.count
+            else {
+                throw PocketTtsConstantsLoader.LoadError.invalidSize(
+                    "\(sanitized).safetensors layer \(layer) cache", expected: 2 * perKV * 4,
+                    actual: cache.byteCount)
+            }
+            guard offset.dtype == "I64", offset.byteCount >= MemoryLayout<Int64>.size,
+                offset.byteOffset + offset.byteCount <= data.count
+            else {
+                throw PocketTtsConstantsLoader.LoadError.malformed(
+                    "\(sanitized).safetensors: layer \(layer) offset is not an I64 scalar")
+            }
             let offsetValue = data.withUnsafeBytes { raw -> Int in
                 Int(raw.loadUnaligned(fromByteOffset: offset.byteOffset, as: Int64.self))
             }
@@ -255,14 +278,14 @@ public struct PocketTtsSmallConstants: Sendable {
                     "\(sanitized).safetensors: layers differ in length")
             }
             promptLength = n
-            let perKV = n * arch.numKvHeads * arch.headDim
-            let floats: [Float] = data.withUnsafeBytes { raw in
-                let start = raw.baseAddress!.advanced(by: cache.byteOffset)
-                var out = [Float](repeating: 0, count: 2 * perKV)
-                out.withUnsafeMutableBytes { dst in
-                    dst.copyMemory(from: UnsafeRawBufferPointer(start: start, count: 2 * perKV * 4))
+            var floats = [Float](repeating: 0, count: 2 * perKV)
+            data.withUnsafeBytes { raw in
+                guard let base = raw.baseAddress else { return }
+                floats.withUnsafeMutableBytes { dst in
+                    dst.copyMemory(
+                        from: UnsafeRawBufferPointer(
+                            start: base.advanced(by: cache.byteOffset), count: cache.byteCount))
                 }
-                return out
             }
             kLayers.append(Array(floats[0..<perKV]))
             vLayers.append(Array(floats[perKV..<(2 * perKV)]))
