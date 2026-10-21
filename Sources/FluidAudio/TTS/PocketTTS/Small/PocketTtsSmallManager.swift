@@ -2,8 +2,10 @@
 @preconcurrency import CoreML
 import Foundation
 
-/// Text-to-speech with the small Pocket TTS models (18m / 7m / 2m), all
-/// resident on the Neural Engine through one MLState multifunction package.
+/// Text-to-speech with the small Pocket TTS models (18m / 7m / 2m): the FlowLM
+/// on the Neural Engine through one MLState multifunction package, the Mimi
+/// decoder in fp32 on the CPU by default (`mimiPrecision`, see
+/// `PocketTtsSmallMimiPrecision` for the fused all-ANE alternative).
 ///
 /// ```swift
 /// let tts = PocketTtsSmallManager(model: .english7m)
@@ -21,6 +23,7 @@ public actor PocketTtsSmallManager {
 
     public nonisolated let model: PocketTtsSmallModel
     public nonisolated let computeUnits: MLComputeUnits
+    public nonisolated let mimiPrecision: PocketTtsSmallMimiPrecision
     public private(set) var defaultVoice: String
 
     private var constants: PocketTtsSmallConstants?
@@ -31,11 +34,13 @@ public actor PocketTtsSmallManager {
     public init(
         model: PocketTtsSmallModel = .english7m,
         defaultVoice: String = PocketTtsConstants.defaultVoice,
-        computeUnits: MLComputeUnits = .cpuAndNeuralEngine
+        computeUnits: MLComputeUnits = .cpuAndNeuralEngine,
+        mimiPrecision: PocketTtsSmallMimiPrecision = .fp32
     ) {
         self.model = model
         self.defaultVoice = defaultVoice
         self.computeUnits = computeUnits
+        self.mimiPrecision = mimiPrecision
     }
 
     public var isInitialized: Bool { models != nil }
@@ -51,19 +56,15 @@ public actor PocketTtsSmallManager {
     /// Load from a local pack directory (`build/<model>/` of the converter).
     public func load(from packDirectory: URL) throws {
         let constants = try PocketTtsSmallConstants.load(from: packDirectory)
-        let package = packDirectory.appendingPathComponent(ModelNames.PocketTTS.pocketStateFile)
-        guard FileManager.default.fileExists(atPath: package.path) else {
-            throw PocketTTSError.modelNotFound(
-                "\(ModelNames.PocketTTS.pocketStateFile) missing in \(packDirectory.path)")
-        }
         let t0 = Date()
-        self.models = try PocketTtsSmallModels(packageURL: package, computeUnits: computeUnits)
+        self.models = try PocketTtsSmallModels(
+            packDirectory: packDirectory, computeUnits: computeUnits, mimiPrecision: mimiPrecision)
         self.constants = constants
         self.packDirectory = packDirectory
         self.voiceCache = [:]
         Self.logger.info(
-            "Loaded PocketTTS \(model.rawValue) (\(constants.arch.dModel)-d, \(constants.arch.numLayers)L) "
-                + "in \(String(format: "%.2f", Date().timeIntervalSince(t0)))s")
+            "Loaded PocketTTS \(model.rawValue) (\(constants.arch.dModel)-d, \(constants.arch.numLayers)L, "
+                + "mimi \(mimiPrecision.rawValue)) in \(String(format: "%.2f", Date().timeIntervalSince(t0)))s")
     }
 
     public func setDefaultVoice(_ voice: String) { defaultVoice = voice }
@@ -153,9 +154,9 @@ public actor PocketTtsSmallManager {
     }
 }
 
-/// Downloads a small-model pack (`v4/<model>/`) from HuggingFace: only the
-/// MLState package, the constants and the voices — the fp32 I/O models and
-/// `.mlpackage` sources next to them are skipped.
+/// Downloads a small-model pack (`v4/<model>/`) from HuggingFace: the MLState
+/// package, the fp32 `mimi_decoder.mlmodelc`, the constants and the voices —
+/// the other fp32 I/O models and the `.mlpackage` sources are skipped.
 public enum PocketTtsSmallDownloader {
     private static let logger = AppLogger(category: "PocketTtsSmallDownloader")
 
@@ -166,6 +167,8 @@ public enum PocketTtsSmallDownloader {
     static let requiredFiles: [String] = [
         ModelNames.PocketTTS.pocketStateFile + "/coremldata.bin",
         ModelNames.PocketTTS.pocketStateFile + "/model.mil",
+        ModelNames.PocketTTS.mimiDecoderFile + "/coremldata.bin",
+        ModelNames.PocketTTS.mimiDecoderFile + "/model.mil",
         "arch.json", "pocket_state.json",
         ModelNames.PocketTTS.constantsBinDir + "/tokenizer.model",
         ModelNames.PocketTTS.constantsBinDir + "/text_embed_table.bin",
@@ -190,16 +193,16 @@ public enum PocketTtsSmallDownloader {
         return pack
     }
 
-    /// Keep `pocket_state.mlmodelc`, the JSON descriptors and `constants_bin/`;
-    /// skip the fp32 I/O `.mlmodelc` bundles, every `.mlpackage` and the
-    /// `constants/` intermediates.
+    /// Keep `pocket_state.mlmodelc`, `mimi_decoder.mlmodelc`, the JSON
+    /// descriptors and `constants_bin/`; skip the other fp32 I/O `.mlmodelc`
+    /// bundles, every `.mlpackage` and the `constants/` intermediates.
     static func shouldSkipAsset(at path: String) -> Bool {
         let components = path.split(separator: "/").map(String.init)
         let basename = components.last ?? path
         if basename == ".DS_Store" || basename.hasSuffix(".wav") { return true }
         if components.contains(where: { $0.hasSuffix(".mlpackage") }) { return true }
         if let bundle = components.first(where: { $0.hasSuffix(".mlmodelc") }),
-            bundle != ModelNames.PocketTTS.pocketStateFile
+            bundle != ModelNames.PocketTTS.pocketStateFile, bundle != ModelNames.PocketTTS.mimiDecoderFile
         {
             return true
         }

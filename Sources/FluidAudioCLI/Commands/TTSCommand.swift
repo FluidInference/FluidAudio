@@ -90,6 +90,7 @@ public struct TTS {
         var pocketSeed: UInt64? = nil
         // PocketTTS small models (`--backend pocket-small --model 7m`).
         var pocketSmallModel: PocketTtsSmallModel = .english7m
+        var pocketSmallMimi: PocketTtsSmallMimiPrecision = .fp32
         // StyleTTS2 zero-shot args.
         var styletts2ReferencePath: String? = nil
         var styletts2Seed: UInt64 = 42
@@ -386,6 +387,17 @@ public struct TTS {
                     pocketSmallModel = parsed
                     i += 1
                 }
+            case "--mimi":
+                if i + 1 < arguments.count {
+                    switch arguments[i + 1].lowercased() {
+                    case "fp32", "cpu": pocketSmallMimi = .fp32
+                    case "fp16", "fp16-fused", "fused", "ane": pocketSmallMimi = .fp16Fused
+                    default:
+                        logger.error("Unknown --mimi '\(arguments[i + 1])'. Supported: fp32 (default), fp16-fused")
+                        return
+                    }
+                    i += 1
+                }
             case "--language":
                 if i + 1 < arguments.count {
                     let raw = arguments[i + 1].lowercased()
@@ -423,7 +435,7 @@ public struct TTS {
                 text: text, output: output, voice: voice, deEss: deEss,
                 model: pocketSmallModel, seed: pocketSeed,
                 temperature: arguments.contains("--temperature") ? pocketTemperature : nil,
-                computeUnits: pocketComputeUnits)
+                computeUnits: pocketComputeUnits, mimiPrecision: pocketSmallMimi)
         case .pocketTts:
             await runPocketTts(
                 text: text, output: output, voice: voice, deEss: deEss,
@@ -863,12 +875,12 @@ public struct TTS {
             seed: seed)
     }
 
-    /// `--backend pocket-small`: the 18m / 7m / 2m models through the all-ANE
+    /// `--backend pocket-small`: the 18m / 7m / 2m models through the MLState
     /// MLState package. Shipped voices only (no cloning yet).
     private static func runPocketTtsSmall(
         text: String, output: String, voice: String, deEss: Bool,
         model: PocketTtsSmallModel, seed: UInt64?, temperature: Float?,
-        computeUnits: PocketTtsComputeUnits
+        computeUnits: PocketTtsComputeUnits, mimiPrecision: PocketTtsSmallMimiPrecision
     ) async {
         guard #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) else {
             logger.error("PocketTTS small models need macOS 15+/iOS 18+ (MLState)")
@@ -879,8 +891,9 @@ public struct TTS {
             let pocketVoice = voice == TtsConstants.recommendedVoice ? PocketTtsConstants.defaultVoice : voice
             // The fused package is one graph; the FlowLM routing decides it.
             let units: MLComputeUnits = computeUnits.flowLM ?? .cpuAndNeuralEngine
-            let manager = PocketTtsSmallManager(model: model, defaultVoice: pocketVoice, computeUnits: units)
-            logger.info("PocketTTS small model: \(model.rawValue)")
+            let manager = PocketTtsSmallManager(
+                model: model, defaultVoice: pocketVoice, computeUnits: units, mimiPrecision: mimiPrecision)
+            logger.info("PocketTTS small model: \(model.rawValue), mimi \(mimiPrecision.rawValue)")
             let tLoad0 = Date()
             try await manager.initialize()
             let tLoad1 = Date()
@@ -1779,9 +1792,11 @@ public struct TTS {
               --voice-file FILE    Load previously saved voice .bin file
               --save-voice FILE    Save cloned voice to .bin file for later use
 
-            PocketTTS small models (--backend pocket-small, macOS 15+/iOS 18+, all on the Neural Engine):
+            PocketTTS small models (--backend pocket-small, macOS 15+/iOS 18+, FlowLM on the Neural Engine):
               --model ID           english_18m_2026-10 | english_7m_2026-10 (default) | english_2m_2026-10
                                    or their *_refl_2026-10 twins; aliases 18m, 7m, 2m, 18m-refl, 7m-refl, 2m-refl
+              --mimi MODE          fp32 (default: Mimi decoder fp32 on the CPU, clean noise floor) or
+                                   fp16-fused (one ANE dispatch per frame, faster, -72 dBFS hiss in pauses)
               --voice, --seed, --temperature, --compute-units apply; voice cloning not yet supported
 
             PocketTTS Language Packs:

@@ -2,37 +2,77 @@
 @preconcurrency import CoreML
 import Foundation
 
-/// The two `MLModel` handles of a small-model `pocket_state.mlmodelc`, loaded
-/// once per manager and shared by every engine (sessions each own an `MLState`).
+/// The `MLModel` handles of a small-model pack, loaded once per manager and
+/// shared by every engine (sessions each own an `MLState`). Which functions are
+/// loaded depends on `mimiPrecision`: `.fp32` loads `prefill` + `generate` from
+/// `pocket_state.mlmodelc` and the fp32 `mimi_decoder.mlmodelc` (CPU);
+/// `.fp16Fused` loads `prefill` + `generate_decode` only.
 @available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
 struct PocketTtsSmallModels: Sendable {
+    let mimiPrecision: PocketTtsSmallMimiPrecision
     let prefill: MLModel
-    let generateDecode: MLModel
+    /// FlowLM step + flow head (`generate`); `.fp32` mode only.
+    let generate: MLModel?
+    /// Fused step + head + fp16 Mimi (`generate_decode`); `.fp16Fused` mode only.
+    let generateDecode: MLModel?
+    /// fp32 I/O Mimi decoder on the CPU; `.fp32` mode only.
+    let mimiDecoder: MLModel?
+    /// The function whose declared state is the union a session needs.
+    let stateSource: MLModel
 
-    init(packageURL: URL, computeUnits: MLComputeUnits) throws {
+    init(packDirectory: URL, computeUnits: MLComputeUnits, mimiPrecision: PocketTtsSmallMimiPrecision) throws {
+        let package = packDirectory.appendingPathComponent(ModelNames.PocketTTS.pocketStateFile)
+        guard FileManager.default.fileExists(atPath: package.path) else {
+            throw PocketTTSError.modelNotFound(
+                "\(ModelNames.PocketTTS.pocketStateFile) missing in \(packDirectory.path)")
+        }
         func config(_ function: String) -> MLModelConfiguration {
             let c = MLModelConfiguration()
             c.computeUnits = computeUnits
             c.functionName = function
             return c
         }
+        self.mimiPrecision = mimiPrecision
         prefill = try MLModel(
-            contentsOf: packageURL, configuration: config(ModelNames.PocketTTS.StateFunction.prefill))
-        generateDecode = try MLModel(
-            contentsOf: packageURL, configuration: config(ModelNames.PocketTTS.StateFunction.generateDecode))
+            contentsOf: package, configuration: config(ModelNames.PocketTTS.StateFunction.prefill))
+        switch mimiPrecision {
+        case .fp16Fused:
+            let fused = try MLModel(
+                contentsOf: package, configuration: config(ModelNames.PocketTTS.StateFunction.generateDecode))
+            generateDecode = fused
+            generate = nil
+            mimiDecoder = nil
+            stateSource = fused
+        case .fp32:
+            let mimiURL = packDirectory.appendingPathComponent(ModelNames.PocketTTS.mimiDecoderFile)
+            guard FileManager.default.fileExists(atPath: mimiURL.path) else {
+                throw PocketTTSError.modelNotFound(
+                    "\(ModelNames.PocketTTS.mimiDecoderFile) missing in \(packDirectory.path) "
+                        + "(needed for mimiPrecision .fp32; re-download the pack or use .fp16Fused)")
+            }
+            let gen = try MLModel(
+                contentsOf: package, configuration: config(ModelNames.PocketTTS.StateFunction.generate))
+            let mimiConfig = MLModelConfiguration()
+            mimiConfig.computeUnits = .cpuOnly
+            generate = gen
+            generateDecode = nil
+            mimiDecoder = try MLModel(contentsOf: mimiURL, configuration: mimiConfig)
+            stateSource = gen
+        }
     }
 }
 
-/// Drives a small-model `pocket_state.mlmodelc`: one `MLState` (made from
-/// `generate_decode`, the union of the FlowLM and Mimi buffers) shared by
-/// `prefill` and `generate_decode`. One engine per session: the state is
-/// mutable and every prediction writes it.
+/// Drives a small-model pack: one `MLState` per engine shared by `prefill` and
+/// the per-frame function. One engine per session: the state is mutable and
+/// every prediction writes it.
 ///
-/// Per utterance: zero the Mimi buffers and conv state, reset the frame
-/// counter. Per chunk: write the voice KV snapshot over the FlowLM buffers
-/// (zero-padded, so it doubles as the cache reset), one `prefill` call for the
-/// text, then one `generate_decode` call per 80 ms frame which returns the
-/// next latent, the EOS logit and the decoded audio together.
+/// Per utterance: zero the Mimi state (fp16 KV buffers in fused mode, the fp32
+/// I/O arrays otherwise) and the conv histories, reset the frame counter. Per
+/// chunk: write the voice KV snapshot over the FlowLM buffers (zero-padded, so
+/// it doubles as the cache reset), one `prefill` call for the text, then per
+/// 80 ms frame either one `generate_decode` call (`.fp16Fused`: next latent,
+/// EOS logit and audio together) or `generate` on the ANE followed by the fp32
+/// `mimi_decoder` on the CPU (`.fp32`, the default: no fp16 noise floor).
 @available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
 actor PocketTtsSmallEngine {
 
@@ -60,7 +100,7 @@ actor PocketTtsSmallEngine {
                 return "PocketTTS small: state buffer '\(name)' has \(actual) elements, expected \(expected)"
             case .unsupportedStateLayout(let name): return "PocketTTS small: state buffer '\(name)' is not fp16"
             case .fusedFunctionMissing:
-                return "PocketTTS small: pocket_state.mlmodelc has no generate_decode function"
+                return "PocketTTS small: the per-frame model for this Mimi precision is not loaded"
             case .phaseOutOfRange(let p, let phases): return "PocketTTS small: Mimi phase \(p) outside [0, \(phases))"
             }
         }
@@ -73,9 +113,14 @@ actor PocketTtsSmallEngine {
     private(set) var position: Float = 0
     /// Mimi frames decoded since the last `beginUtterance()`.
     private(set) var mimiFrame: Int = 0
-    /// Mimi conv histories / overlap-add partials, fed back each call.
+    /// Mimi state that travels as inputs/outputs and is fed back each call:
+    /// the conv histories / overlap-add partials in fused mode, plus the Mimi
+    /// KV caches in `.fp32` mode (the I/O model has no MLState).
     private var convState: [String: MLMultiArray] = [:]
+    private let convSpec: [String: [Int]]
     private let convNames: [String]
+
+    var mimiPrecision: PocketTtsSmallMimiPrecision { models.mimiPrecision }
 
     var arch: PocketTtsSmallArch { constants.arch }
     var kvBufferElementCount: Int {
@@ -83,23 +128,44 @@ actor PocketTtsSmallEngine {
     }
 
     init(models: PocketTtsSmallModels, constants: PocketTtsSmallConstants) throws {
-        guard constants.state.hasFusedGenerateDecode else {
-            throw EngineError.fusedFunctionMissing
-        }
         self.constants = constants
         self.models = models
-        // The union state (FlowLM + Mimi buffers); `prefill` accepts it too.
-        self.mlState = models.generateDecode.makeState()
-        self.convNames = constants.state.mimiConvIO.keys.sorted()
-        self.convState = try Self.makeZeroConvState(constants.state.mimiConvIO)
+        switch models.mimiPrecision {
+        case .fp16Fused:
+            guard constants.state.hasFusedGenerateDecode, models.generateDecode != nil else {
+                throw EngineError.fusedFunctionMissing
+            }
+            convSpec = constants.state.mimiConvIO
+        case .fp32:
+            // Every input of the fp32 I/O model except the latent and the phase is
+            // state to feed back; shapes come from the compiled model, so the host
+            // needs none of the converter's JSON for it.
+            guard let mimi = models.mimiDecoder else { throw EngineError.fusedFunctionMissing }
+            var spec: [String: [Int]] = [:]
+            for (name, desc) in mimi.modelDescription.inputDescriptionsByName
+            where name != "latent" && name != "phase" {
+                guard let shape = desc.multiArrayConstraint?.shape else {
+                    throw EngineError.unsupportedStateLayout(name: name)
+                }
+                spec[name] = shape.map(\.intValue)
+            }
+            convSpec = spec
+        }
+        // The state `prefill` and the frame function share (FlowLM buffers, plus
+        // the Mimi KV buffers in fused mode).
+        self.mlState = models.stateSource.makeState()
+        self.convNames = convSpec.keys.sorted()
+        self.convState = try Self.makeZeroConvState(convSpec)
     }
 
     // MARK: - Utterance / chunk lifecycle
 
     /// Fresh Mimi decoder: zero its KV buffers and conv state, frame counter 0.
     func beginUtterance() throws {
-        for (name, shape) in constants.state.mimiState {
-            try writeStateBuffer([UInt16](repeating: 0, count: shape.reduce(1, *)), name: name)
+        if models.mimiPrecision == .fp16Fused {
+            for (name, shape) in constants.state.mimiState {
+                try writeStateBuffer([UInt16](repeating: 0, count: shape.reduce(1, *)), name: name)
+            }
         }
         try zeroConvState()
         mimiFrame = 0
@@ -175,11 +241,12 @@ actor PocketTtsSmallEngine {
         }
     }
 
-    // MARK: - Fused frame
+    // MARK: - Frame
 
-    /// One frame: FlowLM step + flow head + Mimi decode in a single dispatch.
-    /// `sequence` is the previous latent (the BOS latent on the first step);
-    /// `noise` is z_0 already scaled by sqrt(temperature).
+    /// One frame: FlowLM step + flow head + Mimi decode. `sequence` is the
+    /// previous latent (the BOS latent on the first step); `noise` is z_0
+    /// already scaled by sqrt(temperature). One dispatch in `.fp16Fused` mode,
+    /// `generate` (ANE) + `mimi_decoder` (CPU, fp32) in `.fp32` mode.
     func generateDecodeFrame(sequence: [Float], noise: [Float]) async throws -> Frame {
         guard Int(position) + 1 <= constants.state.kvCacheLen else {
             throw PocketTTSError.processingFailed(
@@ -204,30 +271,68 @@ actor PocketTtsSmallEngine {
         phasePtr.initialize(repeating: 0, count: phases)
         phasePtr[phaseIndex] = 1
 
-        var features: [String: MLFeatureValue] = [
-            "sequence": MLFeatureValue(multiArray: seq),
-            "latent_init": MLFeatureValue(multiArray: latentInit),
-            "position": MLFeatureValue(multiArray: pos),
-            "phase": MLFeatureValue(multiArray: phase),
-        ]
-        for (name, array) in convState {
-            features[name] = MLFeatureValue(multiArray: array)
+        let latent: MLMultiArray
+        let eos: MLMultiArray
+        let mimiOutput: MLFeatureProvider
+        if let fused = models.generateDecode {
+            var features: [String: MLFeatureValue] = [
+                "sequence": MLFeatureValue(multiArray: seq),
+                "latent_init": MLFeatureValue(multiArray: latentInit),
+                "position": MLFeatureValue(multiArray: pos),
+                "phase": MLFeatureValue(multiArray: phase),
+            ]
+            for (name, array) in convState {
+                features[name] = MLFeatureValue(multiArray: array)
+            }
+            let output = try await fused.prediction(
+                from: try MLDictionaryFeatureProvider(dictionary: features),
+                using: mlState, options: MLPredictionOptions())
+            guard let l = output.featureValue(for: "latent_final")?.multiArrayValue else {
+                throw EngineError.missingOutput("latent_final")
+            }
+            guard let e = output.featureValue(for: "is_eos")?.multiArrayValue else {
+                throw EngineError.missingOutput("is_eos")
+            }
+            latent = l
+            eos = e
+            mimiOutput = output
+        } else {
+            guard let generate = models.generate, let mimi = models.mimiDecoder else {
+                throw EngineError.fusedFunctionMissing
+            }
+            let output = try await generate.prediction(
+                from: try MLDictionaryFeatureProvider(dictionary: [
+                    "sequence": seq, "latent_init": latentInit, "position": pos,
+                ]),
+                using: mlState, options: MLPredictionOptions())
+            guard let l = output.featureValue(for: "latent_final")?.multiArrayValue else {
+                throw EngineError.missingOutput("latent_final")
+            }
+            guard let e = output.featureValue(for: "is_eos")?.multiArrayValue else {
+                throw EngineError.missingOutput("is_eos")
+            }
+            // The I/O model wants a contiguous fp32 [1, ldim]; copy rather than
+            // trust the function output's layout and dtype.
+            let latentIn = try MLMultiArray(shape: [1, NSNumber(value: ldim)], dataType: .float32)
+            let values = Self.readFloats(l, count: ldim)
+            for i in 0..<ldim { latentIn[i] = NSNumber(value: values[i]) }
+            var features: [String: MLFeatureValue] = [
+                "latent": MLFeatureValue(multiArray: latentIn),
+                "phase": MLFeatureValue(multiArray: phase),
+            ]
+            for (name, array) in convState {
+                features[name] = MLFeatureValue(multiArray: array)
+            }
+            latent = l
+            eos = e
+            mimiOutput = try await mimi.prediction(from: try MLDictionaryFeatureProvider(dictionary: features))
         }
-        let output = try await models.generateDecode.prediction(
-            from: try MLDictionaryFeatureProvider(dictionary: features),
-            using: mlState, options: MLPredictionOptions())
 
-        guard let latent = output.featureValue(for: "latent_final")?.multiArrayValue else {
-            throw EngineError.missingOutput("latent_final")
-        }
-        guard let eos = output.featureValue(for: "is_eos")?.multiArrayValue else {
-            throw EngineError.missingOutput("is_eos")
-        }
-        guard let audio = output.featureValue(for: "audio")?.multiArrayValue else {
+        guard let audio = mimiOutput.featureValue(for: "audio")?.multiArrayValue else {
             throw EngineError.missingOutput("audio")
         }
         for name in convNames {
-            guard let updated = output.featureValue(for: "\(name)_out")?.multiArrayValue else {
+            guard let updated = mimiOutput.featureValue(for: "\(name)_out")?.multiArrayValue else {
                 throw EngineError.missingOutput("\(name)_out")
             }
             convState[name] = updated
@@ -269,7 +374,7 @@ actor PocketTtsSmallEngine {
     // MARK: - State buffer access
 
     private func zeroConvState() throws {
-        convState = try Self.makeZeroConvState(constants.state.mimiConvIO)
+        convState = try Self.makeZeroConvState(convSpec)
     }
 
     private static func makeZeroConvState(_ spec: [String: [Int]]) throws -> [String: MLMultiArray] {

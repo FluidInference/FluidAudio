@@ -177,6 +177,25 @@ public struct PocketTtsSmallStateInfo: Decodable, Sendable {
     }
 }
 
+/// Where the Mimi decoder of a small model runs.
+///
+/// The fp16 Mimi decoder (`generate_decode` / `decode` in `pocket_state.mlmodelc`)
+/// renders a white noise floor at about −72 dBFS: its SEANet activations are
+/// O(1) while the audio in pauses is O(1e-3), so fp16 rounding of the
+/// activations lands directly in the output (the same graph in fp16 on the CPU
+/// has the same floor, and the Core ML planner rejects mixed precision in
+/// MLState programs). The fp32 I/O `mimi_decoder.mlmodelc` on the CPU has no
+/// such floor (parity with PyTorch to ~1e-6).
+public enum PocketTtsSmallMimiPrecision: String, Sendable, CaseIterable {
+    /// Default. FlowLM step + flow head on the ANE (`generate`), Mimi fp32 on
+    /// the CPU: clean noise floor, ~4.4 ms per frame for 18m on M-series (18× real time).
+    case fp32
+    /// Everything in one ANE dispatch (`generate_decode`): ~2.9 ms per frame for
+    /// 18m, but with the −72 dBFS hiss audible in pauses. For benchmarks and
+    /// devices where the CPU is contended.
+    case fp16Fused = "fp16-fused"
+}
+
 /// A shipped voice for a small model: the upstream per-layer FlowLM KV
 /// snapshot, split into K and V, as flat row-major `[n, Hkv, D]` fp32.
 public struct PocketTtsSmallVoice: Sendable {

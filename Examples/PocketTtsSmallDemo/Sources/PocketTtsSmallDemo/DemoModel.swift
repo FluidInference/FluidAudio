@@ -46,11 +46,15 @@ final class DemoModel: ObservableObject {
     private var pending: [Int: (enqueuedAt: Date, firstFrameAt: Date?, lastFrameAt: Date?, frames: Int)] = [:]
     private var finished: Set<Int> = []
     var playAudio = true
+    /// `--mimi-fp16`: the fused all-ANE path (faster, −72 dBFS hiss) instead of
+    /// the default fp32 Mimi decoder on the CPU.
+    var mimiPrecision: PocketTtsSmallMimiPrecision = .fp32
     private var nextUtterance = 0
     private var logCounter = 0
 
-    /// `--model 7m` picks the model, `--autorun` loads it and speaks the text box
-    /// on launch (used by the showcase script and for headless verification).
+    /// `--model 7m` picks the model, `--mimi-fp16` the fused all-ANE decoder,
+    /// `--autorun` loads it and speaks the text box on launch (used by the
+    /// showcase script and for headless verification).
     func applyLaunchArguments(_ args: [String]) {
         var autorun = false
         var i = 1
@@ -66,6 +70,8 @@ final class DemoModel: ObservableObject {
                 autorun = true
             case "--no-audio":
                 playAudio = false
+            case "--mimi-fp16":
+                mimiPrecision = .fp16Fused
             default: break
             }
             i += 1
@@ -96,10 +102,11 @@ final class DemoModel: ObservableObject {
             "── loading \(selectedModel.rawValue) (first load compiles for the Neural Engine, 10–150 s; later loads < 1 s)"
         )
         let model = selectedModel
+        let mimi = mimiPrecision
         Task {
             do {
                 let t0 = Date()
-                let manager = PocketTtsSmallManager(model: model)
+                let manager = PocketTtsSmallManager(model: model, mimiPrecision: mimi)
                 try await manager.initialize()
                 let dt = Date().timeIntervalSince(t0)
                 let arch = await manager.arch
@@ -110,7 +117,7 @@ final class DemoModel: ObservableObject {
                 if !voices.contains(selectedVoice) { selectedVoice = voices.first ?? "alba" }
                 loadSeconds = dt
                 isReady = true
-                status = "\(model.rawValue) ready — \(String(format: "%.2f", dt)) s load"
+                status = "\(model.rawValue) ready — \(String(format: "%.2f", dt)) s load, mimi \(mimi.rawValue)"
                 if let arch {
                     appendLog(
                         "loaded in \(String(format: "%.2f", dt)) s: d_model \(arch.dModel), \(arch.numLayers) layers, "
