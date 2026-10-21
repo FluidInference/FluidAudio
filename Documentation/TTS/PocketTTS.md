@@ -48,6 +48,80 @@ fused/prefill artifacts at `v2.1/<lang>/` and otherwise reuses v2's `mimi`,
 
 ---
 
+## Small models (pocket-tts 4.0.0): 18m / 7m / 2m with the FlowLM on the Neural Engine
+
+Kyutai's 2026-10-20 release added six small English models — `english_18m_2026-10`,
+`english_7m_2026-10`, `english_2m_2026-10` and reward-fine-tuned `*_refl_2026-10`
+twins. They are a different architecture from the 100M (grouped-query attention,
+a `z_proj` before the heads, a low-rank text table, one-step flow heads, a
+separate 128-d Mimi decoder), so they have their own packs under
+`FluidInference/pocket-tts-coreml` `v4/<model>/` and their own backend:
+
+```swift
+let tts = PocketTtsSmallManager(model: .english7m)        // .english18m, .english2m, *Refl
+try await tts.initialize()                                 // downloads v4/<model>/ (34–145 MB)
+let wav = try await tts.synthesize(text: "Hello, world!", voice: "alba")
+for try await frame in try await tts.synthesizeStreaming(text: "…") { /* 80 ms frames */ }
+```
+
+```bash
+fluidaudiocli tts "Hello world." --backend pocket-small --model 7m --seed 42 -o out.wav
+```
+
+Requires macOS 15 / iOS 18. The FlowLM runs on the Neural Engine through one
+MLState multifunction package, `pocket_state.mlmodelc`: `prefill` writes the text
+block into the FlowLM KV state and `generate` runs the FlowLM step plus the
+one-step flow head per frame (`latent_final`, `is_eos`). The Mimi decoder runs as
+the fp32 I/O model `mimi_decoder.mlmodelc` on the CPU (`mimiPrecision: .fp32`,
+the default); its state (two small KV caches and ~18 KB of conv histories) is
+plain inputs/outputs the host feeds back, zeroed per utterance.
+
+**Why the Mimi decoder is not on the ANE by default.** The package also carries
+`generate_decode`, which fuses step + head + an fp16 Mimi decoder into a single
+ANE dispatch (`mimiPrecision: .fp16Fused`, `--mimi fp16-fused`). It is faster
+(18m: 2.9 vs 4.4 ms per frame on an M5 Pro) but the fp16 SEANet adds a white noise
+floor at about −72 dBFS, audible as hiss in pauses and at the start of an
+utterance; PyTorch and the fp32 path sit at about −80 dBFS with the same spectral
+tilt. The same graph in fp16 on the CPU has the same floor, so it is fp16
+rounding of O(1) activations against O(1e-3) audio, not an ANE fault; keeping the
+SEANet ops in fp32 inside the stateful program is rejected by the Core ML planner
+(bad_cast, status −14), hence the separate fp32 model. The fused path keeps the
+Mimi KV caches in the MLState; both Mimi models take a one-hot `phase` input per frame
+(10 phases, from the frame counter) that selects the Mimi cache-write rows,
+relative RoPE rotations and mask tables — the graph has no data-dependent integer
+arithmetic because the ANE miscomputes it. Every dimension comes from the pack's
+`arch.json` / `pocket_state.json` (`PocketTtsSmallArch`, `PocketTtsSmallStateInfo`)
+or the compiled model's own input descriptions; nothing in `PocketTtsSmallEngine`
+hard-codes a size.
+
+Text is chunked at sentence boundaries to at most 50 tokens
+(`PocketTtsConstants.preferredTokensPerChunk`), the upstream `MAX_TOKEN_PER_CHUNK`.
+This matters more than for the 100M: the small models were trained on short
+chunks, and fed a whole paragraph in one prefill several voices (eponine, azelma,
+anna, estelle, jane, michael, paul with an 81-token passage) never emit EOS and run
+to the frame budget — upstream PyTorch does exactly the same with
+`max_tokens=512`, so it is model behaviour, not a conversion fault.
+
+Differences from the 100M packs a host must know: the first `sequence` of a chunk
+is `bos_emb` (no NaN protocol); `is_eos` is a raw logit with threshold −1.0 and is
+ignored for the first 6 frames; temperature defaults to 0.3; the text table is
+`[4001, d_model]` with the low-rank projection folded in; voices are the upstream
+KV snapshots `[2, 1, n, Hkv, 64]` written as fp16 into `k_cache{i}` / `v_cache{i}`;
+`–` and `—` are rewritten to `,` before tokenizing.
+
+Measured on an M5 Pro with the fused fp16 path (`fluidaudiocli`, debug build,
+86–91 frames of the verify sentence): 7m 156 ms (44× real time), 18m 260 ms (28×),
+2m 125 ms (47×); the default fp32-Mimi path adds about 1.5 ms per frame (18m:
+~18× real time). First load pays the ANE compile (10–150 s), warm loads are
+sub-second. Whisper transcripts match the PyTorch output. If a pack is replaced in
+place with a changed graph, Core ML may keep serving the previously compiled
+program from its per-app cache (`~/Library/Caches/<app>/com.apple.e5rt.e5bundlecache`);
+a new directory name avoids it. Voice cloning is not wired for the small
+models yet (the Mimi encoder is the 100M English one; only `speaker_proj_weight`
+differs and ships in `constants_bin/`). Conversion code and the full trial log
+(ANE faults in `conv_transpose`, time concat, fp16 RoPE, integer compares) live in
+the private model-lab repo, `models/pocket-tts-small-coreml/`.
+
 ## Model Files & Precision
 
 The four CoreML submodels (plus the optional Mimi encoder) and their

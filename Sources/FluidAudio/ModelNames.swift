@@ -1211,6 +1211,11 @@ public enum ModelNames {
             public static let writeState = "write_state"
             public static let prefill = "prefill"
             public static let generate = "generate"
+            /// Small-model packs (`v4/<model>/`) only: Mimi decoder over its
+            /// own MLState buffers, and the fused per-frame function
+            /// (FlowLM step + flow head + Mimi) that `PocketTtsSmallEngine` uses.
+            public static let decode = "decode"
+            public static let generateDecode = "generate_decode"
         }
 
         public static let condStepFile = condStep + ".mlmodelc"
