@@ -258,7 +258,8 @@ public struct VocabularyRescorer: Sendable {
         /// The legacy comparison could not be completed because required evidence was unavailable.
         case unavailableEvidence
 
-        /// The candidate passed comparison but an overlapping candidate won final arbitration.
+        /// The candidate passed comparison but overlapped a selected candidate's word span,
+        /// or borrowed its acoustic evidence for the same term.
         case supersededByOverlap
     }
 
@@ -282,13 +283,14 @@ public struct VocabularyRescorer: Sendable {
         /// String similarity used to rank and gate the candidate.
         public let similarity: Float
 
-        /// Raw CTC score for the vocabulary term, before context biasing, when available.
+        /// Raw CTC score for the vocabulary term (with any preserved possessive), before context biasing, when available.
         public let rawVocabularyCTCScore: Float?
 
         /// Raw CTC score for the original phrase, when available.
         public let rawOriginalCTCScore: Float?
 
         /// Context-biasing boost added to the vocabulary score, when available.
+        /// Positive bonuses are suppressed for weakly matched duplicates beside a recognized occurrence.
         public let effectiveBoost: Float?
 
         /// Half-open word-index range into ``CandidateEvidenceOutput/baseWords``.
