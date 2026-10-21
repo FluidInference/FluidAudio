@@ -185,6 +185,8 @@ public actor SlidingWindowAsrManager {
             logger.info("Recognition task started, waiting for audio...")
 
             for await pcmBuffer in self.inputSequence {
+                guard !Task.isCancelled else { return }
+
                 do {
                     // Convert to 16kHz mono (streaming)
                     let samples = try audioConverter.resampleBuffer(pcmBuffer)
@@ -203,6 +205,8 @@ public actor SlidingWindowAsrManager {
             }
 
             // Stream ended: no need to flush converter since each conversion is stateless
+
+            guard !Task.isCancelled else { return }
 
             // Then flush remaining assembled audio (no right-context requirement)
             await self.flushRemaining()
@@ -324,11 +328,23 @@ public actor SlidingWindowAsrManager {
         logger.info("SlidingWindowAsrManager resources cleaned up")
     }
 
-    /// Cancel streaming without getting results
+    /// Cancel streaming and wait for the recognizer to exit before returning.
+    /// An in-flight model prediction may finish before cancellation completes.
     public func cancel() async {
         inputBuilder.finish()
-        recognizerTask?.cancel()
+        let task = recognizerTask
+        task?.cancel()
         updateContinuation?.finish()
+
+        if let task {
+            do {
+                try await task.value
+            } catch is CancellationError {
+                // Cancellation is the expected exit path.
+            } catch {
+                logger.error("Recognition task failed while cancelling: \(error)")
+            }
+        }
 
         logger.info("SlidingWindowAsrManager cancelled")
     }
@@ -353,6 +369,8 @@ public actor SlidingWindowAsrManager {
 
         var currentAbsEnd = bufferStartIndex + sampleBuffer.count
         while currentAbsEnd >= (nextWindowCenterStart + chunk + right) {
+            guard !Task.isCancelled else { return }
+
             let leftStartAbs = max(0, nextWindowCenterStart - left)
             let rightEndAbs = nextWindowCenterStart + chunk + right
             let startIdx = max(leftStartAbs - bufferStartIndex, 0)
@@ -388,6 +406,8 @@ public actor SlidingWindowAsrManager {
 
         var currentAbsEnd = bufferStartIndex + sampleBuffer.count
         while currentAbsEnd > nextWindowCenterStart {  // process until we exhaust
+            guard !Task.isCancelled else { return }
+
             // If we have less than a chunk ahead, process the final partial chunk
             let availableAhead = currentAbsEnd - nextWindowCenterStart
             if availableAhead <= 0 { break }
