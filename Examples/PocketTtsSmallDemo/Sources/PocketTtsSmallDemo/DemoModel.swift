@@ -2,12 +2,6 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
-/// One line of the on-screen log (mirrored to stdout for the terminal pane).
-struct LogLine: Identifiable {
-    let id: Int
-    let text: String
-}
-
 /// A bundled upstream PyTorch take (`Reference/references.json`): one voice,
 /// one sentence, for A/B against Core ML on the same text and voice.
 struct ReferenceClip: Identifiable, Decodable {
@@ -31,19 +25,14 @@ struct UtteranceStats: Identifiable {
 
 @MainActor
 final class DemoModel: ObservableObject {
-    @Published var selectedModel: PocketTtsSmallModel = .english7m
-    @Published var voices: [String] = ["alba"]
-    @Published var selectedVoice = "alba"
-    @Published var text =
-        "Hello world. I am Kyutai's Pocket TTS. I'm fast enough to run on small CPUs. I hope you'll like me."
-    @Published private(set) var status = "Pick a model and press Load."
     @Published private(set) var isLoading = false
     @Published private(set) var isReady = false
+    /// True from the moment a Core ML utterance is requested until every
+    /// pending utterance has finished generating. Set synchronously in
+    /// `speak()` so a second click during session creation is rejected.
     @Published private(set) var isSpeaking = false
-    @Published private(set) var loadSeconds: Double?
-    @Published private(set) var arch: PocketTtsSmallArch?
     @Published private(set) var utterances: [UtteranceStats] = []
-    /// PyTorch reference takes shipped with the demo (empty if the bundle lacks them).
+    /// PyTorch reference takes shipped with the demo.
     let references: [ReferenceClip] = DemoModel.loadReferences()
     /// The reference row currently playing (file + which renderer), for the highlight.
     @Published private(set) var activeReference: (file: String, source: ReferenceSource)?
@@ -52,34 +41,42 @@ final class DemoModel: ObservableObject {
         case pytorch = "PyTorch"
         case coreml = "Core ML"
     }
-    @Published private(set) var log: [LogLine] = []
 
     let player = StreamPlayer()
+
+    /// Chosen with `--model`; loaded on launch.
+    private(set) var selectedModel: PocketTtsSmallModel = .english7m
+    /// `.fp32` (default): FlowLM on the ANE, Mimi fp32 on the CPU. `.fp16Fused`
+    /// (`--mimi fp16-fused`): one all-ANE dispatch, faster, with the −72 dBFS hiss.
+    private(set) var mimiPrecision: PocketTtsSmallMimiPrecision = .fp32
+    private var selectedVoice = "alba"
+    /// Sentence spoken by `--autorun`, or the reference row's text.
+    private var text =
+        "Hello world. I am Kyutai's Pocket TTS. I'm fast enough to run on small CPUs. I hope you'll like me."
+    var playAudio = true
 
     private var manager: PocketTtsSmallManager?
     private var session: PocketTtsSmallSession?
     private var consumer: Task<Void, Never>?
+    /// True while `makeSession` is in flight: `pending` is still empty then,
+    /// so `tick()` must not treat the model as idle.
+    private var openingSession = false
     /// Per-utterance timing, touched on every frame; the published
-    /// `utterances` table is refreshed from it on the 250 ms tick so the UI
+    /// `utterances` rows are refreshed from it on the 250 ms tick so the UI
     /// never re-renders per frame (that alone cost ~6 ms a frame).
     private var pending: [Int: (enqueuedAt: Date, firstFrameAt: Date?, lastFrameAt: Date?, frames: Int)] = [:]
-    private var finished: Set<Int> = []
-    var playAudio = true
-    /// `.fp32` (default): FlowLM on the ANE, Mimi fp32 on the CPU. `.fp16Fused`
-    /// (`--mimi-fp16` or the picker): one all-ANE dispatch, faster, with the
-    /// −72 dBFS hiss — switch live to hear the difference. Needs a reload.
-    @Published private(set) var mimiPrecision: PocketTtsSmallMimiPrecision = .fp32
     private var nextUtterance = 0
     /// Row index of the live session's utterance 0: sessions number their
     /// utterances from 0, rows keep counting across sessions.
     private var sessionBase = 0
     /// Rows kept on screen (older ones are dropped).
     private let maxRows = 4
-    private var logCounter = 0
+    /// An utterance that never produced a frame is given up after this long.
+    private let firstFrameTimeout: TimeInterval = 10
 
-    /// `--model 7m` picks the model, `--mimi fp16-fused` (or `--mimi-fp16`) the fused all-ANE decoder,
-    /// `--autorun` loads it and speaks the text box on launch (used by the
-    /// showcase script and for headless verification).
+    /// `--model 7m` picks the model, `--mimi fp32|fp16-fused` the Mimi path,
+    /// `--text "…"` the sentence, `--autorun` speaks it once the model is
+    /// loaded, `--no-audio` keeps the speaker quiet (headless timing).
     func applyLaunchArguments(_ args: [String]) {
         var autorun = false
         var i = 1
@@ -104,7 +101,6 @@ final class DemoModel: ObservableObject {
             }
             i += 1
         }
-        // Always load the selected model on launch; `--autorun` also speaks the text box.
         load()
         guard autorun else { return }
         Task {
@@ -113,10 +109,8 @@ final class DemoModel: ObservableObject {
         }
     }
 
-    func appendLog(_ line: String) {
-        logCounter += 1
-        log.append(LogLine(id: logCounter, text: line))
-        if log.count > 400 { log.removeFirst(log.count - 400) }
+    /// The log goes to stdout (run the app from a terminal to see it).
+    func log(_ line: String) {
         print(line)
     }
 
@@ -126,8 +120,7 @@ final class DemoModel: ObservableObject {
         guard !isLoading else { return }
         isLoading = true
         isReady = false
-        status = "Downloading / loading \(selectedModel.rawValue)…"
-        appendLog(
+        log(
             "── loading \(selectedModel.rawValue) (first load compiles for the Neural Engine, 10–150 s; later loads < 1 s)"
         )
         let model = selectedModel
@@ -141,74 +134,53 @@ final class DemoModel: ObservableObject {
                 let arch = await manager.arch
                 let voices = try await manager.availableVoices()
                 self.manager = manager
-                self.arch = arch
-                self.voices = voices
                 if !voices.contains(selectedVoice) { selectedVoice = voices.first ?? "alba" }
-                loadSeconds = dt
                 isReady = true
-                status = "\(model.rawValue) ready — \(String(format: "%.2f", dt)) s load, mimi \(mimi.rawValue)"
                 if let arch {
-                    appendLog(
+                    log(
                         "loaded in \(String(format: "%.2f", dt)) s: d_model \(arch.dModel), \(arch.numLayers) layers, "
                             + "\(arch.numHeads)/\(arch.numKvHeads) heads, flow \(arch.flowType), eos \(arch.eosThreshold), "
-                            + "\(voices.count) voices")
+                            + "\(voices.count) voices, mimi \(mimi.rawValue)")
                 }
             } catch {
-                status = "Load failed: \(error)"
-                appendLog("load failed: \(error)")
+                log("load failed: \(error)")
             }
             isLoading = false
         }
     }
 
-    func setMimiPrecision(_ precision: PocketTtsSmallMimiPrecision) {
-        guard precision != mimiPrecision else { return }
-        stop()
-        mimiPrecision = precision
-        isReady = false
-        manager = nil
-        status = "Press Load for \(selectedModel.rawValue) with Mimi \(precision.rawValue)."
-    }
-
-    func selectModel(_ model: PocketTtsSmallModel) {
-        guard model != selectedModel else { return }
-        stop()
-        selectedModel = model
-        isReady = false
-        manager = nil
-        arch = nil
-        loadSeconds = nil
-        status = "Press Load for \(model.rawValue)."
-    }
-
     // MARK: - Speaking
 
-    /// Enqueue the text box on the live session; a session is opened on first
-    /// use (voice KV snapshot + MLState), then stays warm for further sentences.
+    /// Enqueue `text` on the live session; a session is opened on first use
+    /// (voice KV snapshot + MLState), then stays warm for further sentences.
+    /// Rejects re-entry while a session is being opened or an utterance is
+    /// pending, so a double click cannot open two sessions.
     func speak() {
         let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !line.isEmpty, let manager else { return }
+        guard !line.isEmpty, let manager, !isSpeaking else { return }
+        isSpeaking = true
         Task {
             do {
                 if session == nil {
+                    openingSession = true
+                    defer { openingSession = false }
                     try player.begin()
                     let s = try await manager.makeSession(voice: selectedVoice)
                     session = s
                     sessionBase = nextUtterance
                     startConsumer(s)
-                    appendLog("── session opened (voice \(selectedVoice))")
+                    log("── session opened (voice \(selectedVoice))")
                 }
                 let idx = nextUtterance
                 nextUtterance += 1
                 pending[idx] = (Date(), nil, nil, 0)
                 utterances.append(UtteranceStats(id: idx, text: line))
                 if utterances.count > maxRows { utterances.removeFirst(utterances.count - maxRows) }
-                isSpeaking = true
                 session?.enqueue(line)
-                appendLog("[\(idx)] enqueued: \(line)")
+                log("[\(idx)] enqueued: \(line)")
             } catch {
-                status = "Speak failed: \(error)"
-                appendLog("speak failed: \(error)")
+                log("speak failed: \(error)")
+                isSpeaking = false
             }
         }
     }
@@ -225,7 +197,7 @@ final class DemoModel: ObservableObject {
                     if var p = self.pending[idx] {
                         if p.firstFrameAt == nil {
                             p.firstFrameAt = now
-                            self.appendLog(
+                            self.log(
                                 "[\(idx)] first audio after \(String(format: "%.0f", now.timeIntervalSince(p.enqueuedAt) * 1000)) ms"
                             )
                         }
@@ -235,9 +207,16 @@ final class DemoModel: ObservableObject {
                     }
                 }
             } catch {
-                self?.appendLog("stream error: \(error)")
+                self?.log("stream error: \(error)")
             }
-            self?.isSpeaking = false
+            // The stream is over (finished, cancelled or failed): drop the dead
+            // session so the next speak() opens a fresh one instead of
+            // enqueueing into a loop that has exited.
+            guard let self, self.session === session else { return }
+            self.session = nil
+            self.consumer = nil
+            self.pending.removeAll()
+            self.isSpeaking = false
         }
     }
 
@@ -247,12 +226,11 @@ final class DemoModel: ObservableObject {
         }
     }
 
-    /// Called from the view on a timer: refresh the table from `pending` and
-    /// log a summary once an utterance has been quiet for 300 ms.
+    /// Called from the view on a timer: refresh the rows from `pending`, log a
+    /// summary once an utterance has been quiet for 300 ms, give up on one
+    /// that never produced a frame, and clear the highlight when playback is over.
     func tick() {
-        if activeReference != nil, !isSpeaking, player.playedFrames >= player.scheduledFrames {
-            activeReference = nil
-        }
+        let now = Date()
         for (idx, p) in pending {
             update(idx) {
                 $0.frames = p.frames
@@ -261,18 +239,25 @@ final class DemoModel: ObservableObject {
                     if let l = p.lastFrameAt { $0.generationSeconds = l.timeIntervalSince(f) }
                 }
             }
-            guard let last = p.lastFrameAt, Date().timeIntervalSince(last) > 0.3,
-                let stats = utterances.first(where: { $0.id == idx })
-            else { continue }
-            pending.removeValue(forKey: idx)
-            appendLog(
-                "[\(idx)] \(stats.frames) frames = \(String(format: "%.2f", stats.audioSeconds)) s audio generated in "
-                    + "\(String(format: "%.0f", stats.generationSeconds * 1000)) ms → \(String(format: "%.1f", stats.realTimeFactor))x real time, "
-                    + "\(String(format: "%.2f", stats.msPerFrame)) ms per 80 ms frame")
-            if pending.isEmpty {
-                isSpeaking = false
-                status = "Ready — \(selectedModel.rawValue), voice \(selectedVoice)"
+            if let last = p.lastFrameAt, now.timeIntervalSince(last) > 0.3, let first = p.firstFrameAt {
+                pending.removeValue(forKey: idx)
+                let seconds = Double(p.frames) * 0.08
+                let gen = last.timeIntervalSince(first)
+                log(
+                    "[\(idx)] \(p.frames) frames = \(String(format: "%.2f", seconds)) s audio generated in "
+                        + "\(String(format: "%.0f", gen * 1000)) ms → \(String(format: "%.1f", gen > 0 ? seconds / gen : 0))x real time, "
+                        + "\(String(format: "%.2f", p.frames > 1 ? gen * 1000 / Double(p.frames - 1) : 0)) ms per 80 ms frame"
+                )
+            } else if p.firstFrameAt == nil, now.timeIntervalSince(p.enqueuedAt) > firstFrameTimeout {
+                pending.removeValue(forKey: idx)
+                log("[\(idx)] gave up: no audio after \(Int(firstFrameTimeout)) s")
             }
+        }
+        if pending.isEmpty, !openingSession { isSpeaking = false }
+        if activeReference != nil, pending.isEmpty, !openingSession, !isSpeaking,
+            player.playedFrames >= player.scheduledFrames
+        {
+            activeReference = nil
         }
     }
 
@@ -287,7 +272,6 @@ final class DemoModel: ObservableObject {
         player.stop()
         isSpeaking = false
         activeReference = nil
-        if isReady { status = "Stopped." }
     }
 
     // MARK: - PyTorch references
@@ -306,34 +290,38 @@ final class DemoModel: ObservableObject {
         guard
             let url = Bundle.module.url(forResource: clip.file, withExtension: nil, subdirectory: "Reference")
         else {
-            appendLog("reference \(clip.file) missing from the bundle")
+            log("reference \(clip.file) missing from the bundle")
             return
         }
         do {
             stop()
             try player.begin()
             let samples = try Self.readMono24k(url)
-            let frame = Int(StreamPlayer.sampleRate * 0.08)
-            var start = 0
-            while start < samples.count {
-                let end = min(samples.count, start + frame)
-                player.enqueue(Array(samples[start..<end]))
-                start = end
+            if playAudio {
+                let frame = Int(StreamPlayer.sampleRate * 0.08)
+                var start = 0
+                while start < samples.count {
+                    let end = min(samples.count, start + frame)
+                    player.enqueue(Array(samples[start..<end]))
+                    start = end
+                }
             }
             activeReference = (clip.file, .pytorch)
-            status = "Playing PyTorch reference — voice \(clip.voice)"
-            appendLog(
+            log(
                 "── PyTorch reference (\(clip.voice), \(String(format: "%.2f", Double(samples.count) / StreamPlayer.sampleRate)) s): \(clip.text)"
             )
         } catch {
-            appendLog("reference playback failed: \(error)")
+            log("reference playback failed: \(error)")
         }
     }
 
     /// Speak the reference sentence with the reference voice through Core ML.
     func speakReference(_ clip: ReferenceClip) {
-        guard isReady else { return }
-        changeVoice(clip.voice)
+        guard isReady, !isSpeaking else { return }
+        if clip.voice != selectedVoice {
+            stop()
+            selectedVoice = clip.voice
+        }
         text = clip.text
         activeReference = (clip.file, .coreml)
         speak()
@@ -341,8 +329,8 @@ final class DemoModel: ObservableObject {
 
     private static func readMono24k(_ url: URL) throws -> [Float] {
         let file = try AVAudioFile(forReading: url)
-        let format = AVAudioFormat(standardFormatWithSampleRate: StreamPlayer.sampleRate, channels: 1)!
-        guard let converter = AVAudioConverter(from: file.processingFormat, to: format),
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: StreamPlayer.sampleRate, channels: 1),
+            let converter = AVAudioConverter(from: file.processingFormat, to: format),
             let input = AVAudioPCMBuffer(
                 pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length))
         else {
@@ -368,17 +356,7 @@ final class DemoModel: ObservableObject {
         }
         if let error { throw error }
         let n = Int(output.frameLength)
-        return Array(UnsafeBufferPointer(start: output.floatChannelData![0], count: n))
-    }
-
-    func changeVoice(_ voice: String) {
-        guard voice != selectedVoice else { return }
-        stop()
-        selectedVoice = voice
-    }
-
-    func clearStats() {
-        utterances.removeAll()
-        log.removeAll()
+        guard let channel = output.floatChannelData?[0] else { return [] }
+        return Array(UnsafeBufferPointer(start: channel, count: n))
     }
 }
