@@ -34,14 +34,20 @@ public actor PocketTtsSmallSession {
     private let voicePosition: Int
     private let temperature: Float
     private var rng: SeededRNG
+    /// Text normalization applied to each enqueued text before chunking (Phonon:
+    /// Gradium's English normalizer, numbers / currency / emails / URLs / symbols).
+    /// nil keeps the kyutai behaviour (character replacements only).
+    private let textNormalizer: (@Sendable (String) -> String)?
 
     init(
         engine: PocketTtsSmallEngine,
         constants: PocketTtsSmallConstants,
         voiceSnapshot: PocketTtsSmallEngine.Fp16Snapshot,
         temperature: Float?,
-        seed: UInt64
+        seed: UInt64,
+        textNormalizer: (@Sendable (String) -> String)? = nil
     ) {
+        self.textNormalizer = textNormalizer
         self.engine = engine
         self.constants = constants
         self.voiceSnapshot = voiceSnapshot
@@ -86,7 +92,8 @@ public actor PocketTtsSmallSession {
         do {
             for await raw in textStream {
                 if Task.isCancelled { break }
-                let text = Self.replaceUntrainedCharacters(raw).trimmingCharacters(in: .whitespacesAndNewlines)
+                let normalized = textNormalizer.map { $0(raw) } ?? Self.replaceUntrainedCharacters(raw)
+                let text = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !text.isEmpty else { continue }
                 let cacheLen = constants.state.kvCacheLen
                 let maxTokens = try PocketTtsSynthesizer.effectiveMaxTokensPerChunk(
@@ -129,8 +136,9 @@ public actor PocketTtsSmallSession {
         let cacheLen = constants.state.kvCacheLen
         let maxGenLen = PocketTtsSynthesizer.boundedGenerationFrameCount(
             text: normalized, cachePosition: prefilled, cacheLen: cacheLen)
-        let totalFramesAfterEos = framesAfterEos + PocketTtsConstants.extraFramesAfterDetection
         let arch = constants.arch
+        let totalFramesAfterEos = framesAfterEos + arch.framesAfterEosExtra
+        let fadeRamp = arch.fadeInRamp
         var sequence = constants.bosEmbedding
         var eosStep: Int?
         let scale = sqrtf(temperature)
@@ -153,9 +161,14 @@ public actor PocketTtsSmallSession {
             if let eos = eosStep, step >= eos + totalFramesAfterEos {
                 break
             }
+            var samples = frame.samples
+            if step == 0, !fadeRamp.isEmpty {
+                // every chunk starts a fresh Mimi state; fade its cold-start click
+                for i in 0..<min(fadeRamp.count, samples.count) { samples[i] *= fadeRamp[i] }
+            }
             frameContinuation.yield(
                 PocketTtsSynthesizer.AudioFrame(
-                    samples: frame.samples, frameIndex: step, chunkIndex: chunkIndex,
+                    samples: samples, frameIndex: step, chunkIndex: chunkIndex,
                     chunkCount: chunkCount, utteranceIndex: utteranceIndex))
             sequence = frame.latent
         }

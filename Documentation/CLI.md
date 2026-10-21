@@ -28,6 +28,10 @@ swift run fluidaudiocli tts "Hello from FluidAudio" \
   --backend pocket \
   --output out-pocket.wav
 
+# Gradium Phonon 31m on the Neural Engine (macOS 15+); --voice en_us_Easton, characters_The Snow Queen, ...
+swift run -c release fluidaudiocli tts "Your order of $42.50 ships today." \
+  --backend pocket-small --model phonon --voice en_gb_Maeve --output phonon.wav
+
 # Multilingual G2P benchmark
 swift run fluidaudiocli g2p-benchmark
 ```
