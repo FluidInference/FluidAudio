@@ -10,6 +10,7 @@ struct ContentView: View {
             header
             Divider()
             controls
+            statusLine
             textEntry
             OceanWaveView(meter: model.player.meter)
             if !model.references.isEmpty { referenceStrip }
@@ -60,8 +61,11 @@ struct ContentView: View {
             .disabled(model.isLoading)
             Spacer()
             if model.isLoading { ProgressView().controlSize(.small) }
-            Text(model.status).font(.caption).foregroundStyle(Nord.green).lineLimit(1).truncationMode(.middle)
         }
+    }
+
+    private var statusLine: some View {
+        Text(model.status).font(.caption).foregroundStyle(Nord.green).lineLimit(1).truncationMode(.middle)
     }
 
     private var textEntry: some View {
@@ -100,10 +104,10 @@ struct ContentView: View {
             Text("Reference takes — upstream PyTorch fp32 on the CPU (18m) vs Core ML, same voice and text")
                 .font(.caption).foregroundStyle(Nord.textDim)
             ForEach(model.references) { clip in
-                HStack(spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
                     Text(clip.voice).font(.caption.bold()).foregroundStyle(Nord.purple).frame(
                         width: 60, alignment: .leading)
-                    Text(clip.text).font(.caption).lineLimit(1).truncationMode(.tail)
+                    Text(clip.text).font(.caption).fixedSize(horizontal: false, vertical: true)
                     Spacer()
                     Button("▶ PyTorch") { model.playReference(clip) }
                     Button("▶ Core ML") { model.speakReference(clip) }.disabled(!model.isReady)
@@ -113,20 +117,46 @@ struct ContentView: View {
         }
     }
 
+    /// Content-sized rows (no empty filler rows), full text, RTFx.
     private var statsTable: some View {
-        Table(model.utterances.reversed()) {
-            TableColumn("#") { u in Text("\(u.id)").monospacedDigit() }.width(28)
-            TableColumn("text") { u in Text(u.text).lineLimit(1) }
-            TableColumn("1st audio") { u in
-                Text(u.firstAudioMs.map { String(format: "%.0f ms", $0) } ?? "…").monospacedDigit()
-            }.width(90)
-            TableColumn("frames") { u in Text("\(u.frames)").monospacedDigit() }.width(60)
-            TableColumn("audio") { u in Text(String(format: "%.2f s", u.audioSeconds)).monospacedDigit() }.width(70)
-            TableColumn("ms / frame") { u in Text(String(format: "%.2f", u.msPerFrame)).monospacedDigit() }.width(80)
-            TableColumn("speed") { u in Text(String(format: "%.1fx", u.realTimeFactor)).monospacedDigit() }.width(70)
+        VStack(spacing: 0) {
+            statsRow(
+                id: "#", text: "text", first: "1st audio", frames: "frames", audio: "audio",
+                perFrame: "ms / frame", rtfx: "RTFx", header: true)
+            Divider().overlay(Nord.border)
+            if model.utterances.isEmpty {
+                Text("No utterances yet.").font(.caption).foregroundStyle(Nord.textDim).padding(8)
+            }
+            ForEach(model.utterances.reversed()) { u in
+                statsRow(
+                    id: "\(u.id)", text: u.text,
+                    first: u.firstAudioMs.map { String(format: "%.0f ms", $0) } ?? "…",
+                    frames: "\(u.frames)", audio: String(format: "%.2f s", u.audioSeconds),
+                    perFrame: String(format: "%.2f", u.msPerFrame),
+                    rtfx: String(format: "%.1fx", u.realTimeFactor), header: false)
+            }
         }
-        .frame(minHeight: 110, maxHeight: 180)
         .nordPanel()
+    }
+
+    private func statsRow(
+        id: String, text: String, first: String, frames: String, audio: String, perFrame: String, rtfx: String,
+        header: Bool
+    ) -> some View {
+        let font: Font = header ? .caption.bold() : .caption.monospacedDigit()
+        let color = header ? Nord.textDim : Nord.text
+        return HStack(alignment: .top, spacing: 8) {
+            Text(id).font(font).foregroundStyle(color).frame(width: 24, alignment: .leading)
+            Text(text).font(header ? font : .caption).foregroundStyle(header ? color : Nord.textBright)
+                .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+            Text(first).font(font).foregroundStyle(color).frame(width: 62, alignment: .trailing)
+            Text(frames).font(font).foregroundStyle(color).frame(width: 48, alignment: .trailing)
+            Text(audio).font(font).foregroundStyle(color).frame(width: 54, alignment: .trailing)
+            Text(perFrame).font(font).foregroundStyle(color).frame(width: 66, alignment: .trailing)
+            Text(rtfx).font(font).foregroundStyle(color).frame(width: 50, alignment: .trailing)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
     }
 
     private var logView: some View {
