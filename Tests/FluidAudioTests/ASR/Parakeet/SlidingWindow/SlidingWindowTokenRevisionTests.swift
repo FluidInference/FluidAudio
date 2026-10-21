@@ -75,6 +75,42 @@ final class SlidingWindowTokenRevisionTests: XCTestCase {
         XCTAssertEqual(cursor.ordinal, 1)
     }
 
+    /// Right context longer than the chunk: 1 s chunk, 2 s left and right, 3 s of
+    /// audio. The regular window reads 0..<48000; the drain reads 0..<32000 while
+    /// its center advances. That is valid lineage and still ends in one terminal.
+    func testDrainMayReadLessRightContextWhileItsCenterAdvances() throws {
+        var cursor = SlidingWindowTokenCursor()
+        _ = try cursor.next(
+            tokens: [], previous: 0, retained: 0, stable: 0, window: 0..<48000, center: 0..<16000)
+        let drain = try cursor.next(
+            tokens: [], previous: 0, retained: 0, stable: 0, window: 0..<32000, center: 16000..<32000)
+        let terminal = try cursor.finish()
+
+        XCTAssertEqual(drain.revision.window, 0..<32000)
+        XCTAssertTrue(terminal.revision.isTerminal)
+        XCTAssertEqual(terminal.revision.ordinal, 3)
+    }
+
+    func testRepeatedStartEndsTheStrictStreamInsteadOfRestartingItsLineage() async throws {
+        let manager = SlidingWindowAsrManager()
+        let updates = await manager.tokenUpdates
+        await manager.beginStreamingJob()
+        try await manager.publishTokenUpdate(
+            tokens: [token("a", 1)], previous: 0, retained: 0, stable: 1,
+            window: 0..<22400, center: 0..<16000)
+        await manager.beginStreamingJob()
+        try await manager.publishTokenUpdate(
+            tokens: [token("b", 2)], previous: 0, retained: 0, stable: 1,
+            window: 0..<22400, center: 0..<16000)
+
+        var ordinals: [Int] = []
+        do {
+            for try await update in updates { ordinals.append(update.revision.ordinal) }
+            XCTFail("a repeated start must end the strict stream")
+        } catch SlidingWindowTokenStreamError.unavailableJob {}
+        XCTAssertEqual(ordinals, [1], "no second ordinal 1 from a restarted lineage")
+    }
+
     func testManagerCancellationIsErrorNotSuccessfulTerminal() async throws {
         let manager = SlidingWindowAsrManager()
         let updates = await manager.tokenUpdates

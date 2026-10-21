@@ -27,6 +27,7 @@ public actor SlidingWindowAsrManager {
     private var publishedStableTokenCount = 0
     private var tokenSubscriptionClosed = false
     private var hasAcceptedAudio = false
+    private var hasStartedStreaming = false
 
     /// One subscriber per manager/job. Subscribe before feeding audio. Failures
     /// terminate this stream rather than silently resuming across lost windows.
@@ -54,6 +55,14 @@ public actor SlidingWindowAsrManager {
         tokenContinuation = nil
         tokenSubscriptionClosed = true
         // Do not let a late subscriber reopen lineage without its prefix.
+    }
+
+    /// A strict stream belongs to one job. Another start would restart its lineage
+    /// under the same subscriber, so that stream ends instead. Runs before any
+    /// suspension, so concurrent starts cannot both pass.
+    func beginStreamingJob() {
+        if hasStartedStreaming { failTokenStream(SlidingWindowTokenStreamError.unavailableJob) }
+        hasStartedStreaming = true
     }
 
     private func failTokenStream(_ error: Error) {
@@ -223,6 +232,7 @@ public actor SlidingWindowAsrManager {
 
         logger.info("Starting sliding-window ASR engine for source: \(String(describing: source))...")
 
+        beginStreamingJob()
         self.audioSource = source
 
         // Create decoder state with correct layer count for this model

@@ -110,6 +110,34 @@ extension AsrManager {
         return floored < pieces.count ? floored : nil
     }
 
+    /// How many leading current tokens re-emit the stable start of a word the
+    /// floor split. The re-decode starts at the word, not at the floor, so that
+    /// copy must go before reconciliation or the stable part would repeat.
+    /// Timestamps are global frames. Pure, for testability.
+    nonisolated internal static func reemittedStableWordHead(
+        previousTokens: [Int],
+        previousTimestamps: [Int],
+        wordStart: Int,
+        flooredStart: Int,
+        currentTokens: [Int],
+        currentTimestamps: [Int],
+        frameTolerance: Int = 2 * redecodeEmissionJitterFrames
+    ) -> Int {
+        guard wordStart < flooredStart, flooredStart <= previousTokens.count,
+            previousTimestamps.count == previousTokens.count,
+            currentTimestamps.count == currentTokens.count
+        else { return 0 }
+        let head = flooredStart - wordStart
+        guard currentTokens.count >= head else { return 0 }
+        for offset in 0..<head {
+            let previous = wordStart + offset
+            guard currentTokens[offset] == previousTokens[previous],
+                abs(currentTimestamps[offset] - previousTimestamps[previous]) <= frameTolerance
+            else { return 0 }
+        }
+        return head
+    }
+
     /// The words of `pieces[0..<upTo]` as (core text, start frame), for matching
     /// re-emitted words at the seam. Pure.
     nonisolated internal static func words(
@@ -520,6 +548,20 @@ extension AsrManager {
         if redecodePlan.initialTimeIndexOverride == 0, let trailingWordStart,
             let previousTimestamps = previousTokenTimestamps
         {
+            let stableCopy = Self.reemittedStableWordHead(
+                previousTokens: previousTokens,
+                previousTimestamps: previousTimestamps,
+                wordStart: Self.trailingWordStartIndex(pieces: previousTokens.map { vocabulary[$0] ?? "" })
+                    ?? trailingWordStart,
+                flooredStart: trailingWordStart,
+                currentTokens: currentTokens,
+                currentTimestamps: currentTimestamps.map { $0 + globalFrameOffset }
+            )
+            if stableCopy > 0 {
+                currentTokens.removeFirst(stableCopy)
+                currentTimestamps.removeFirst(stableCopy)
+                currentConfidences.removeFirst(min(stableCopy, currentConfidences.count))
+            }
             let seam = Self.reconcileFinalWindowSeam(
                 previousTokens: previousTokens,
                 previousTimestamps: previousTimestamps,

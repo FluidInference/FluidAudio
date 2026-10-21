@@ -86,7 +86,8 @@ struct SlidingWindowTokenCursor {
             stable <= total.partialValue, !terminal || stable == total.partialValue,
             window.lowerBound >= 0, window.lowerBound <= center.lowerBound,
             center.upperBound <= window.upperBound,
-            center.lowerBound >= self.center.lowerBound, window.upperBound >= self.window.upperBound,
+            // A drain reads less right context, so only the center must advance.
+            center.lowerBound >= self.center.lowerBound, center.upperBound >= self.center.upperBound,
             tokens.allSatisfy({
                 $0.startTime.isFinite && $0.endTime.isFinite && $0.startTime >= 0
                     && $0.endTime >= $0.startTime && $0.confidence.isFinite && (0...1).contains($0.confidence)
