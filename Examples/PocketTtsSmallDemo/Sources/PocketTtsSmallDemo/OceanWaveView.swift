@@ -60,9 +60,9 @@ struct OceanWaveView: View {
         }
         let layers:
             [(wavelength: CGFloat, speed: Double, phase: Double, height: CGFloat, color: Color, alpha: Double)] = [
-                (w / 2.2, 0.9, 0.0, 0.42, Nord.seaDeep, 1.0),
+                (w / 2.2, 0.9, 0.0, 0.42, Nord.seaLight, 1.0),
                 (w / 3.6, -1.4, 1.7, 0.32, Nord.seaMid, 1.0),
-                (w / 5.5, 2.3, 3.1, 0.22, Nord.seaLight, 1.0),
+                (w / 5.5, 2.3, 3.1, 0.22, Nord.seaDeep, 1.0),
             ]
         for layer in layers {
             var path = Path()
