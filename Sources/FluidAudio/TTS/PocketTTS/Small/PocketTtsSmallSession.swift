@@ -5,7 +5,8 @@ import Foundation
 /// A streaming session over a small Pocket TTS model: enqueue text, receive
 /// 80 ms `AudioFrame`s. Text is chunked with the shared Pocket TTS chunker;
 /// every chunk re-injects the voice KV snapshot, prefills the text once and
-/// then runs one fused `generate_decode` dispatch per frame on the ANE.
+/// then generates one frame per engine call (`generate` on the ANE + the fp32
+/// Mimi decoder on the CPU by default, or one fused `generate_decode` dispatch).
 @available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
 public actor PocketTtsSmallSession {
 

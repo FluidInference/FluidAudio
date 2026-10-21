@@ -389,11 +389,15 @@ public struct TTS {
                 }
             case "--mimi":
                 if i + 1 < arguments.count {
-                    switch arguments[i + 1].lowercased() {
-                    case "fp32", "cpu": pocketSmallMimi = .fp32
-                    case "fp16", "fp16-fused", "fused", "ane": pocketSmallMimi = .fp16Fused
-                    default:
-                        logger.error("Unknown --mimi '\(arguments[i + 1])'. Supported: fp32 (default), fp16-fused")
+                    let raw = arguments[i + 1].lowercased()
+                    if let parsed = PocketTtsSmallMimiPrecision(rawValue: raw) {
+                        pocketSmallMimi = parsed
+                    } else if raw == "fp16" || raw == "fused" {
+                        pocketSmallMimi = .fp16Fused
+                    } else {
+                        logger.error(
+                            "Unknown --mimi '\(arguments[i + 1])'. Supported: "
+                                + PocketTtsSmallMimiPrecision.allCases.map(\.rawValue).joined(separator: ", "))
                         return
                     }
                     i += 1
@@ -889,7 +893,8 @@ public struct TTS {
         do {
             let tStart = Date()
             let pocketVoice = voice == TtsConstants.recommendedVoice ? PocketTtsConstants.defaultVoice : voice
-            // The fused package is one graph; the FlowLM routing decides it.
+            // --compute-units steers the MLState functions (prefill / generate / generate_decode);
+            // the fp32 Mimi decoder of the default mode is always CPU.
             let units: MLComputeUnits = computeUnits.flowLM ?? .cpuAndNeuralEngine
             let manager = PocketTtsSmallManager(
                 model: model, defaultVoice: pocketVoice, computeUnits: units, mimiPrecision: mimiPrecision)

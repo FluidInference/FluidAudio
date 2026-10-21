@@ -1,3 +1,4 @@
+import AVFoundation
 import FluidAudio
 import Foundation
 
@@ -5,6 +6,15 @@ import Foundation
 struct LogLine: Identifiable {
     let id: Int
     let text: String
+}
+
+/// A bundled upstream PyTorch take (`Reference/references.json`): one voice,
+/// one sentence, for A/B against Core ML on the same text and voice.
+struct ReferenceClip: Identifiable, Decodable {
+    let voice: String
+    let file: String
+    let text: String
+    var id: String { file }
 }
 
 /// Per-utterance measurements.
@@ -33,6 +43,8 @@ final class DemoModel: ObservableObject {
     @Published private(set) var loadSeconds: Double?
     @Published private(set) var arch: PocketTtsSmallArch?
     @Published private(set) var utterances: [UtteranceStats] = []
+    /// PyTorch reference takes shipped with the demo (empty if the bundle lacks them).
+    let references: [ReferenceClip] = DemoModel.loadReferences()
     @Published private(set) var log: [LogLine] = []
 
     let player = StreamPlayer()
@@ -46,13 +58,14 @@ final class DemoModel: ObservableObject {
     private var pending: [Int: (enqueuedAt: Date, firstFrameAt: Date?, lastFrameAt: Date?, frames: Int)] = [:]
     private var finished: Set<Int> = []
     var playAudio = true
-    /// `--mimi-fp16`: the fused all-ANE path (faster, −72 dBFS hiss) instead of
-    /// the default fp32 Mimi decoder on the CPU.
-    var mimiPrecision: PocketTtsSmallMimiPrecision = .fp32
+    /// `.fp32` (default): FlowLM on the ANE, Mimi fp32 on the CPU. `.fp16Fused`
+    /// (`--mimi-fp16` or the picker): one all-ANE dispatch, faster, with the
+    /// −72 dBFS hiss — switch live to hear the difference. Needs a reload.
+    @Published private(set) var mimiPrecision: PocketTtsSmallMimiPrecision = .fp32
     private var nextUtterance = 0
     private var logCounter = 0
 
-    /// `--model 7m` picks the model, `--mimi-fp16` the fused all-ANE decoder,
+    /// `--model 7m` picks the model, `--mimi fp16-fused` (or `--mimi-fp16`) the fused all-ANE decoder,
     /// `--autorun` loads it and speaks the text box on launch (used by the
     /// showcase script and for headless verification).
     func applyLaunchArguments(_ args: [String]) {
@@ -72,6 +85,9 @@ final class DemoModel: ObservableObject {
                 playAudio = false
             case "--mimi-fp16":
                 mimiPrecision = .fp16Fused
+            case "--mimi" where i + 1 < args.count:
+                if let m = PocketTtsSmallMimiPrecision(rawValue: args[i + 1]) { mimiPrecision = m }
+                i += 1
             default: break
             }
             i += 1
@@ -130,6 +146,15 @@ final class DemoModel: ObservableObject {
             }
             isLoading = false
         }
+    }
+
+    func setMimiPrecision(_ precision: PocketTtsSmallMimiPrecision) {
+        guard precision != mimiPrecision else { return }
+        stop()
+        mimiPrecision = precision
+        isReady = false
+        manager = nil
+        status = "Press Load for \(selectedModel.rawValue) with Mimi \(precision.rawValue)."
     }
 
     func selectModel(_ model: PocketTtsSmallModel) {
@@ -244,6 +269,85 @@ final class DemoModel: ObservableObject {
         player.stop()
         isSpeaking = false
         if isReady { status = "Stopped." }
+    }
+
+    // MARK: - PyTorch references
+
+    private static func loadReferences() -> [ReferenceClip] {
+        guard let url = Bundle.module.url(forResource: "references", withExtension: "json", subdirectory: "Reference"),
+            let data = try? Data(contentsOf: url),
+            let clips = try? JSONDecoder().decode([ReferenceClip].self, from: data)
+        else { return [] }
+        return clips
+    }
+
+    /// Play a bundled PyTorch take through the same player (and sea view) as
+    /// the generated audio, as 80 ms frames.
+    func playReference(_ clip: ReferenceClip) {
+        guard
+            let url = Bundle.module.url(forResource: clip.file, withExtension: nil, subdirectory: "Reference")
+        else {
+            appendLog("reference \(clip.file) missing from the bundle")
+            return
+        }
+        do {
+            stop()
+            try player.begin()
+            let samples = try Self.readMono24k(url)
+            let frame = Int(StreamPlayer.sampleRate * 0.08)
+            var start = 0
+            while start < samples.count {
+                let end = min(samples.count, start + frame)
+                player.enqueue(Array(samples[start..<end]))
+                start = end
+            }
+            status = "Playing PyTorch reference — voice \(clip.voice)"
+            appendLog(
+                "── PyTorch reference (\(clip.voice), \(String(format: "%.2f", Double(samples.count) / StreamPlayer.sampleRate)) s): \(clip.text)"
+            )
+        } catch {
+            appendLog("reference playback failed: \(error)")
+        }
+    }
+
+    /// Speak the reference sentence with the reference voice through Core ML.
+    func speakReference(_ clip: ReferenceClip) {
+        guard isReady else { return }
+        changeVoice(clip.voice)
+        text = clip.text
+        speak()
+    }
+
+    private static func readMono24k(_ url: URL) throws -> [Float] {
+        let file = try AVAudioFile(forReading: url)
+        let format = AVAudioFormat(standardFormatWithSampleRate: StreamPlayer.sampleRate, channels: 1)!
+        guard let converter = AVAudioConverter(from: file.processingFormat, to: format),
+            let input = AVAudioPCMBuffer(
+                pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length))
+        else {
+            throw NSError(
+                domain: "PocketTtsSmallDemo", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "cannot read \(url.lastPathComponent)"])
+        }
+        try file.read(into: input)
+        let capacity =
+            AVAudioFrameCount(Double(input.frameLength) * StreamPlayer.sampleRate / file.processingFormat.sampleRate)
+            + 1
+        guard let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return [] }
+        var consumed = false
+        var error: NSError?
+        converter.convert(to: output, error: &error) { _, status in
+            if consumed {
+                status.pointee = .endOfStream
+                return nil
+            }
+            consumed = true
+            status.pointee = .haveData
+            return input
+        }
+        if let error { throw error }
+        let n = Int(output.frameLength)
+        return Array(UnsafeBufferPointer(start: output.floatChannelData![0], count: n))
     }
 
     func changeVoice(_ voice: String) {

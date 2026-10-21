@@ -86,7 +86,7 @@ tilt. The same graph in fp16 on the CPU has the same floor, so it is fp16
 rounding of O(1) activations against O(1e-3) audio, not an ANE fault; keeping the
 SEANet ops in fp32 inside the stateful program is rejected by the Core ML planner
 (bad_cast, status −14), hence the separate fp32 model. The fused path keeps the
-Mimi KV caches in the MLState and passes a one-hot `phase` input per frame
+Mimi KV caches in the MLState; both Mimi models take a one-hot `phase` input per frame
 (10 phases, from the frame counter) that selects the Mimi cache-write rows,
 relative RoPE rotations and mask tables — the graph has no data-dependent integer
 arithmetic because the ANE miscomputes it. Every dimension comes from the pack's

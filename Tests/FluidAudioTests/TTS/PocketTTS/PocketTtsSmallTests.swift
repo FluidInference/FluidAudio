@@ -88,6 +88,49 @@ final class PocketTtsSmallTests: XCTestCase {
 
     /// End to end on a cached pack: shipped voice, short sentence, expects EOS
     /// and 1920 samples per frame. Skips when no small-model pack is cached.
+    func testMimiPrecisionRawValues() {
+        XCTAssertEqual(PocketTtsSmallMimiPrecision.fp32.rawValue, "fp32")
+        XCTAssertEqual(PocketTtsSmallMimiPrecision.fp16Fused.rawValue, "fp16-fused")
+        XCTAssertEqual(PocketTtsSmallMimiPrecision(rawValue: "fp16-fused"), .fp16Fused)
+        XCTAssertEqual(PocketTtsSmallMimiPrecision.allCases.count, 2)
+    }
+
+    /// Every state input of the fp32 Mimi I/O model has a same-sized `<name>_out`,
+    /// and latent / phase / audio match `arch.json` — what the engine relies on.
+    func testMimiDecoderIOContract() throws {
+        guard let pack = Self.cachedPack() else { throw XCTSkip("no small Pocket TTS pack in the local cache") }
+        let constants = try PocketTtsSmallConstants.load(from: pack)
+        let config = MLModelConfiguration()
+        config.computeUnits = .cpuOnly
+        let mimi = try MLModel(
+            contentsOf: pack.appendingPathComponent(ModelNames.PocketTTS.mimiDecoderFile), configuration: config)
+        let inputs = mimi.modelDescription.inputDescriptionsByName
+        let outputs = mimi.modelDescription.outputDescriptionsByName
+        func count(_ d: MLFeatureDescription?) -> Int? { d?.multiArrayConstraint?.shape.map(\.intValue).reduce(1, *) }
+        XCTAssertEqual(count(inputs["latent"]), constants.arch.ldim)
+        XCTAssertEqual(count(inputs["phase"]), constants.state.mimiPhases)
+        XCTAssertEqual(count(outputs["audio"]), constants.arch.frameSize)
+        var stateInputs = 0
+        for (name, desc) in inputs where name != "latent" && name != "phase" {
+            stateInputs += 1
+            XCTAssertEqual(count(outputs["\(name)_out"]), count(desc), "state input \(name) needs a same-sized _out")
+        }
+        XCTAssertGreaterThan(stateInputs, constants.state.mimiConvIO.count)  // conv I/O + Mimi KV caches
+    }
+
+    private static func cachedPack() -> URL? {
+        guard let base = try? TtsCacheDirectory.ensure() else { return nil }
+        let repoDir = base.appendingPathComponent(PocketTtsConstants.defaultModelsSubdirectory)
+            .appendingPathComponent(Repo.pocketTts.folderName)
+        // Prefer the smallest pack: its first-time ANE compile is ~10 s vs ~150 s for 18m.
+        let preferred: [PocketTtsSmallModel] = [.english2m, .english7m, .english18m] + PocketTtsSmallModel.allCases
+        return preferred.map { repoDir.appendingPathComponent($0.repoSubdirectory) }.first { pack in
+            PocketTtsSmallDownloader.requiredFiles.allSatisfy {
+                FileManager.default.fileExists(atPath: pack.appendingPathComponent($0).path)
+            }
+        }
+    }
+
     func testSynthesizeWithCachedPack() async throws {
         guard #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) else { throw XCTSkip("MLState requires macOS 15+") }
         let base = try TtsCacheDirectory.ensure()
@@ -105,24 +148,27 @@ final class PocketTtsSmallTests: XCTestCase {
         else {
             throw XCTSkip("no small Pocket TTS pack in the local cache")
         }
-        let manager = PocketTtsSmallManager(model: model)
-        try await manager.load(from: repoDir.appendingPathComponent(model.repoSubdirectory))
-        let voices = try await manager.availableVoices()
-        XCTAssertTrue(voices.contains("alba"), "voices: \(voices)")
+        for precision in PocketTtsSmallMimiPrecision.allCases {
+            let manager = PocketTtsSmallManager(model: model, mimiPrecision: precision)
+            try await manager.load(from: repoDir.appendingPathComponent(model.repoSubdirectory))
+            let voices = try await manager.availableVoices()
+            XCTAssertTrue(voices.contains("alba"), "voices: \(voices)")
 
-        var frames = 0
-        var samples = 0
-        let stream = try await manager.synthesizeStreaming(
-            text: "Hello world, this is a test.", voice: "alba", seed: 42)
-        for try await frame in stream {
-            XCTAssertEqual(frame.samples.count, 1920)
-            frames += 1
-            samples += frame.samples.count
+            var frames = 0
+            var peak: Float = 0
+            let stream = try await manager.synthesizeStreaming(
+                text: "Hello world, this is a test.", voice: "alba", seed: 42)
+            for try await frame in stream {
+                XCTAssertEqual(frame.samples.count, 1920)
+                frames += 1
+                peak = max(peak, frame.samples.map(abs).max() ?? 0)
+            }
+            // ~2.5 s of speech: between 15 and 80 frames, and audible.
+            XCTAssertGreaterThan(frames, 15, "\(precision)")
+            XCTAssertLessThan(frames, 80, "\(precision)")
+            XCTAssertGreaterThan(peak, 0.05, "\(precision): silent output")
+            let wav = try await manager.synthesize(text: "Hello world.", voice: "alba", seed: 1)
+            XCTAssertGreaterThan(wav.count, 44 + 2 * 1920 * 10)
         }
-        // ~2.5 s of speech: between 15 and 80 frames, and audible.
-        XCTAssertGreaterThan(frames, 15)
-        XCTAssertLessThan(frames, 80)
-        let wav = try await manager.synthesize(text: "Hello world.", voice: "alba", seed: 1)
-        XCTAssertGreaterThan(wav.count, 44 + 2 * 1920 * 10)
     }
 }

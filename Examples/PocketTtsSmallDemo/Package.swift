@@ -12,6 +12,10 @@ let package = Package(
             name: "PocketTtsSmallDemo",
             dependencies: [
                 .product(name: "FluidAudio", package: "FluidAudio")
+            ],
+            resources: [
+                // Three upstream PyTorch (fp32, CPU) takes for A/B against Core ML.
+                .copy("Reference")
             ]
         )
     ]

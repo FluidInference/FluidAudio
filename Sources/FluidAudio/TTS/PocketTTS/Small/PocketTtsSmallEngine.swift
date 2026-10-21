@@ -33,6 +33,13 @@ struct PocketTtsSmallModels: Sendable {
             return c
         }
         self.mimiPrecision = mimiPrecision
+        // Check every file this mode needs before paying the first ANE compile.
+        let mimiURL = packDirectory.appendingPathComponent(ModelNames.PocketTTS.mimiDecoderFile)
+        if mimiPrecision == .fp32, !FileManager.default.fileExists(atPath: mimiURL.path) {
+            throw PocketTTSError.modelNotFound(
+                "\(ModelNames.PocketTTS.mimiDecoderFile) missing in \(packDirectory.path) "
+                    + "(needed for mimiPrecision .fp32; re-download the pack or use .fp16Fused)")
+        }
         prefill = try MLModel(
             contentsOf: package, configuration: config(ModelNames.PocketTTS.StateFunction.prefill))
         switch mimiPrecision {
@@ -44,12 +51,6 @@ struct PocketTtsSmallModels: Sendable {
             mimiDecoder = nil
             stateSource = fused
         case .fp32:
-            let mimiURL = packDirectory.appendingPathComponent(ModelNames.PocketTTS.mimiDecoderFile)
-            guard FileManager.default.fileExists(atPath: mimiURL.path) else {
-                throw PocketTTSError.modelNotFound(
-                    "\(ModelNames.PocketTTS.mimiDecoderFile) missing in \(packDirectory.path) "
-                        + "(needed for mimiPrecision .fp32; re-download the pack or use .fp16Fused)")
-            }
             let gen = try MLModel(
                 contentsOf: package, configuration: config(ModelNames.PocketTTS.StateFunction.generate))
             let mimiConfig = MLModelConfiguration()
@@ -91,6 +92,9 @@ actor PocketTtsSmallEngine {
         case stateBufferMismatch(name: String, expected: Int, actual: Int)
         case unsupportedStateLayout(name: String)
         case fusedFunctionMissing
+        case perFrameModelMissing(PocketTtsSmallMimiPrecision)
+        case unexpectedInput(name: String)
+        case outputShapeMismatch(name: String, expected: Int, actual: Int)
         case phaseOutOfRange(Int, phases: Int)
 
         var errorDescription: String? {
@@ -100,7 +104,13 @@ actor PocketTtsSmallEngine {
                 return "PocketTTS small: state buffer '\(name)' has \(actual) elements, expected \(expected)"
             case .unsupportedStateLayout(let name): return "PocketTTS small: state buffer '\(name)' is not fp16"
             case .fusedFunctionMissing:
-                return "PocketTTS small: the per-frame model for this Mimi precision is not loaded"
+                return "PocketTTS small: pocket_state.mlmodelc has no generate_decode function"
+            case .perFrameModelMissing(let precision):
+                return "PocketTTS small: the per-frame models for mimiPrecision .\(precision) are not loaded"
+            case .unexpectedInput(let name):
+                return "PocketTTS small: mimi_decoder input '\(name)' is not a multi-array"
+            case .outputShapeMismatch(let name, let expected, let actual):
+                return "PocketTTS small: output '\(name)' has \(actual) elements, expected \(expected)"
             case .phaseOutOfRange(let p, let phases): return "PocketTTS small: Mimi phase \(p) outside [0, \(phases))"
             }
         }
@@ -132,20 +142,44 @@ actor PocketTtsSmallEngine {
         self.models = models
         switch models.mimiPrecision {
         case .fp16Fused:
-            guard constants.state.hasFusedGenerateDecode, models.generateDecode != nil else {
-                throw EngineError.fusedFunctionMissing
-            }
+            guard models.generateDecode != nil else { throw EngineError.perFrameModelMissing(.fp16Fused) }
             convSpec = constants.state.mimiConvIO
         case .fp32:
             // Every input of the fp32 I/O model except the latent and the phase is
             // state to feed back; shapes come from the compiled model, so the host
-            // needs none of the converter's JSON for it.
-            guard let mimi = models.mimiDecoder else { throw EngineError.fusedFunctionMissing }
+            // needs none of the converter's JSON for it. Checked once here so a
+            // pack/arch mismatch fails at load, not as an out-of-bounds read.
+            guard let mimi = models.mimiDecoder, models.generate != nil else {
+                throw EngineError.perFrameModelMissing(.fp32)
+            }
+            let inputs = mimi.modelDescription.inputDescriptionsByName
+            let outputs = mimi.modelDescription.outputDescriptionsByName
+            func count(_ desc: MLFeatureDescription?, _ name: String) throws -> Int {
+                guard let shape = desc?.multiArrayConstraint?.shape else {
+                    throw EngineError.unexpectedInput(name: name)
+                }
+                return shape.map(\.intValue).reduce(1, *)
+            }
+            for (name, expected) in [("latent", constants.arch.ldim), ("phase", constants.state.mimiPhases)] {
+                let actual = try count(inputs[name], name)
+                guard actual == expected else {
+                    throw EngineError.outputShapeMismatch(name: name, expected: expected, actual: actual)
+                }
+            }
+            let audioCount = try count(outputs["audio"], "audio")
+            guard audioCount == constants.arch.frameSize else {
+                throw EngineError.outputShapeMismatch(
+                    name: "audio", expected: constants.arch.frameSize, actual: audioCount)
+            }
             var spec: [String: [Int]] = [:]
-            for (name, desc) in mimi.modelDescription.inputDescriptionsByName
-            where name != "latent" && name != "phase" {
+            for (name, desc) in inputs where name != "latent" && name != "phase" {
                 guard let shape = desc.multiArrayConstraint?.shape else {
-                    throw EngineError.unsupportedStateLayout(name: name)
+                    throw EngineError.unexpectedInput(name: name)
+                }
+                let n = shape.map(\.intValue).reduce(1, *)
+                let outCount = try count(outputs["\(name)_out"], "\(name)_out")
+                guard outCount == n else {
+                    throw EngineError.outputShapeMismatch(name: "\(name)_out", expected: n, actual: outCount)
                 }
                 spec[name] = shape.map(\.intValue)
             }
@@ -271,7 +305,7 @@ actor PocketTtsSmallEngine {
         phasePtr.initialize(repeating: 0, count: phases)
         phasePtr[phaseIndex] = 1
 
-        let latent: MLMultiArray
+        let latentValues: [Float]
         let eos: MLMultiArray
         let mimiOutput: MLFeatureProvider
         if let fused = models.generateDecode {
@@ -293,12 +327,12 @@ actor PocketTtsSmallEngine {
             guard let e = output.featureValue(for: "is_eos")?.multiArrayValue else {
                 throw EngineError.missingOutput("is_eos")
             }
-            latent = l
+            latentValues = try Self.readFloats(l, count: ldim, name: "latent_final")
             eos = e
             mimiOutput = output
         } else {
             guard let generate = models.generate, let mimi = models.mimiDecoder else {
-                throw EngineError.fusedFunctionMissing
+                throw EngineError.perFrameModelMissing(.fp32)
             }
             let output = try await generate.prediction(
                 from: try MLDictionaryFeatureProvider(dictionary: [
@@ -314,7 +348,7 @@ actor PocketTtsSmallEngine {
             // The I/O model wants a contiguous fp32 [1, ldim]; copy rather than
             // trust the function output's layout and dtype.
             let latentIn = try MLMultiArray(shape: [1, NSNumber(value: ldim)], dataType: .float32)
-            let values = Self.readFloats(l, count: ldim)
+            let values = try Self.readFloats(l, count: ldim, name: "latent_final")
             for i in 0..<ldim { latentIn[i] = NSNumber(value: values[i]) }
             var features: [String: MLFeatureValue] = [
                 "latent": MLFeatureValue(multiArray: latentIn),
@@ -323,7 +357,7 @@ actor PocketTtsSmallEngine {
             for (name, array) in convState {
                 features[name] = MLFeatureValue(multiArray: array)
             }
-            latent = l
+            latentValues = values
             eos = e
             mimiOutput = try await mimi.prediction(from: try MLDictionaryFeatureProvider(dictionary: features))
         }
@@ -340,9 +374,9 @@ actor PocketTtsSmallEngine {
         position += 1
         mimiFrame += 1
         return Frame(
-            latent: Self.readFloats(latent, count: ldim),
+            latent: latentValues,
             eosLogit: eos[0].floatValue,
-            samples: Self.readFloats(audio, count: arch.frameSize))
+            samples: try Self.readFloats(audio, count: arch.frameSize, name: "audio"))
     }
 
     // MARK: - Snapshot conversion
@@ -427,8 +461,13 @@ actor PocketTtsSmallEngine {
         }
     }
 
-    private static func readFloats(_ array: MLMultiArray, count: Int) -> [Float] {
-        if array.dataType == .float16 {
+    /// First `count` elements of a model output as Float; bounds-checked, with
+    /// the raw-pointer fast path only for float32.
+    private static func readFloats(_ array: MLMultiArray, count: Int, name: String) throws -> [Float] {
+        guard array.count >= count else {
+            throw EngineError.outputShapeMismatch(name: name, expected: count, actual: array.count)
+        }
+        guard array.dataType == .float32 else {
             return (0..<count).map { array[$0].floatValue }
         }
         let ptr = array.dataPointer.bindMemory(to: Float.self, capacity: count)

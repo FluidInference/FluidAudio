@@ -17,8 +17,9 @@ struct PocketTtsSmallDemoApp: App {
         WindowGroup("Pocket TTS small models on the Neural Engine") {
             ContentView()
                 .environmentObject(model)
-                .frame(minWidth: 860, minHeight: 640)
+                .frame(minWidth: 620, idealWidth: 700, minHeight: 640)
                 .task { model.applyLaunchArguments(CommandLine.arguments) }
         }
+        .defaultSize(width: 700, height: 820)
     }
 }
