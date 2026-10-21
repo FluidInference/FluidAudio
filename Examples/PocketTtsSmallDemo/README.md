@@ -8,12 +8,12 @@ mode are chosen with launch flags (`--model`, `--mimi`); the model loads on laun
 The table shows, per sentence, time to first audio, frames, audio length, ms per frame and the
 real-time factor; the log goes to stdout (run it from a terminal to see it).
 
-- **The sea** between the text box and the table is the speech envelope of what the speaker is
+- **The sea** at the top is the speech envelope of what the speaker is
   playing (an audio tap on the player node, 20 ms blocks), drawn as three frost-blue swells at display
   rate — it follows playback, not the generator, which runs 20–50x ahead.
-- **Mimi picker**: `fp32 CPU` (default; FlowLM on the ANE, Mimi decoder fp32 on the CPU, clean) or
-  `fp16 ANE (hiss)` (one fused ANE dispatch per frame: faster, with the −72 dBFS noise floor audible in
-  pauses). Switching reloads the model.
+- **Mimi path**: `--mimi fp32` (default; FlowLM on the ANE, Mimi decoder fp32 on the CPU, clean) or
+  `--mimi fp16-fused` (one fused ANE dispatch per frame: faster, with the −72 dBFS noise floor audible in
+  pauses). Relaunch to switch.
 - **Reference takes**: three upstream PyTorch renders (18m, fp32 CPU; voices alba / marius / javert,
   each a different sentence) ship in `Sources/PocketTtsSmallDemo/Reference/`. `▶ PyTorch` plays the
   file through the same player and sea view; `▶ Core ML` speaks the same sentence with the same voice
