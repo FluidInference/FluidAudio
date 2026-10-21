@@ -45,6 +45,13 @@ final class DemoModel: ObservableObject {
     @Published private(set) var utterances: [UtteranceStats] = []
     /// PyTorch reference takes shipped with the demo (empty if the bundle lacks them).
     let references: [ReferenceClip] = DemoModel.loadReferences()
+    /// The reference row currently playing (file + which renderer), for the highlight.
+    @Published private(set) var activeReference: (file: String, source: ReferenceSource)?
+
+    enum ReferenceSource: String {
+        case pytorch = "PyTorch"
+        case coreml = "Core ML"
+    }
     @Published private(set) var log: [LogLine] = []
 
     let player = StreamPlayer()
@@ -235,6 +242,9 @@ final class DemoModel: ObservableObject {
     /// Called from the view on a timer: refresh the table from `pending` and
     /// log a summary once an utterance has been quiet for 300 ms.
     func tick() {
+        if activeReference != nil, !isSpeaking, player.playedFrames >= player.scheduledFrames {
+            activeReference = nil
+        }
         for (idx, p) in pending {
             update(idx) {
                 $0.frames = p.frames
@@ -268,6 +278,7 @@ final class DemoModel: ObservableObject {
         pending.removeAll()
         player.stop()
         isSpeaking = false
+        activeReference = nil
         if isReady { status = "Stopped." }
     }
 
@@ -301,6 +312,7 @@ final class DemoModel: ObservableObject {
                 player.enqueue(Array(samples[start..<end]))
                 start = end
             }
+            activeReference = (clip.file, .pytorch)
             status = "Playing PyTorch reference — voice \(clip.voice)"
             appendLog(
                 "── PyTorch reference (\(clip.voice), \(String(format: "%.2f", Double(samples.count) / StreamPlayer.sampleRate)) s): \(clip.text)"
@@ -315,6 +327,7 @@ final class DemoModel: ObservableObject {
         guard isReady else { return }
         changeVoice(clip.voice)
         text = clip.text
+        activeReference = (clip.file, .coreml)
         speak()
     }
 
