@@ -218,6 +218,7 @@ enum TranscribeCommand {
         var melChunkContext: Bool? = nil
         var dualDecodeArbitration = false
         var seamGapRepair = true
+        var seamGapRepairMinGapSeconds: Double? = nil
         var seamTimingRealignment = true
         var streamingMode = false
 
@@ -372,6 +373,11 @@ enum TranscribeCommand {
                 parsed.dualDecodeArbitration = true
             case "--no-seam-gap-repair":
                 parsed.seamGapRepair = false
+            case "--seam-gap-min":
+                if i + 1 < args.count {
+                    parsed.seamGapRepairMinGapSeconds = Double(args[i + 1])
+                    i += 1
+                }
             case "--no-seam-timing-realignment":
                 parsed.seamTimingRealignment = false
 
@@ -609,6 +615,7 @@ enum TranscribeCommand {
                 melChunkContext: args.melChunkContext,
                 dualDecodeArbitration: args.dualDecodeArbitration,
                 seamGapRepair: args.seamGapRepair,
+                seamGapRepairMinGapSeconds: args.seamGapRepairMinGapSeconds ?? ASRConfig.default.seamGapRepairMinGapSeconds,
                 seamTimingRealignment: args.seamTimingRealignment
             )
             let asrManager = AsrManager(config: asrConfig)
