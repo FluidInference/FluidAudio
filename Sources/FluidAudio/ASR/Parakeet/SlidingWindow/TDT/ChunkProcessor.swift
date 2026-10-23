@@ -1520,9 +1520,41 @@ struct ChunkProcessor {
 
     // MARK: - Seam-gap repair (issue #758)
 
-    /// Probe budget per file — backstop against pathological inputs; sizing
-    /// rationale in "Post-Merge Repair Pass" (LongTranscription.md).
-    private var maxSeamGapRepairs: Int { 32 }
+    /// Probe budget — backstop against pathological inputs. Scales with the
+    /// audio: gap-heavy non-English speech (Italian oral history measured at
+    /// ~8 speech-bearing gaps per minute) needs far more than a flat 32 per
+    /// file, while the floor keeps short files fully covered.
+    private var maxSeamGapRepairs: Int {
+        let minutes = Double(totalSamples) / Double(ASRConstants.sampleRate) / 60
+        return max(32, Int(minutes * Double(Self.seamGapRepairsPerMinute)))
+    }
+
+    static let seamGapRepairsPerMinute = 12
+
+    /// Audio replayed either side of a gap in the short probe window. The
+    /// dropped phrase needs its immediate neighbours as context and nothing
+    /// else: a full-length window cold-started at the gap, or centred on it,
+    /// re-drops the same phrase (measured on Italian/German oral history),
+    /// while ±0.8 s recovers it.
+    static let seamGapShortWindowPadSeconds = 0.8
+
+    /// Gaps at least this long also get the full-length placements, the
+    /// seam-drop class the pass was built for (multi-second spans at
+    /// low-SNR seams) and the pass's original minimum gap.
+    static let seamGapFullWindowMinGapSeconds = 1.5
+
+    /// Lowest median token confidence accepted from a probe. Re-decoding a
+    /// gap that holds only noise hallucinates at 0.1–0.5 across the run;
+    /// genuine dropped speech decodes at 0.6–1.0 with the odd weak function
+    /// word ("a" at 0.38 inside "Are you ready? Just a little bit."), which
+    /// a per-token floor would throw away whole.
+    static let seamGapMinMedianConfidence: Float = 0.7
+
+    static func isConfidentSplice(_ candidate: [TokenWindow]) -> Bool {
+        guard !candidate.isEmpty else { return false }
+        let sorted = candidate.map { $0.confidence }.sorted()
+        return sorted[sorted.count / 2] >= seamGapMinMedianConfidence
+    }
 
     // Adaptive speech-gate constants. Per-value rationale (dBFS anchors,
     // clamp structure, percentile choice) lives in the constants table under
@@ -1609,10 +1641,57 @@ struct ChunkProcessor {
         return stream[neighborIndex]
     }
 
-    /// Filter a probe window's tokens to the spliceable run: strictly
-    /// in-gap, word-initial start, edge dedupe of re-heard border words —
-    /// rules and tolerances in "Post-Merge Repair Pass"
-    /// (LongTranscription.md).
+    /// A word's text as the splice rules compare it: pieces joined, the
+    /// word marker, punctuation and diacritics dropped, case folded. A
+    /// piece missing from the vocabulary compares by id.
+    static func comparableWord(_ tokens: [Int], vocabulary: [Int: String]) -> String {
+        var text = ""
+        for token in tokens {
+            guard let piece = vocabulary[token] else {
+                text += "#\(token)"
+                continue
+            }
+            text += piece.unicodeScalars.filter {
+                $0 != "▁" && !CharacterSet.punctuationCharacters.contains($0) && !CharacterSet.symbols.contains($0)
+            }
+            .map(String.init).joined()
+        }
+        return text.folding(options: [.diacriticInsensitive, .caseInsensitive, .widthInsensitive], locale: nil)
+    }
+
+    /// The whole word bordering a gap — every piece of it, not just the
+    /// piece touching the gap — so a probe's re-hearing of that word can be
+    /// recognised whatever piece boundary it happens to land on. `step` -1
+    /// walks left from the token before the gap, +1 walks right from the
+    /// token after it.
+    static func neighborWord(
+        in stream: [TokenWindow],
+        from index: Int,
+        step: Int,
+        spliceSafeTokenIds: Set<Int>?,
+        vocabulary: [Int: String]
+    ) -> (text: String, timestamp: Int) {
+        let touching = wordNeighbor(in: stream, from: index, step: step, vocabulary: vocabulary)
+        guard let safeIds = spliceSafeTokenIds,
+            let touchingIndex = stream.firstIndex(where: { $0.timestamp == touching.timestamp && $0.token == touching.token })
+        else {
+            return (comparableWord([touching.token], vocabulary: vocabulary), touching.timestamp)
+        }
+        func isWordStart(_ i: Int) -> Bool {
+            safeIds.contains(stream[i].token) && !isPunctuationOnlyPiece(stream[i].token, vocabulary: vocabulary)
+        }
+        var start = touchingIndex
+        while start > 0, !isWordStart(start) { start -= 1 }
+        var end = start + 1
+        while end < stream.count, !isWordStart(end) { end += 1 }
+        let pieces = stream[start..<end].map { $0.token }
+        return (comparableWord(pieces, vocabulary: vocabulary), stream[start].timestamp)
+    }
+
+    /// Filter a probe window's tokens to the spliceable run: in-gap words,
+    /// completed when the gap end cuts through one, with re-hearings of the
+    /// bordering words removed — rules and tolerances in "Post-Merge Repair
+    /// Pass" (LongTranscription.md).
     static func spliceCandidate(
         windowTokens: [Int],
         windowTimestamps: [Int],
@@ -1620,19 +1699,32 @@ struct ChunkProcessor {
         windowDurations: [Int],
         gapStartFrame: Int,
         gapEndFrame: Int,
-        leadNeighbor: TokenWindow,
-        tailNeighbor: TokenWindow,
+        leadWord: (text: String, timestamp: Int),
+        tailWord: (text: String, timestamp: Int),
         spliceSafeTokenIds: Set<Int>?,
         vocabulary: [Int: String]
     ) -> [TokenWindow] {
         let edgeToleranceFrames = 6
-        func samePiece(_ a: Int, _ b: Int) -> Bool {
-            if a == b { return true }
-            guard let pieceA = vocabulary[a], let pieceB = vocabulary[b] else { return false }
-            return pieceA.lowercased() == pieceB.lowercased()
+        let samePositionFrames = 2
+
+        func isPunctuation(_ token: Int) -> Bool {
+            isPunctuationOnlyPiece(token, vocabulary: vocabulary)
+        }
+        // Without a vocabulary every token is its own word.
+        func isWordStart(_ token: Int) -> Bool {
+            guard let safeIds = spliceSafeTokenIds else { return true }
+            return safeIds.contains(token) && !isPunctuation(token)
+        }
+        // A continuation piece, or an apostrophe inside a word ("l" "'" "in…").
+        func continuesWord(at i: Int) -> Bool {
+            guard let safeIds = spliceSafeTokenIds, i < windowTokens.count else { return false }
+            if !safeIds.contains(windowTokens[i]) { return true }
+            return isPunctuation(windowTokens[i]) && i + 1 < windowTokens.count
+                && !safeIds.contains(windowTokens[i + 1])
         }
 
         var candidate: [TokenWindow] = []
+        var lastInGapIndex = -1
         for tokenIndex in 0..<windowTokens.count {
             let timestamp = windowTimestamps[tokenIndex]
             guard timestamp > gapStartFrame, timestamp < gapEndFrame - 1 else { continue }
@@ -1644,35 +1736,83 @@ struct ChunkProcessor {
                     duration: windowDurations[tokenIndex]
                 )
             )
+            lastInGapIndex = tokenIndex
         }
 
-        if let safeIds = spliceSafeTokenIds {
-            while let first = candidate.first, !safeIds.contains(first.token) {
+        // The gap end can cut through a word ("Dicev" | "ano"): pull in the
+        // pieces that complete it, clamped so they still sort before the
+        // token after the gap. A completion that runs on past the gap end
+        // is the probe hearing the tail word's audio differently
+        // ("nasceamo" against "parliamo"); that word is dropped below.
+        var overran = false
+        var next = lastInGapIndex + 1
+        while lastInGapIndex >= 0, continuesWord(at: next) {
+            if windowTimestamps[next] >= gapEndFrame { overran = true }
+            candidate.append(
+                (
+                    token: windowTokens[next],
+                    timestamp: min(windowTimestamps[next], gapEndFrame - 1),
+                    confidence: windowConfidences[next],
+                    duration: windowDurations[next]
+                )
+            )
+            next += 1
+        }
+
+        // A head fragment (continuation pieces of a word that started before
+        // the gap, or orphaned punctuation) is never spliced.
+        func trimHead() {
+            while let first = candidate.first, !isWordStart(first.token) {
                 candidate.removeFirst()
             }
         }
+        trimHead()
 
-        while let first = candidate.first,
-            samePiece(first.token, leadNeighbor.token),
-            abs(first.timestamp - leadNeighbor.timestamp) <= edgeToleranceFrames
-        {
-            candidate.removeFirst()
+        // Words: a word runs from a word-start piece to the next one, with
+        // its continuation pieces and punctuation attached.
+        func wordRanges() -> [Range<Int>] {
+            guard !candidate.isEmpty else { return [] }
+            var ranges: [Range<Int>] = []
+            var start = 0
+            for i in 1...candidate.count where i == candidate.count || isWordStart(candidate[i].token) {
+                ranges.append(start..<i)
+                start = i
+            }
+            return ranges
         }
-        while let last = candidate.last,
-            samePiece(last.token, tailNeighbor.token),
-            abs(tailNeighbor.timestamp - last.timestamp) <= edgeToleranceFrames
+        func text(_ range: Range<Int>) -> String {
+            comparableWord(candidate[range].map { $0.token }, vocabulary: vocabulary)
+        }
+
+        if overran, let last = wordRanges().last {
+            candidate.removeSubrange(last)
+        }
+
+        // Edge dedupe: the probe re-hears the words either side of the gap,
+        // often on a slightly shifted frame and sometimes as a different
+        // word ("Meu" for "Mio"). The same text within the tolerance, or any
+        // text at the same frames, is the neighbour, not a recovery. Genuine
+        // stutters ("I I") sit beyond the tolerance.
+        func echoesNeighbor(_ range: Range<Int>, _ neighbor: (text: String, timestamp: Int)) -> Bool {
+            let distance = abs(candidate[range.lowerBound].timestamp - neighbor.timestamp)
+            if distance <= samePositionFrames { return true }
+            return !neighbor.text.isEmpty && text(range) == neighbor.text && distance <= edgeToleranceFrames
+        }
+        while let first = wordRanges().first, echoesNeighbor(first, leadWord) {
+            candidate.removeSubrange(first)
+        }
+        while let last = wordRanges().last, echoesNeighbor(last, tailWord) {
+            candidate.removeSubrange(last)
+        }
+
+        // At most one trailing punctuation piece ("grazie.." came from two).
+        while candidate.count >= 2,
+            isPunctuation(candidate[candidate.count - 1].token),
+            isPunctuation(candidate[candidate.count - 2].token)
         {
             candidate.removeLast()
         }
-        // Removing an edge token can expose continuation pieces (or orphaned
-        // punctuation) at the head — re-trim.
-        if let safeIds = spliceSafeTokenIds {
-            while let first = candidate.first,
-                !safeIds.contains(first.token) || isPunctuationOnlyPiece(first.token, vocabulary: vocabulary)
-            {
-                candidate.removeFirst()
-            }
-        }
+        trimHead()
 
         return candidate
     }
@@ -1687,18 +1827,18 @@ struct ChunkProcessor {
     }
     #endif
 
-    /// One gap probe of the repair pass: the gap, its word neighbours, and the
-    /// audio of each window placement, in the order they are tried.
+    /// One gap probe of the repair pass: the gap, the words bordering it,
+    /// and the audio of each window placement, in the order they are tried.
     private struct SeamGapProbe: Sendable {
         let gapStartFrame: Int
         let gapEndFrame: Int
-        let leadNeighbor: TokenWindow
-        let tailNeighbor: TokenWindow
+        let leadWord: (text: String, timestamp: Int)
+        let tailWord: (text: String, timestamp: Int)
         let placements: [(start: Int, audio: [Float], isLastChunk: Bool)]
     }
 
-    /// Re-decode inter-token gaps that plausibly contain dropped speech with
-    /// a fresh seam-free window and splice in only in-gap tokens (issue
+    /// Re-decode inter-word gaps that plausibly contain dropped speech with
+    /// a fresh seam-free window and splice in only in-gap words (issue
     /// #758). Genuine silence splices nothing. See "Post-Merge Repair Pass"
     /// in Documentation/ASR/LongTranscription.md. The probes of a pass are
     /// independent (they read the pre-pass tokens), so they run across the
@@ -1718,6 +1858,7 @@ struct ChunkProcessor {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
         let frameDuration = ASRConstants.secondsPerEncoderFrame
         let minGapFrames = max(2, Int(minGapSeconds / frameDuration))
+        let fullWindowMinGapFrames = Int(Self.seamGapFullWindowMinGapSeconds / frameDuration)
         // Same frame-aligned usable window size the chunker uses (no context
         // reservation — the repair window is decoded standalone). With a
         // ladder encoder the probe runs on its smallest function: the splice
@@ -1729,6 +1870,8 @@ struct ChunkProcessor {
             frameSamples,
             ((probeSamples ?? maxModelSamples) - ASRConstants.melHopSize) / frameSamples * frameSamples
         )
+        let padSamples = Int(Self.seamGapShortWindowPadSeconds * Double(ASRConstants.sampleRate))
+            / frameSamples * frameSamples
 
         var working = tokens
         var probes = 0
@@ -1743,6 +1886,14 @@ struct ChunkProcessor {
 
                 let current = working[index]
                 let next = working[index + 1]
+                // A gap inside a word (slow "mille … novecento" between the
+                // pieces of "1929", or "E" … "'" written for "È") has nothing
+                // to splice: only gaps before a word start are probed.
+                if let safeIds = spliceSafeTokenIds,
+                    !safeIds.contains(next.token) || Self.isPunctuationOnlyPiece(next.token, vocabulary: vocabulary)
+                {
+                    continue
+                }
                 // Conservative end of the current token: its decoded duration
                 // when present, else one frame (mirrors mergeChunks).
                 let gapStartFrame = current.timestamp + max(1, current.duration)
@@ -1760,15 +1911,27 @@ struct ChunkProcessor {
                 probedGapStarts.insert(gapStartFrame)
                 probes += 1
 
-                // Cold-start AT the gap first (replaying the pre-gap noise
-                // can re-blank), gap-centred fallback — see "Placement
-                // matters" in LongTranscription.md.
+                // The short window first: the gap plus its immediate
+                // neighbours, padded to the model window by the encoder. A
+                // multi-second gap (the seam-drop class this pass was built
+                // for) also gets the full-length placements — cold-start AT
+                // the gap (replaying the pre-gap noise can re-blank), then
+                // gap-centred — see "Placement matters" in
+                // LongTranscription.md.
                 let gapCenterSample = (gapStartSample + gapEndSample) / 2
+                var candidates: [(start: Int, length: Int)] = [
+                    (gapStartSample - padSamples, gapEndSample - gapStartSample + 2 * padSamples)
+                ]
+                if gapEndFrame - gapStartFrame >= fullWindowMinGapFrames {
+                    candidates.append((gapStartSample, windowSamples))
+                    candidates.append((gapCenterSample - windowSamples / 2, windowSamples))
+                }
                 var placements: [(start: Int, audio: [Float], isLastChunk: Bool)] = []
-                for placement in [gapStartSample, gapCenterSample - windowSamples / 2] {
-                    var windowStart = max(0, min(placement, totalSamples - windowSamples))
+                for candidate in candidates {
+                    let length = min(candidate.length, windowSamples)
+                    var windowStart = max(0, min(candidate.start, totalSamples - length))
                     windowStart = windowStart / frameSamples * frameSamples
-                    let windowEnd = min(windowStart + windowSamples, totalSamples)
+                    let windowEnd = min(windowStart + length, totalSamples)
                     guard windowEnd > windowStart else { continue }
                     let windowAudio = try readSamples(offset: windowStart, count: windowEnd - windowStart)
                     placements.append((windowStart, windowAudio, windowEnd >= totalSamples))
@@ -1778,9 +1941,12 @@ struct ChunkProcessor {
                     SeamGapProbe(
                         gapStartFrame: gapStartFrame,
                         gapEndFrame: gapEndFrame,
-                        leadNeighbor: Self.wordNeighbor(in: working, from: index, step: -1, vocabulary: vocabulary),
-                        tailNeighbor: Self.wordNeighbor(
-                            in: working, from: index + 1, step: 1, vocabulary: vocabulary),
+                        leadWord: Self.neighborWord(
+                            in: working, from: index, step: -1,
+                            spliceSafeTokenIds: spliceSafeTokenIds, vocabulary: vocabulary),
+                        tailWord: Self.neighborWord(
+                            in: working, from: index + 1, step: 1,
+                            spliceSafeTokenIds: spliceSafeTokenIds, vocabulary: vocabulary),
                         placements: placements
                     ))
             }
@@ -1833,7 +1999,7 @@ struct ChunkProcessor {
         return working
     }
 
-    /// Decode one probe's placements in order and return the first non-empty
+    /// Decode one probe's placements in order and return the first confident
     /// splice candidate (empty when every placement yields nothing).
     private static func recoverSeamGap(
         _ probe: SeamGapProbe,
@@ -1873,12 +2039,14 @@ struct ChunkProcessor {
                 windowDurations: durations,
                 gapStartFrame: probe.gapStartFrame,
                 gapEndFrame: probe.gapEndFrame,
-                leadNeighbor: probe.leadNeighbor,
-                tailNeighbor: probe.tailNeighbor,
+                leadWord: probe.leadWord,
+                tailWord: probe.tailWord,
                 spliceSafeTokenIds: spliceSafeTokenIds,
                 vocabulary: vocabulary
             )
-            if !candidate.isEmpty { return candidate }
+            // A low-confidence candidate is a hallucination over noise, not
+            // a recovery; try the next placement.
+            if !candidate.isEmpty, isConfidentSplice(candidate) { return candidate }
         }
         return []
     }
