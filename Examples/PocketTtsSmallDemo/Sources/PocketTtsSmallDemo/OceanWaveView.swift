@@ -27,6 +27,7 @@ struct OceanWaveView: View {
     private func draw(context: GraphicsContext, size: CGSize, time t: Double, level: Float, history: [Float]) {
         let w = size.width
         let h = size.height
+        guard w > 0, h > 0 else { return }
         let baseline = h * 0.58
         // Envelope along x: oldest level at the left, what plays now at the right.
         // The 20 ms RMS blocks are smoothed with a Hann window over ±4 blocks and
