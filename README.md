@@ -44,7 +44,7 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 
 - **Automatic Speech Recognition (ASR)**: [Parakeet TDT v3](Documentation/Models.md#batch-transcription-near-real-time) (0.6b) and other TDT/CTC models for batch transcription supporting 25 European languages and Japanese, plus SenseVoice and Paraformer for Mandarin Chinese; [Parakeet EOU](Documentation/Models.md#streaming-transcription-true-real-time) (120m) for streaming ASR with end-of-utterance detection (English only). See all [ASR models](Documentation/Models.md#asr-models).
 - **Inverse Text Normalization (ITN)**: Post-process ASR output to convert spoken-form to written-form ("two hundred" → "200"). See [text-processing-rs](https://github.com/FluidInference/text-processing-rs). Optional: ASR-only apps can drop the engine (~8 MB per slice) with `traits: []` (Swift 6.2+), see [PostProcessing.md](Documentation/ASR/PostProcessing.md#opting-out-of-the-engine)
-- **Text-to-Speech (TTS)**: Kokoro (82m) for parallel synthesis with SSML and pronunciation control across 9 languages (EN, ES, FR, HI, IT, JA, PT, ZH); PocketTTS for streaming TTS with voice cloning support (EN, DE, ES, FR, IT, PT — 6L and 24L variants); Chatterbox Multilingual (520M, 18 languages) and Chatterbox Nano (110M, English with `[laugh]`/`[chuckle]` paralinguistic tags) in beta — see [Documentation/TTS/Chatterbox.md](Documentation/TTS/Chatterbox.md); Paradee (8M Kokoro distill, English, 12 MB) in beta — see [Documentation/TTS/Paradee.md](Documentation/TTS/Paradee.md)
+- **Text-to-Speech (TTS)**: Kokoro (82m) for parallel synthesis with SSML and pronunciation control across 9 languages (EN, ES, FR, HI, IT, JA, PT, ZH); PocketTTS for streaming TTS with voice cloning support (EN, DE, ES, FR, IT, PT — 6L and 24L variants); Chatterbox Multilingual (520M, 18 languages) and Chatterbox Nano (110M, English with `[laugh]`/`[chuckle]` paralinguistic tags) in beta — see [Documentation/TTS/Chatterbox.md](Documentation/TTS/Chatterbox.md); Paradee (8M Kokoro distill, English, 12 MB) in beta — see [Documentation/TTS/Paradee.md](Documentation/TTS/Paradee.md); Gradium's Phonon 31m (Apache-2.0, English, 103 voices) on the Neural Engine at ~20x real time — see [Documentation/TTS/PocketTTS.md](Documentation/TTS/PocketTTS.md#phonon-31m-gradium)
 - **Speaker Diarization (Online + Offline)**: Speaker separation and identification across audio streams. Streaming pipeline for real-time processing and offline batch pipeline with advanced clustering.
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
@@ -690,6 +690,27 @@ swift run fluidaudiocli tts "Hello world." --output out.wav --backend pocket --c
 
 See [Documentation/TTS/PocketTTS.md](Documentation/TTS/PocketTTS.md#languages)
 for the full language table.
+
+#### Phonon 31m (Gradium)
+
+Gradium's [Phonon](https://gradium.ai/phonon) 31m, Apache-2.0, is the Pocket TTS recipe
+trained by the Kyutai founders' spin-off. It runs on the Neural Engine with 103 voices,
+including 12 characters, and Gradium's English text normalizer, so numbers, currency,
+emails and URLs are read correctly. Requires macOS 15 / iOS 18.
+
+```swift
+let tts = PocketTtsSmallManager(model: .phonon31m)   // downloads phonon/phonon-31m-en (~171 MB)
+try await tts.initialize()
+let wav = try await tts.synthesize(text: "Your order of $42.50 ships today.", voice: "en_us_Easton")
+```
+
+```bash
+swift run fluidaudiocli tts "Hello from Phonon." --backend pocket-small --model phonon \
+  --voice en_gb_Maeve --output phonon.wav
+
+# demo app: a ring that speaks
+cd Examples/PhononDemo && swift run -c release PhononDemo
+```
 
 ### KokoroAne
 

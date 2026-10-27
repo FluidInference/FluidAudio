@@ -88,6 +88,9 @@ public struct TTS {
         var pocketTemperature: Float = PocketTtsConstants.temperature
         // PocketTTS deterministic-seed mode (uses session API for fixed RNG).
         var pocketSeed: UInt64? = nil
+        // PocketTTS small models (`--backend pocket-small --model 7m`).
+        var pocketSmallModel: PocketTtsSmallModel = .english7m
+        var pocketSmallMimi: PocketTtsSmallMimiPrecision = .fp32
         // StyleTTS2 zero-shot args.
         var styletts2ReferencePath: String? = nil
         var styletts2Seed: UInt64 = 42
@@ -186,6 +189,8 @@ public struct TTS {
                     switch value {
                     case "pocket", "pockettts":
                         backend = .pocketTts
+                    case "pocket-small", "pocketsmall", "pocket-tts-small", "pockettts-small":
+                        backend = .pocketTtsSmall
                     case "kokoro-ane", "kokoroane", "kokoro", "lai":
                         backend = .kokoroAne
                     case "styletts2", "style-tts2", "stts2":
@@ -370,6 +375,33 @@ public struct TTS {
                     }
                     i += 1
                 }
+            case "--model":
+                if i + 1 < arguments.count {
+                    guard let parsed = PocketTtsSmallModel(name: arguments[i + 1]) else {
+                        logger.error(
+                            "Unknown small Pocket TTS model '\(arguments[i + 1])'. Supported: "
+                                + PocketTtsSmallModel.allCases.map(\.rawValue).joined(separator: ", ")
+                                + " (aliases 18m, 7m, 2m, 18m-refl, 7m-refl, 2m-refl, phonon)")
+                        return
+                    }
+                    pocketSmallModel = parsed
+                    i += 1
+                }
+            case "--mimi":
+                if i + 1 < arguments.count {
+                    let raw = arguments[i + 1].lowercased()
+                    if let parsed = PocketTtsSmallMimiPrecision(rawValue: raw) {
+                        pocketSmallMimi = parsed
+                    } else if raw == "fp16" || raw == "fused" {
+                        pocketSmallMimi = .fp16Fused
+                    } else {
+                        logger.error(
+                            "Unknown --mimi '\(arguments[i + 1])'. Supported: "
+                                + PocketTtsSmallMimiPrecision.allCases.map(\.rawValue).joined(separator: ", "))
+                        return
+                    }
+                    i += 1
+                }
             case "--language":
                 if i + 1 < arguments.count {
                     let raw = arguments[i + 1].lowercased()
@@ -402,6 +434,12 @@ public struct TTS {
         }
 
         switch backend {
+        case .pocketTtsSmall:
+            await runPocketTtsSmall(
+                text: text, output: output, voice: voice, deEss: deEss,
+                model: pocketSmallModel, seed: pocketSeed,
+                temperature: arguments.contains("--temperature") ? pocketTemperature : nil,
+                computeUnits: pocketComputeUnits, mimiPrecision: pocketSmallMimi)
         case .pocketTts:
             await runPocketTts(
                 text: text, output: output, voice: voice, deEss: deEss,
@@ -839,6 +877,59 @@ public struct TTS {
             voice: voice,
             temperature: temperature,
             seed: seed)
+    }
+
+    /// `--backend pocket-small`: the 18m / 7m / 2m models through the MLState
+    /// MLState package. Shipped voices only (no cloning yet).
+    private static func runPocketTtsSmall(
+        text: String, output: String, voice: String, deEss: Bool,
+        model: PocketTtsSmallModel, seed: UInt64?, temperature: Float?,
+        computeUnits: PocketTtsComputeUnits, mimiPrecision: PocketTtsSmallMimiPrecision
+    ) async {
+        guard #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) else {
+            logger.error("PocketTTS small models need macOS 15+/iOS 18+ (MLState)")
+            return
+        }
+        do {
+            let tStart = Date()
+            let pocketVoice = voice == TtsConstants.recommendedVoice ? model.defaultVoice : voice
+            // --compute-units steers the MLState functions (prefill / generate / generate_decode);
+            // the fp32 Mimi decoder of the default mode is always CPU.
+            let units: MLComputeUnits = computeUnits.flowLM ?? .cpuAndNeuralEngine
+            let manager = PocketTtsSmallManager(
+                model: model, defaultVoice: pocketVoice, computeUnits: units, mimiPrecision: mimiPrecision)
+            logger.info("PocketTTS small model: \(model.rawValue), mimi \(mimiPrecision.rawValue)")
+            let tLoad0 = Date()
+            try await manager.initialize()
+            let tLoad1 = Date()
+            if let arch = await manager.arch {
+                logger.info(
+                    "  arch: d_model \(arch.dModel), \(arch.numLayers) layers, \(arch.numHeads)/\(arch.numKvHeads) heads, "
+                        + "flow \(arch.flowType), eos threshold \(arch.eosThreshold), temperature \(temperature ?? arch.temperature)"
+                )
+            }
+            let tSynth0 = Date()
+            let wav = try await manager.synthesize(
+                text: text, voice: pocketVoice, temperature: temperature, seed: seed, deEss: deEss)
+            let tSynth1 = Date()
+
+            let outURL = resolveInputURL(output)
+            try FileManager.default.createDirectory(
+                at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try wav.write(to: outURL)
+
+            let synthS = tSynth1.timeIntervalSince(tSynth0)
+            let audioSecs = Double(max(0, wav.count - 44)) / (Double(PocketTtsConstants.audioSampleRate) * 2.0)
+            logger.info("PocketTTS small synthesis complete")
+            logger.info("  Load: \(String(format: "%.3f", tLoad1.timeIntervalSince(tLoad0)))s")
+            logger.info("  Synthesis: \(String(format: "%.3f", synthS))s")
+            logger.info("  Audio: \(String(format: "%.3f", audioSecs))s")
+            logger.info("  RTFx: \(String(format: "%.2f", synthS > 0 ? audioSecs / synthS : 0))x")
+            logger.info("  Total: \(String(format: "%.3f", tSynth1.timeIntervalSince(tStart)))s")
+            logger.info("  Output: \(outURL.path)")
+        } catch {
+            logger.error("PocketTTS small synthesis failed: \(error)")
+        }
     }
 
     private static func runPocketTts(
@@ -1639,7 +1730,7 @@ public struct TTS {
             Options:
               --output, -o         Output WAV path (default: output.wav)
               --voice, -v          Voice name (default: af_heart for KokoroAne, alba for PocketTTS)
-              --backend            TTS backend: kokoro-ane (default), pocket, styletts2,
+              --backend            TTS backend: kokoro-ane (default), pocket, pocket-small, styletts2,
                                    supertonic3, luxtts, neutts (beta), inflect (beta),
                                    chatterbox (beta, multilingual, macOS 15+),
                                    chatterbox-nano (beta, English + [laugh]/[chuckle] tags, macOS 15+),
@@ -1705,6 +1796,14 @@ public struct TTS {
               --clone-voice FILE   Clone voice from audio file (WAV, MP3, M4A, etc.)
               --voice-file FILE    Load previously saved voice .bin file
               --save-voice FILE    Save cloned voice to .bin file for later use
+
+            PocketTTS small models (--backend pocket-small, macOS 15+/iOS 18+, FlowLM on the Neural Engine):
+              --model ID           english_18m_2026-10 | english_7m_2026-10 (default) | english_2m_2026-10
+                                   or their *_refl_2026-10 twins; aliases 18m, 7m, 2m, 18m-refl, 7m-refl, 2m-refl
+                                   phonon-31m-en (alias phonon): Gradium Phonon 31m, 103 voices (default, en_us_Easton, ...)
+              --mimi MODE          fp32 (default: Mimi decoder fp32 on the CPU, clean noise floor) or
+                                   fp16-fused (one ANE dispatch per frame, faster, -72 dBFS hiss in pauses)
+              --voice, --seed, --temperature, --compute-units apply; voice cloning not yet supported
 
             PocketTTS Language Packs:
               --language ID        Language pack (default: english)
