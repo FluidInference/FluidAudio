@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Compile-time constants for the StyleTTS2 LibriTTS (iteration_3) pipeline.
@@ -84,3 +85,4 @@ public enum StyleTTS2Constants {
     /// the shift.
     public static let applyHifiganAsrShift: Bool = true
 }
+#endif

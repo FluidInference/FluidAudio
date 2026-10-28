@@ -144,7 +144,7 @@ extension StreamingNemotronMultilingualAsrManager {
             promptIdArray[0] = NSNumber(value: currentPromptIdValue())
 
             let encoderOutput: MLFeatureProvider
-            if #available(macOS 15, iOS 18, *), let state = encoderState as? MLState {
+            if #available(macOS 15, iOS 18, tvOS 18, *), let state = encoderState as? MLState {
                 let statefulInput = try MLDictionaryFeatureProvider(dictionary: [
                     "mel": MLFeatureValue(multiArray: inputMel),
                     "mel_length": MLFeatureValue(multiArray: melLen),
@@ -207,7 +207,7 @@ extension StreamingNemotronMultilingualAsrManager {
         // Stateful (MLState) encoder path is excluded from triple-stage —
         // MLState's session ownership doesn't cross task boundaries cleanly.
         let mlStateActive: Bool
-        if #available(macOS 15, iOS 18, *) {
+        if #available(macOS 15, iOS 18, tvOS 18, *) {
             mlStateActive = (encoderState as? MLState) != nil
         } else {
             mlStateActive = false
@@ -330,9 +330,8 @@ extension StreamingNemotronMultilingualAsrManager {
             self.lastToken = currentToken
             self.hState = currentH
             self.cState = currentC
-            if !newTokens.isEmpty, let callback = partialCallback {
-                let decoded = tokenizer.decode(ids: accumulatedTokenIds)
-                callback(decoded.text)
+            if !newTokens.isEmpty {
+                publishPartialTranscript(using: partialCallback)
             }
             if let nextEnc = try await nextEncFuture {
                 self.prefetchedEncoded = nextEnc.encoded
@@ -551,9 +550,8 @@ extension StreamingNemotronMultilingualAsrManager {
         self.cState = currentC
 
         // Invoke partial callback if new tokens were decoded
-        if !newTokens.isEmpty, let callback = partialCallback {
-            let decoded = tokenizer.decode(ids: accumulatedTokenIds)
-            callback(decoded.text)
+        if !newTokens.isEmpty {
+            publishPartialTranscript(using: partialCallback)
         }
 
         // TRIPLE-STAGE PIPELINE: collect the next chunk's encoder output

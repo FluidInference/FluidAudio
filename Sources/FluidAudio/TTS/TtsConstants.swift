@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Shared TTS constants. Backend-specific tuning lives next to each backend
@@ -9,3 +10,4 @@ public enum TtsConstants {
     /// Currently matches the KokoroAne English default (`af_heart`).
     public static let recommendedVoice = "af_heart"
 }
+#endif

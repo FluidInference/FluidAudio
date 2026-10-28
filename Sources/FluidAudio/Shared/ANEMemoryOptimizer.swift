@@ -3,7 +3,7 @@ import CoreML
 import Foundation
 import Metal
 
-/// ANE-optimized memory management for speaker diarization pipeline
+/// ANE-optimized memory management shared by the diarization, ASR and VAD pipelines.
 public final class ANEMemoryOptimizer {
     // Use shared ANE constants
     public static let aneAlignment = ANEMemoryUtils.aneAlignment
@@ -25,10 +25,10 @@ public final class ANEMemoryOptimizer {
                 dataType: dataType,
                 zeroClear: true
             )
-        } catch ANEMemoryUtils.ANEMemoryError.allocationFailed {
-            throw DiarizerError.memoryAllocationFailed
+        } catch let error as ANEMemoryUtils.ANEMemoryError {
+            throw error
         } catch {
-            throw DiarizerError.memoryAllocationFailed
+            throw ANEMemoryUtils.ANEMemoryError.allocationFailed
         }
     }
 
@@ -88,12 +88,15 @@ public final class ANEMemoryOptimizer {
         shape: [NSNumber],
         offset: Int = 0
     ) throws -> MLMultiArray {
-        // Ensure we have enough data
-        let sourceElements = sourceArray.shape.map { $0.intValue }.reduce(1, *)
-        let viewElements = shape.map { $0.intValue }.reduce(1, *)
+        // The view pads its innermost stride, so its storage span can exceed its element count;
+        // bound the span, not the count, or a padded view would run past a tighter source.
+        let strides = calculateOptimalStrides(for: shape, dataType: sourceArray.dataType)
+        let viewSpan = shape.isEmpty ? 0 : strides[0].intValue * shape[0].intValue
+        let sourceSpan =
+            sourceArray.shape.isEmpty ? 0 : sourceArray.strides[0].intValue * sourceArray.shape[0].intValue
 
-        guard offset + viewElements <= sourceElements else {
-            throw DiarizerError.invalidArrayBounds
+        guard offset + viewSpan <= sourceSpan else {
+            throw ANEMemoryUtils.ANEMemoryError.invalidArrayBounds
         }
 
         // Calculate byte offset
@@ -107,7 +110,7 @@ public final class ANEMemoryOptimizer {
             dataPointer: offsetPointer,
             shape: shape,
             dataType: sourceArray.dataType,
-            strides: calculateOptimalStrides(for: shape, dataType: sourceArray.dataType),
+            strides: strides,
             deallocator: nil  // No deallocation since it's a view
         )
     }

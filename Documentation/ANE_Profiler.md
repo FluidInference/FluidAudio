@@ -1,5 +1,9 @@
 # ANE Profiler
 
+The header below describes the original June audit. Later model sections state
+their own dates, configurations and metrics; see [Kokoro ANE v3](#kokoro-ane-v3)
+for the October M5 Pro routing, latency and telemetry checks.
+
 | | |
 |---|---|
 | **Measured** | 2026-06-05 |
@@ -23,6 +27,26 @@
 > VectorEstimator, which is **fixed** at the denoising-step count (8).
 
 ---
+
+# Computer-use decision models
+
+Measured separately on September 19, 2026: Apple M5 Pro, 24 GB, macOS 27.0.
+CUA-S1-FORMS uses real text inputs, not audio. With `.cpuAndNeuralEngine`, its
+plan assigns 149 operations to ANE and 24 to CPU; `.all` selects 173 GPU operations.
+
+| Model | ANE ops | GPU ops | CPU ops | Portable size | Warm model call |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| CUA-S1-FORMS (`.cpuAndNeuralEngine`) | 149 (86.1%) | 0 | 24 (13.9%) | 1.51 MB | p50 0.929 ms / p95 0.973 ms |
+| CUA-S1-FORMS `ane-gather` (optional) | 162 (98.2%) | 0 | 3 (1.8%) | ~1.51 MB | paired p50 0.970 ms / p95 0.988 ms |
+
+Timing uses 30 Python Core ML calls over three real form inputs after warmup,
+excluding encoding and UI work. Counts are scheduler assignments, not measured
+runtime shares. See [the conversion toolkit](https://github.com/FluidInference/mobius/tree/codex/cua-s1-forms/models/computer-use/cua-s1-forms/coreml#device-placement) for the
+four-policy comparison, load timings, fallback reasons, protocol, and raw report.
+The optional unsigned-gather variant leaves only three input casts on CPU. Its
+matched ABBA comparison used 60 calls per model and measured 0.915 ms for the
+default versus 0.970 ms for `ane-gather`; more ANE placement was about 6% slower.
+The default artifact is retained. No utilization or energy saving was measured.
 
 # ASR
 
@@ -139,6 +163,51 @@ fused `decoder_joint` (B1).
 
 ---
 
+# Diarization (streaming)
+
+Compute plan (`Scripts/ane_profile.swift`, `--units all`) plus **warm per-call latency on real audio**
+(NVIDIA's 97.6 s 8-voice demo clip, M5 Pro, macOS 26.7; Nemotron via `nemotron3-diarize --profile`,
+Sortformer derived from wall RTFx over its 203 calls, so it includes host time and the cold first call).
+Both models are pure forward passes over `[speaker cache | FIFO | chunk]`; `T` is that packed length.
+
+| Model | Preset | Latency | Audio/call | T | ANE | GPU | CPU | ops | Size | ANE ms/call | GPU ms/call | ANE ms per audio-s |
+|-------|--------|--------:|-----------:|--:|----:|----:|----:|----:|-----:|------------:|------------:|-------------------:|
+| Sortformer v2.1 | fast | 1.04 s | 0.48 s | 242 | 94% | 0% | 6% | 1526 | 229 MB | 12.5 | 10.4 | 26 |
+| Sortformer v2.1 | high context | 30.4 s | 27.2 s | — | 94% | 0% | 6% | 1526 | 243 MB | — | — | — |
+| Sortformer v2.1 | offline (fused) | 30.7 s | 30.7 s | — | 99% | 0% | 1% | 1497 | 230 MB | — | — | — |
+| Nemotron 3 | low | 1.04 s | 0.72 s | 541 | 98% | 0% | 2% | 1178 | 190 MB | 27.1 | 12.0 | 38 |
+| Nemotron 3 | fast32 | 2.88 s | 2.56 s | 340 | 98% | 0% | 2% | 1178 | 190 MB | 11.6 | 12.6 | 4.5 |
+| Nemotron 3 | fast128 | 10.56 s | 10.24 s | 436 | 98% | 0% | 2% | 1178 | 190 MB | 20.6 | 37.0 | 2.0 |
+| Nemotron 3 | offline | 30.4 s | 27.2 s | 684 | 98%* | 0% | 2% | 1178 | 190 MB | fails* | 11.2 | — |
+| Nemotron 3 | fast32-split-w8a8 | 2.88 s | 2.56 s | 340 | 100% | 0% | 0% | 1649 | 95 MB | 9.7 | — | 3.8 |
+| Nemotron 3 | c128-split-w8a8 | 10.56 s | 10.24 s | 436 | 100% | 0% | 0% | 1649 | 95 MB | ~18 | — | 1.8 |
+
+\* `MLComputePlan` reports the placement CoreML *intends*; Nemotron 3 `offline` (3040 mel frames) fails
+`ANECCompile` at runtime and silently runs on the GPU. Chunk mel input ≤ 1376 frames compiles for the
+ANE; 1440+ does not. The split-graph presets bypass the cliff (host does feature stacking + the
+1024→512 projection).
+
+**Reading the table**
+
+- Sortformer's 2% CPU residue and Nemotron's 2% are index/gather ops around the state packing; the
+  split-graph variants move that packing to the host and leave a pure-fp transformer that is 100% ANE.
+- **Per-call cost scales with `T`, not with audio advanced.** Nemotron `low` (T=541) costs 2.2× Sortformer
+  fast (T=242) per call on the ANE and advances 1.5× the audio; at 1.04 s latency the two are within 1.5×
+  of each other per audio-second. Bigger Nemotron chunks amortize the fixed state: fast32 is 8× cheaper
+  than `low` per audio-second at higher DER-neutral latency, fast128 19× cheaper.
+- **The M5 Pro GPU beats the ANE at 1.04 s latency for both models** (Nemotron `low` 12.0 vs 27.1 ms,
+  Sortformer fast 10.4 vs 12.5) — ANE tiling of these packed sequences is unfavourable — while the ANE
+  wins for fast128 (20.6 vs 37.0). `.all` picks per-op, not
+  per-model, so choose the route explicitly for `low` on Macs; on iPhone the ANE is the only fast route.
+- Sortformer's first GPU run on a fresh process paid a ~2.4 s cold compile on call 1 (whole-clip RTFx
+  22× instead of 46×); the table's GPU figure is the warm second run. Its ANE cold cost is small.
+  Nemotron's cold ANE compile is ~1 s for the monolithic presets.
+- Sequence length is the cost: zero-shot layer drops, W8A8 on the monolithic graph, batch>1 on the ANE
+  and speaker-cache/FIFO shrinking were all measured and rejected (see the Nemotron 3 conversion notes);
+  the remaining lever is reusing the static state's attention across speaker-cache updates, untested.
+
+---
+
 # Diarization (offline)
 
 | Pipeline | Type | Chunk | ANE | GPU | CPU | ops | Size |
@@ -172,14 +241,64 @@ Latency **measured on real synthesis**, warm (one short sentence; `tts --backend
 
 | Model | Type | ANE | GPU | CPU | ops | Size | Heavy graph → device |
 |-------|------|----:|----:|----:|----:|-----:|----------------------|
-| Kokoro ANE (7-stage) | batch (per utterance) | 75% | 0% | 25% | 1472 | 83 MB | Vocoder → ANE |
+| Kokoro ANE (legacy capability profile) | batch (per utterance) | 75% | 0% | 25% | 1472 | 83 MB | Vocoder → ANE |
 | Supertonic (`--ve-variant fp16`, legacy) | batch (8-step diffusion) | 30% | 0% | 70% | 1365 | 192 MB | VectorEstimator → **CPU** (dynamic shapes can't use ANE) |
 | Supertonic (default, int4 L-bucketed) | batch (8-step diffusion) | ~90% | 0% | ~10% | 1289 | 102 MB | VectorEstimator → **ANE** (fixed L-buckets) |
 | PocketTTS (v2.1) | streaming (autoregressive) | ~9% | ~31% | ~60% | 2629 | ~330 MB | flow_decoder_fused → **ANE**; flowlm/cond → GPU; mimi → CPU |
 
 **Component detail**
 
-### Kokoro ANE (7-stage)
+### Kokoro ANE v3
+
+**Separate check: M5 Pro, 24 GiB, macOS 27.0 (26A428), October 7, 2026.**
+The historical seven-stage op-count percentages below do not describe v3.
+
+| Stage | Requested compute policy in v0.17.6 |
+| --- | --- |
+| Static/dynamic Albert, PostAlbert, Alignment, Prosody, masked decoder | `.cpuAndNeuralEngine` |
+| Fast waveform generator | `.cpuAndGPU` |
+| Native source/STFT | CPU / Accelerate (outside Core ML) |
+| Long-input fallback Vocoder | `.cpuAndNeuralEngine` |
+| Long-input fallback Noise / Tail | `.cpuAndGPU` |
+
+This is hybrid routing, not `.all`. Allowed devices are not a guarantee that
+all operations execute on one device; CPU fallback is permitted. There is no
+strict ANE-only Core ML compute policy. The public v3 API retains this fixed
+routing; the policy overrides below were local diagnostic changes.
+
+Across the three language variants, `MLComputePlan` preferred ANE for about
+**98.8% of estimated operation cost in static Albert-64** and approximately
+**100% in DecoderPre-200**; the source/generator plan preferred GPU for about
+**100%**. PostAlbert, Alignment and fp32 Prosody preferred CPU in this audit.
+These percentages are **estimated cost weights within individual graphs**, not
+op counts, measured utilization, wall-time shares or a runtime execution trace.
+The 32-token and 120-frame buckets are not covered by those percentages.
+
+A separate real-input check measured hybrid medians of **49.45 / 35.85 / 53.97 ms**
+for English / Japanese / Mandarin. Forcing `.cpuAndNeuralEngine` throughout
+measured **511.40 / 474.45 / 584.19 ms**. Both `.all` and `.cpuAndGPU` hit
+`GPURNNOps.mm: JIT not supported` during Prosody on the second warmup in all
+three cases. See the [timing protocol and raw records](TTS/Benchmarks.md#compute-policy-comparison).
+
+**Interpreting asitop:** the live demo performs short bursts, while the observed
+powermetrics collector sampled roughly once per second. Samples near three demo
+clicks reported about **30.0 / 9.7 / 11.7 mW** of system-wide ANE power for
+English / Japanese / Mandarin. Those observations are not synchronized per-process
+energy measurements and are separate from the compute-policy timing run.
+The installed asitop display rounded low power to `0.0 W` / `0%`; a local viewer
+showed mW and the maximum observed sample over 60 seconds. That maximum is still
+a sampled average, not an instantaneous utilization peak. Neither those readings
+nor a compute plan establish which Kokoro operations actually ran on ANE;
+process-attributed runtime tracing remains outstanding.
+[Compute-plan records](TTS/Measurements/KokoroV3/compute-placement.json) and
+[system-wide power samples](TTS/Measurements/KokoroV3/ane-latest-clicks.json)
+preserve the separate sources for those observations.
+
+### Kokoro ANE (legacy seven-stage capability profile)
+
+Historical June profile under `.cpuAndNeuralEngine` throughout. Percentages are
+preferred-device operation counts, not production utilization or v3 routing.
+
 | Component | ANE | GPU | CPU | ops | Size | Lat ms |
 |-----------|----:|----:|----:|----:|-----:|-------:|
 | Albert | 94% | 0% | 6% | 310 | 6 MB | 6.5 |

@@ -29,8 +29,8 @@ public final class AudioMelSpectrogram {
     // Config
     private let sampleRate: Int
     public let nFFT: Int
-    private let hopLength: Int  // window_stride * sample_rate
-    private let winLength: Int  // window_size * sample_rate
+    public let hopLength: Int  // window_stride * sample_rate
+    public let winLength: Int  // window_size * sample_rate
     private let fMin: Float = 0.0
     private let fMax: Float  // sample_rate / 2
     internal let preemph: Float  // NeMo preemphasis coefficient
@@ -56,13 +56,16 @@ public final class AudioMelSpectrogram {
     private var imagSq: [Float]
     private var frame: [Float]
 
+    /// NeMo's default pre-emphasis coefficient.
+    public static let defaultPreemph: Float = 0.97
+
     public init(
         sampleRate: Int = 16000,
         nMels: Int = 128,
         nFFT: Int = 512,
         hopLength: Int = 160,
         winLength: Int = 400,
-        preemph: Float = 0.97,
+        preemph: Float = AudioMelSpectrogram.defaultPreemph,
         padTo: Int = 0,
         logFloor: Float = powf(2, -24),
         logFloorMode: LogFloorMode = .additive,

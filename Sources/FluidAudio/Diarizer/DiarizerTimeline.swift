@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 
 // MARK: - Timeline Configuration
@@ -1389,3 +1390,4 @@ public enum DiarizerTimelineError: Error, LocalizedError {
         }
     }
 }
+#endif

@@ -94,17 +94,3 @@ public struct TdtDecoderState: Sendable {
         // Keep LSTM states as they represent the final linguistic context
     }
 }
-
-extension MLMultiArray {
-    func resetData(to value: NSNumber) {
-        for i in 0..<count {
-            self[i] = value
-        }
-    }
-
-    func copyData(from source: MLMultiArray) {
-        for i in 0..<count {
-            self[i] = source[i]
-        }
-    }
-}

@@ -8,10 +8,11 @@ Primary public APIs for FluidAudio components. See inline doc comments for compl
 - [Voice Activity Detection](#voice-activity-detection)
 - [Automatic Speech Recognition](#automatic-speech-recognition)
 - [Text-to-Speech](#text-to-speech)
+- [Decision Scoring](#decision-scoring)
 
 ## Common Patterns
 
-**Audio Format:** All modules expect 16kHz mono Float32 audio samples. Use `FluidAudio.AudioConverter` to convert `AVAudioPCMBuffer` or files to 16kHz mono for both CLI and library paths.
+**Audio Format:** Audio modules expect 16kHz mono Float32 audio samples. Use `FluidAudio.AudioConverter` to convert `AVAudioPCMBuffer` or files to 16kHz mono for both CLI and library paths.
 
 **Model Registry:** Models auto-download from HuggingFace by default. Customize the registry URL using:
 - `ModelRegistry.baseURL` (programmatic) - recommended for apps
@@ -44,7 +45,7 @@ Main class for speaker diarization and "who spoke when" analysis.
 ### OfflineDiarizerManager
 Full batch pipeline that mirrors the pyannote/Core ML exporter (powerset segmentation + VBx clustering).
 
-> Requires macOS 14 / iOS 17 or later because the manager relies on Swift Concurrency features and C++ clustering shims that are unavailable on older OS releases.
+> Requires macOS 14 / iOS 17 / tvOS 17 or later because the manager relies on Swift Concurrency features and C++ clustering shims that are unavailable on older OS releases.
 
 **Key Methods:**
 - `init(config: OfflineDiarizerConfig = .default)`
@@ -335,7 +336,9 @@ Apple Silicon. See [KokoroAne](TTS/KokoroAne.md) for the full pipeline.
 - `synthesize(text:voice:speed:) async throws -> Data`
   - One-shot text → 24 kHz mono 16-bit PCM WAV
 - `synthesizeDetailed(text:voice:speed:) async throws -> KokoroAneSynthesisResult`
-  - Returns samples + per-stage timings
+  - Returns samples + per-stage timings, plus `normalizedText` / `phonemes`
+    (the frontend output actually spoken) and `inputIds` / `predictedDurations`
+    for word-level timing
 - `synthesizeFromPhonemes(_:voice:speed:) async throws -> Data`
   - Bypass G2P; feed an already-IPA phoneme string directly
 - `synthesizeFromPhonemesDetailed(_:voice:speed:) async throws -> KokoroAneSynthesisResult`
@@ -415,3 +418,49 @@ for try await chunk in manager.synthesizeStreaming(text: longText) {
     playAudio(chunk)
 }
 ```
+
+## Decision Scoring
+
+### CuaS1FormsManager
+
+Actor-backed Core ML classifier that selects one supplied action for a form element.
+The caller supplies document values and UI descriptions, then validates and executes actions.
+
+```swift
+import FluidAudio
+import Foundation
+
+let manager = try await CuaS1FormsManager.load(
+    from: URL(fileURLWithPath: "/models/cua_s1_forms_fp16_options32.mlpackage"))
+let decision = try await manager.score(
+    context: """
+        TASK fill the form from the document, then submit
+        FORM Contact details
+        ELEMENT Edit "Email address" value=""
+        """,
+    options: ["fill E-mail: person@example.com", "check", "click", "skip"])
+print(decision.selectedOption, decision.probabilities)
+```
+
+**Loading:** `load(from:computeUnits:)` accepts a local `.mlpackage` or `.mlmodelc`;
+`init(model:)` accepts an already loaded `MLModel`. Both validate the tensor contract.
+`load(cacheDirectory:computeUnits:progressHandler:)` uses the shared download cache.
+The default compute policy is `.cpuAndNeuralEngine`. Use
+`try await CuaS1FormsManager.load()` to download and cache the default model from
+[Hugging Face](https://huggingface.co/FluidInference/cua-s1-forms-coreml), or download
+a portable package and use the local loader.
+
+**Input and output:**
+
+- Supply a nonempty context and 2–32 nonempty options. Excess options raise an error.
+- Encoding truncates at 224 UTF-8 bytes for context and 96 bytes per option;
+  inspect `contextWasTruncated` and `truncatedOptionIndices` before acting.
+- `selectedIndex` is zero-based; `selectedOption` retains the original string.
+  `probabilities` uses a stable softmax of the emitted logits; `rawProbabilities`
+  retains the model's unmodified softmax output for conversion comparisons.
+  Scores contain only supplied options, in order. Calls on one manager are serialized.
+- Invalid tensors, nonfinite or out-of-range scores, and nonzero padding
+  probabilities throw `CuaS1FormsError`. Scores do not authorize an action.
+
+See [Benchmarks](Benchmarks.md#cua-s1-forms-decision-scoring) for accuracy, latency,
+ANE placement, and the unresolved numerical failures in the converted artifacts.

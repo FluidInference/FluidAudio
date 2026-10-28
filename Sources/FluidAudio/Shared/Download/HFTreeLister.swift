@@ -2,9 +2,22 @@ import Foundation
 
 /// A file discovered in a HuggingFace repository tree listing.
 struct RemoteFile: Equatable, Sendable {
+    enum ContentID: Equatable, Sendable {
+        case lfsSHA256(String)
+        case gitBlobSHA1(String)
+    }
+
     let path: String
     /// Size in bytes as reported by the tree API; `-1` when not reported.
     let size: Int
+    /// LFS content hash, or the Git blob hash for a regular file (not an LFS pointer).
+    let contentID: ContentID?
+
+    init(path: String, size: Int, contentID: ContentID? = nil) {
+        self.path = path
+        self.size = size
+        self.contentID = contentID
+    }
 }
 
 /// The one tree-listing implementation for the download stack (#765 Wave 3),
@@ -48,12 +61,13 @@ enum HFTreeLister {
     /// excludes the file.
     static func listTree(
         repoRemotePath: String,
+        revision: String = "main",
         startingAt path: String = "",
         include: (_ itemPath: String, _ isDirectory: Bool) -> Bool,
         fetch: Fetch
     ) async throws -> [RemoteFile] {
         var files: [RemoteFile] = []
-        let apiPath = path.isEmpty ? "tree/main" : "tree/main/\(path)"
+        let apiPath = path.isEmpty ? "tree/\(revision)" : "tree/\(revision)/\(path)"
         var pageURL: URL? = try ModelRegistry.apiModels(repoRemotePath, apiPath)
         // Guards the walk against a server echoing a cursor it already served
         // (the old one-request-per-directory walkers could not loop).
@@ -85,13 +99,24 @@ enum HFTreeLister {
                     guard include(itemPath, true) else { continue }
                     files += try await listTree(
                         repoRemotePath: repoRemotePath,
+                        revision: revision,
                         startingAt: itemPath,
                         include: include,
                         fetch: fetch
                     )
                 } else if itemType == "file" {
                     guard include(itemPath, false) else { continue }
-                    files.append(RemoteFile(path: itemPath, size: item["size"] as? Int ?? -1))
+                    let contentID: RemoteFile.ContentID?
+                    if item["lfs"] != nil {
+                        // The top-level oid of an LFS entry hashes its pointer,
+                        // not the resolved content downloaded into the cache.
+                        let lfs = item["lfs"] as? [String: Any]
+                        contentID = (lfs?["oid"] as? String).map { .lfsSHA256($0) }
+                    } else {
+                        contentID = (item["oid"] as? String).map { .gitBlobSHA1($0) }
+                    }
+                    files.append(
+                        RemoteFile(path: itemPath, size: item["size"] as? Int ?? -1, contentID: contentID))
                 }
             }
 

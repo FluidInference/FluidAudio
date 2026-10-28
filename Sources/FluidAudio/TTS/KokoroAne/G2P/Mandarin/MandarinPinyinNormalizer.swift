@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Convert pypinyin's diacritic-form pinyin (`níhǎo`, `qiū`, `lǜ`) into
@@ -22,11 +23,18 @@ public enum MandarinPinyinNormalizer {
         /// Set by `MandarinErhua.merge`; consumed by
         /// `MandarinBopomofoMap.encode` to append the `ㄦ` suffix.
         public var erhua: Bool
+        /// Whether this `er` syllable is the erhua suffix `儿` and may fold
+        /// into the syllable before it. Pinyin alone can't tell `儿` from
+        /// `二` / `而` / `耳` / `尔`, so `MandarinG2P` sets this from the
+        /// source text (see `MandarinErhua.isSuffix`); `MandarinErhua.merge`
+        /// only folds syllables that carry it.
+        public var isErhuaSuffix: Bool
 
-        public init(base: String, tone: Int, erhua: Bool = false) {
+        public init(base: String, tone: Int, erhua: Bool = false, isErhuaSuffix: Bool = false) {
             self.base = base
             self.tone = tone
             self.erhua = erhua
+            self.isErhuaSuffix = isErhuaSuffix
         }
     }
 
@@ -103,3 +111,4 @@ public enum MandarinPinyinNormalizer {
         return Syllable(base: base, tone: tone)
     }
 }
+#endif

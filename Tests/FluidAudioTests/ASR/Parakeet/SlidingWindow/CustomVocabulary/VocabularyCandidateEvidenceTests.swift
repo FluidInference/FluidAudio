@@ -301,6 +301,23 @@ final class VocabularyCandidateEvidenceTests: XCTestCase {
         XCTAssertNil(ambiguous[0])
     }
 
+    func testLongTranscriptAlignsOffTheMainThreadWithoutStackOverflow() async {
+        let vocabulary = ["so", "we", "should", "um", "go", "go", "C++,", "re-enter", "don't", "“remote”"]
+        let baseWords = (0..<20_000).map { vocabulary[$0 * 7 % vocabulary.count] }
+        let baseText = baseWords.joined(separator: " ")
+
+        let ranges = await Task.detached {
+            VocabularyRescorer.alignBaseWordsToUTF8Ranges(baseText: baseText, baseWords: baseWords)
+        }.value
+        XCTAssertEqual(ranges.count, baseWords.count)
+        XCTAssertTrue(ranges.allSatisfy { $0 != nil })
+
+        let truncated = await Task.detached {
+            VocabularyRescorer.alignBaseWordsToUTF8Ranges(baseText: baseText, baseWords: Array(baseWords.dropLast()))
+        }.value
+        XCTAssertTrue(truncated.allSatisfy { $0 == nil }, "A trailing unmatched word must fail closed")
+    }
+
     func testMissingReorderedAndNormalizationOnlyMatchesFailClosed() {
         let cases: [(String, [String])] = [
             ("one two", ["two", "one"]),

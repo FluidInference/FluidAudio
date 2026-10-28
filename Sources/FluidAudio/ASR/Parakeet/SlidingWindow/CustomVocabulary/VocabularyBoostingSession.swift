@@ -84,6 +84,16 @@ public struct VocabularyBoostingSession: Sendable {
         )
     }
 
+    /// Whether transcript rescoring needs CTC inference. This does not predict
+    /// standalone keyword detections; callers requiring those must still rescore.
+    public func hasCTCRescoringCandidates(text: String, tokenTimings: [TokenTiming]) -> Bool {
+        rescorer.hasCTCRescoringCandidates(
+            transcript: text,
+            tokenTimings: tokenTimings,
+            minSimilarity: max(vocabSizeConfig.minSimilarity, vocabulary.minSimilarity)
+        )
+    }
+
     /// Rescore a transcript against CTC acoustic evidence from its audio.
     ///
     /// `tokenTimings` must be on the same clock as `audioSamples`: time zero

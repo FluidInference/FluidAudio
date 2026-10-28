@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 import Foundation
 import OSLog
@@ -497,6 +498,219 @@ public enum SpeakerUtilities {
 
         return VDSPOperations.l2Normalize(average)
     }
+
+    // MARK: - Clean Speaker Embeddings
+
+    /// Build one embedding per speaker from clean speech only, for enrolling speakers from a finished
+    /// diarization (for example with `SpeakerManager.initializeKnownSpeakers`).
+    ///
+    /// Averaging everything a speaker said lets crosstalk, short turns, and clustering mistakes pull the
+    /// embedding toward another voice, so a profile built that way can match the wrong person in the next
+    /// session. This works on `result.chunkEmbeddings`, the one independent embedding per (chunk, local
+    /// speaker), so run the diarizer with `exposeChunkEmbeddings = true` (`DiarizerConfig` or
+    /// `OfflineDiarizerConfig`). Segment embeddings can't be used: segments in a chunk share its
+    /// embedding, and offline segments carry their cluster centroid.
+    ///
+    /// A speaker's clean speech is the time `result.segments` show them talking and nobody else. Seconds
+    /// are counted as audio, not per chunk: `OfflineDiarizerManager`'s windows overlap (80% by default), so
+    /// the same second sits in several chunks. Each moment is split evenly between the chunks covering it,
+    /// and a chunk's share is its weight in the average; consensus and the floor use the kept chunks'
+    /// shares, so a moment a rejected chunk also covers doesn't count as agreement in full.
+    ///
+    /// A chunk with less than `minChunkCleanSpeech` seconds of clean speech isn't used, but its clean
+    /// speech still counts toward the speaker's total; a chunk whose embedding failed isn't counted. With 3 or more usable chunks, the medoid (the chunk
+    /// most like the others, counted by chunks rather than seconds so one long odd chunk can't stand for
+    /// the speaker) represents the voice, and chunks within `maxDistanceToMedoid` cosine distance of it are
+    /// kept; two chunks must be within that distance of each other. The speaker gets no embedding when
+    /// fewer than `minChunks` chunks are kept (one chunk has nothing to corroborate it), when the kept
+    /// chunks cover less than `minConsensus` of the speaker's clean speech (a cluster that is really two
+    /// people, including a second voice spread over many short chunks), or when they cover less than
+    /// `minTotalCleanSpeech` seconds.
+    ///
+    /// The defaults were measured on 3 AMI meetings, with chunks labeled by reference turns so the numbers
+    /// are about this function rather than clustering (`CleanSpeakerEmbeddingsAMITests`). With
+    /// `DiarizerManager`, 9 of 11 speakers got an embedding, 85% of held-out chunks were identified, and of 9
+    /// pairs of speakers merged into one cluster, 5 got no embedding and 4 got the majority's voice with at
+    /// most 0.05 more similarity to the other voice than the two voices share (at 0.6 that leak reached 0.3).
+    /// With `OfflineDiarizerManager`'s overlapping windows the embeddings matched `DiarizerManager`'s
+    /// (similarity 0.99 or more), 89% of held-out windows were identified, and the leak stayed under 0.05.
+    /// Chunk pairs are noisy (within 0.5: 45% of same-speaker pairs, 5% of different-speaker pairs), so a
+    /// looser pair rule would enroll blends. `DiarizerManager` drops turns under `minSpeechDuration` (1 s),
+    /// so other speakers' short interjections count as clean speech; on the same meetings that moved
+    /// embeddings by under 0.2%.
+    ///
+    /// - Parameters:
+    ///   - result: A diarization run with `chunkEmbeddings` populated
+    ///   - minChunkCleanSpeech: Least clean speech a chunk needs to be used, in seconds
+    ///   - minTotalCleanSpeech: Least clean speech the kept chunks must cover, in seconds of audio
+    ///   - maxDistanceToMedoid: Largest cosine distance from the speaker's medoid chunk to keep a chunk
+    ///   - minConsensus: Least share of the speaker's clean speech the kept chunks must cover
+    ///   - minChunks: Fewest kept chunks for an embedding
+    /// - Returns: Speaker ID to L2-normalized embedding; speakers without enough consistent clean speech are
+    ///   omitted, and the result is empty when `result.chunkEmbeddings` is nil
+    public static func cleanEmbeddingsBySpeaker(
+        _ result: DiarizationResult,
+        minChunkCleanSpeech: Double = 1.5,
+        minTotalCleanSpeech: Double = 4.0,
+        maxDistanceToMedoid: Float = 0.5,
+        minConsensus: Double = 0.6,
+        minChunks: Int = 2
+    ) -> [String: [Float]] {
+        guard let chunks = result.chunkEmbeddings else {
+            logger.warning("cleanEmbeddingsBySpeaker needs chunk embeddings; set exposeChunkEmbeddings = true")
+            return [:]
+        }
+        var turns: [String: [Interval]] = [:]
+        for segment in result.segments where segment.endTimeSeconds > segment.startTimeSeconds {
+            turns[segment.speakerId, default: []].append(
+                (Double(segment.startTimeSeconds), Double(segment.endTimeSeconds)))
+        }
+        // Each speaker's clean speech over the whole meeting, once.
+        var clean: [String: [Interval]] = [:]
+        for speaker in Set(chunks.map(\.speakerId)) where !speaker.isEmpty {
+            let others = merged(turns.filter { $0.key != speaker }.flatMap(\.value))
+            clean[speaker] = subtract(merged(turns[speaker] ?? []), others)
+        }
+
+        struct Entry {
+            var embedding: [Float]
+            /// Index into the speaker's `covering` list.
+            var slot: Int
+        }
+        var usable: [String: [Entry]] = [:]
+        /// Every valid chunk's clean speech, usable or too short, per speaker.
+        var covering: [String: [[Interval]]] = [:]
+        // A chunk whose embedding failed (NaN, zero) says nothing about the voice and isn't counted; a valid
+        // chunk too short to use still counts toward the speaker's clean speech.
+        for chunk in chunks
+        where !chunk.speakerId.isEmpty && chunk.embedding256.allSatisfy(\.isFinite)
+            && validateEmbedding(chunk.embedding256)
+        {
+            let own = clipped(clean[chunk.speakerId] ?? [], to: (chunk.startTimeSeconds, chunk.endTimeSeconds))
+            covering[chunk.speakerId, default: []].append(own)
+            guard measure(own) >= minChunkCleanSpeech else { continue }
+            usable[chunk.speakerId, default: []].append(
+                Entry(
+                    embedding: VDSPOperations.l2Normalize(chunk.embedding256),
+                    slot: covering[chunk.speakerId]!.count - 1))
+        }
+
+        var embeddings: [String: [Float]] = [:]
+        for (speakerId, entries) in usable {
+            guard let dimension = entries.first?.embedding.count,
+                entries.allSatisfy({ $0.embedding.count == dimension })
+            else {
+                logger.warning("Mixed embedding sizes for speaker \(speakerId); skipping")
+                continue
+            }
+            let n = entries.count
+            var distance = [[Float]](repeating: [Float](repeating: 0, count: n), count: n)
+            for i in 0..<n {
+                for j in (i + 1)..<max(i + 1, n) {
+                    let d = cosineDistance(entries[i].embedding, entries[j].embedding)
+                    distance[i][j] = d
+                    distance[j][i] = d
+                }
+            }
+            var kept = Array(0..<n)
+            if n == 2 {
+                guard distance[0][1] <= maxDistanceToMedoid else { continue }
+            } else if n >= 3 {
+                let medoid = (0..<n).min { distance[$0].reduce(0, +) < distance[$1].reduce(0, +) } ?? 0
+                kept = (0..<n).filter { $0 == medoid || distance[$0][medoid] <= maxDistanceToMedoid }
+            }
+            guard kept.count >= minChunks else { continue }
+            // Each moment of clean speech is split between every chunk covering it, kept or not, so a
+            // moment a rejected chunk also covers isn't counted as agreement in full.
+            let shares = sharedWeights(covering[speakerId] ?? [])
+            let all = Double(shares.reduce(0, +))
+            let weights = kept.map { shares[entries[$0].slot] }
+            let agreed = Double(weights.reduce(0, +))
+            guard agreed >= minTotalCleanSpeech, agreed >= minConsensus * all else { continue }
+            let mean = weightedSum(kept.map { entries[$0].embedding }, weights: weights, dimension: dimension)
+            embeddings[speakerId] = VDSPOperations.l2Normalize(mean)
+        }
+        return embeddings
+    }
+
+    typealias Interval = (start: Double, end: Double)
+
+    /// Each chunk's share of the audio its intervals cover: a moment covered by k chunks gives each 1/k of
+    /// its length, so overlapping windows don't count the same second several times.
+    static func sharedWeights(_ chunks: [[Interval]]) -> [Float] {
+        // One sweep over start/end events; each chunk's intervals are already merged, so a chunk is
+        // active at most once at a time.
+        var events: [(time: Double, start: Bool, chunk: Int)] = []
+        for (i, intervals) in chunks.enumerated() {
+            for interval in intervals where interval.end > interval.start {
+                events.append((interval.start, true, i))
+                events.append((interval.end, false, i))
+            }
+        }
+        events.sort { $0.time != $1.time ? $0.time < $1.time : (!$0.start && $1.start) }
+        var weights = [Double](repeating: 0, count: chunks.count)
+        var active = Set<Int>()
+        var last = events.first?.time ?? 0
+        for event in events {
+            let length = event.time - last
+            if length > 0, !active.isEmpty {
+                for i in active { weights[i] += length / Double(active.count) }
+            }
+            last = event.time
+            if event.start { active.insert(event.chunk) } else { active.remove(event.chunk) }
+        }
+        return weights.map { Float($0) }
+    }
+
+    private static func weightedSum(_ embeddings: [[Float]], weights: [Float], dimension: Int) -> [Float] {
+        var sum = [Float](repeating: 0, count: dimension)
+        for (embedding, weight) in zip(embeddings, weights) {
+            for d in 0..<dimension {
+                sum[d] += weight * embedding[d]
+            }
+        }
+        return sum
+    }
+
+    /// Sorted, merged intervals.
+    static func merged(_ intervals: [Interval]) -> [Interval] {
+        var out: [Interval] = []
+        for (start, end) in intervals.filter({ $0.end > $0.start }).sorted(by: { $0.start < $1.start }) {
+            if let last = out.last, start <= last.end {
+                out[out.count - 1].end = max(last.end, end)
+            } else {
+                out.append((start, end))
+            }
+        }
+        return out
+    }
+
+    /// `a` minus `b`; both merged.
+    static func subtract(_ a: [Interval], _ b: [Interval]) -> [Interval] {
+        var out: [Interval] = []
+        for (start, end) in a {
+            var cursor = start
+            for (bs, be) in b where be > cursor && bs < end {
+                if bs > cursor { out.append((cursor, bs)) }
+                cursor = max(cursor, be)
+            }
+            if cursor < end { out.append((cursor, end)) }
+        }
+        return out
+    }
+
+    /// Merged intervals cut to `span`.
+    static func clipped(_ intervals: [Interval], to span: Interval) -> [Interval] {
+        intervals.compactMap { i in
+            let s = max(i.start, span.start)
+            let e = min(i.end, span.end)
+            return s < e ? (s, e) : nil
+        }
+    }
+
+    static func measure(_ intervals: [Interval]) -> Double {
+        intervals.reduce(0) { $0 + $1.end - $1.start }
+    }
 }
 
 /// These functions provide additional capabilities beyond core diarization
@@ -592,3 +806,4 @@ extension SpeakerManager {
         return (speakers.count, totalDuration, min(1.0, averageConfidence), speakersWithHistory)
     }
 }
+#endif

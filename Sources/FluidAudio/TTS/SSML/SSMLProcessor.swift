@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Main SSML processing orchestrator
@@ -102,3 +103,4 @@ public enum SSMLProcessor {
         return [trimmed]
     }
 }
+#endif

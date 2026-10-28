@@ -49,28 +49,39 @@ final class Supertonic3BucketPaddingTests: XCTestCase {
         // FP16 dynamic stays at repo root; variants live under the subdir.
         XCTAssertEqual(
             ModelNames.Supertonic3.vectorEstimatorFile(precisionSuffix: nil, bucket: nil),
-            "VectorEstimator.mlmodelc")
+            "VectorEstimator_v2.mlmodelc")
         XCTAssertEqual(
             ModelNames.Supertonic3.vectorEstimatorFile(precisionSuffix: "int4", bucket: nil),
-            "VectorEstimatorVariants/VectorEstimator_int4.mlmodelc")
+            "VectorEstimatorVariants/VectorEstimator_v2_int4.mlmodelc")
         XCTAssertEqual(
             ModelNames.Supertonic3.vectorEstimatorFile(precisionSuffix: "int8", bucket: 256),
-            "VectorEstimatorVariants/VectorEstimator_L256_int8.mlmodelc")
+            "VectorEstimatorVariants/VectorEstimator_v2_L256_int8.mlmodelc")
     }
 
     func testRequiredFilesPerVariant() {
         let ane = ModelNames.Supertonic3.requiredFiles(veVariant: "ane-int4")
-        XCTAssertTrue(ane.contains("VectorEstimatorVariants/VectorEstimator_L128_int4.mlmodelc"))
-        XCTAssertTrue(ane.contains("VectorEstimatorVariants/VectorEstimator_L256_int4.mlmodelc"))
-        XCTAssertTrue(ane.contains("VectorEstimatorVariants/VectorEstimator_L512_int4.mlmodelc"))
-        XCTAssertFalse(ane.contains("VectorEstimator.mlmodelc"))
-        XCTAssertTrue(ane.contains("TextEncoder.mlmodelc"))  // shared module stays at root
+        XCTAssertTrue(ane.contains("VectorEstimatorVariants/VectorEstimator_v2_L128_int4.mlmodelc"))
+        XCTAssertTrue(ane.contains("VectorEstimatorVariants/VectorEstimator_v2_L256_int4.mlmodelc"))
+        XCTAssertTrue(ane.contains("VectorEstimatorVariants/VectorEstimator_v2_L512_int4.mlmodelc"))
+        XCTAssertFalse(ane.contains("VectorEstimator_v2.mlmodelc"))
+        XCTAssertTrue(ane.contains("TextEncoder_v2.mlmodelc"))  // shared module stays at root
 
         let dyn = ModelNames.Supertonic3.requiredFiles(veVariant: "dyn-int8")
-        XCTAssertTrue(dyn.contains("VectorEstimatorVariants/VectorEstimator_int8.mlmodelc"))
-        XCTAssertFalse(dyn.contains("VectorEstimator.mlmodelc"))
+        XCTAssertTrue(dyn.contains("VectorEstimatorVariants/VectorEstimator_v2_int8.mlmodelc"))
+        XCTAssertFalse(dyn.contains("VectorEstimator_v2.mlmodelc"))
 
         let def = ModelNames.Supertonic3.requiredFiles(veVariant: nil)
-        XCTAssertTrue(def.contains("VectorEstimator.mlmodelc"))
+        XCTAssertTrue(def.contains("VectorEstimator_v2.mlmodelc"))
+    }
+
+    func testV2EdgePadBundlesReplaceV1() {
+        // TE / DP / VE are the edge-pad-fixed v2 builds; the causal Vocoder is unchanged.
+        let files = ModelNames.Supertonic3.requiredFiles(veVariant: "ane-int4")
+        XCTAssertTrue(files.contains("TextEncoder_v2.mlmodelc"))
+        XCTAssertTrue(files.contains("DurationPredictor_v2.mlmodelc"))
+        XCTAssertTrue(files.contains("Vocoder.mlmodelc"))
+        XCTAssertFalse(files.contains("TextEncoder.mlmodelc"))
+        XCTAssertFalse(files.contains("DurationPredictor.mlmodelc"))
+        XCTAssertFalse(files.contains { $0.hasPrefix("VectorEstimatorVariants/VectorEstimator_L") })
     }
 }

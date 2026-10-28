@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 import Foundation
 
@@ -280,3 +281,4 @@ public enum SpeakerInitializationMode: Sendable {
     /// Skip speakers whose IDs match existing ones
     case skip
 }
+#endif

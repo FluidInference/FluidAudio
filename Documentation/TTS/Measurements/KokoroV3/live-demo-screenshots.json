@@ -1,0 +1,28 @@
+{
+  "source": "User-supplied live demo screenshots; individual runs, not benchmark medians",
+  "mode": "One at a time",
+  "timer": "Public text synthesis through complete PCM; excludes model load, warmup, WAV and playback",
+  "rows": [
+    {
+      "language": "en",
+      "legacyMs": 149.8,
+      "v3Ms": 79.8,
+      "displayedSpeedup": 1.88,
+      "v3AudioSeconds": 3.35
+    },
+    {
+      "language": "ja",
+      "legacyMs": 305.9,
+      "v3Ms": 57.8,
+      "displayedSpeedup": 5.29,
+      "v3AudioSeconds": 3.05
+    },
+    {
+      "language": "zh",
+      "legacyMs": 161.7,
+      "v3Ms": 71.9,
+      "displayedSpeedup": 2.25,
+      "v3AudioSeconds": 3.67
+    }
+  ]
+}

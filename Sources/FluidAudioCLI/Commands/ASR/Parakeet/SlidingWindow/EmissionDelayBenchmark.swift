@@ -95,6 +95,9 @@ public enum EmissionDelayBenchmark {
                     switch v {
                     case "v2": tdtVersion = .v2
                     case "v3": tdtVersion = .v3
+                    case "redux": tdtVersion = .redux
+                    case "ultra": tdtVersion = .ultra
+                    case "phonon2", "phonon-2": tdtVersion = .phonon2
                     case "110m", "tdt-ctc-110m": tdtVersion = .tdtCtc110m
                     default:
                         print("Unknown TDT version '\(v)', keeping v2")
@@ -425,6 +428,9 @@ public enum EmissionDelayBenchmark {
         switch v {
         case .v2: return "v2"
         case .v3: return "v3"
+        case .redux: return "redux"
+        case .ultra: return "ultra"
+        case .phonon2: return "phonon2"
         case .tdtCtc110m: return "tdt-ctc-110m"
         default: return "\(v)"
         }

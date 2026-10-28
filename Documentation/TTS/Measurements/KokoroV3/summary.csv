@@ -1,0 +1,13 @@
+language,policy,status,medianMs,minMs,maxMs,audioSeconds,peak
+en,hybrid,passed,49.449666,40.515875,66.98,3.35,0.5302734375
+en,cpuAndNeuralEngine,passed,511.400542,464.735209,526.832541,3.35,0.544921875
+en,all,failed (-6),,,,,
+en,cpuAndGPU,failed (-6),,,,,
+ja,cpuAndNeuralEngine,passed,474.447791,451.964542,522.908959,3.05,0.5595703125
+ja,all,failed (-6),,,,,
+ja,cpuAndGPU,failed (-6),,,,,
+ja,hybrid,passed,35.851334,35.414625,36.358667,3.05,0.5419921875
+zh,all,failed (-6),,,,,
+zh,cpuAndGPU,failed (-6),,,,,
+zh,hybrid,passed,53.97225,45.457584,58.523583,3.675,0.6953125
+zh,cpuAndNeuralEngine,passed,584.190834,505.655042,596.269708,3.675,0.681640625

@@ -7,22 +7,38 @@ This guide collects commonly used `fluidaudio` CLI commands for ASR, diarization
 TTS is built into the CLI. Run it directly:
 
 ```bash
-# Default Kokoro (CPU+GPU, multi-voice, chunker, custom lexicon)
+# Default TTS backend (use --backend to select explicitly)
 swift run fluidaudiocli tts "Hello from FluidAudio" --output out.wav
 
-# Kokoro ANE (7-stage, ANE-resident, 3-11× RTFx, single voice af_heart)
+# Kokoro legacy seven-stage runtime (variant voices; OS-dependent routing)
 swift run fluidaudiocli tts "Hello from FluidAudio" \
   --backend kokoro-ane \
   --output out-ane.wav
+
+# Kokoro ANE v3: fixed hybrid CPU/ANE/GPU routing (v0.17.6+)
+swift run -c release fluidaudiocli tts "Hello from FluidAudio" \
+  --backend kokoro-ane --kokoro-version v3 --voice af_heart --output en.wav
+swift run -c release fluidaudiocli tts "こんにちは、世界。" \
+  --backend kokoro-ane --kokoro-version v3 --variant ja --voice jf_alpha --output ja.wav
+swift run -c release fluidaudiocli tts "你好世界。" \
+  --backend kokoro-ane --kokoro-version v3 --variant zh --voice zf_001 --output zh.wav
 
 # PocketTTS (streaming, voice cloning)
 swift run fluidaudiocli tts "Hello from FluidAudio" \
   --backend pocket \
   --output out-pocket.wav
 
+# Gradium Phonon 31m on the Neural Engine (macOS 15+); --voice en_us_Easton, characters_The Snow Queen, ...
+swift run -c release fluidaudiocli tts "Your order of $42.50 ships today." \
+  --backend pocket-small --model phonon --voice en_gb_Maeve --output phonon.wav
+
 # Multilingual G2P benchmark
 swift run fluidaudiocli g2p-benchmark
 ```
+
+V3 requires macOS 15 / iOS 18. It supports the fixed hybrid route, not arbitrary
+global compute policies. See [Kokoro usage and limits](TTS/KokoroAne.md) and
+[latency measurement boundaries](TTS/Benchmarks.md#kokoro-ane-v3-selected-m5-pro-measurements).
 
 ## ASR
 
@@ -32,6 +48,9 @@ swift run fluidaudiocli transcribe audio.wav
 
 # English-only run with higher accuracy
 swift run fluidaudiocli transcribe audio.wav --model-version v2
+
+# Parakeet Unified (English, punctuation and capitalization), with word timings in the JSON
+swift run fluidaudiocli transcribe audio.wav --model-version unified --output-json out.json
 
 # Streaming ASR with Parakeet EOU
 swift run fluidaudiocli parakeet-eou --input audio.wav
@@ -108,6 +127,32 @@ swift run fluidaudiocli vad-benchmark --all-files --output vad_results.json --de
 
 `swift run fluidaudiocli vad-analyze --help` lists every tuning option (padding,
 negative threshold overrides, max-duration splitting, etc.).
+
+## Speech Enhancement (LocalVQE)
+
+```bash
+# Echo cancellation + noise suppression: mic capture plus what the speaker played
+swift run -c release fluidaudiocli enhance mic.wav --reference speaker.wav --output clean.wav
+
+# Noise suppression / dereverb only (silent far end)
+swift run -c release fluidaudiocli enhance mic.wav --output clean.wav
+
+# Drive the streaming API in 256-sample buffers with the 16 ms export and report per-call latency
+swift run -c release fluidaudiocli enhance mic.wav -r speaker.wav --chunk 16ms --streaming --buffer-samples 256
+```
+
+`--variant v1.2` selects the 1.3M-param checkpoint, `--compute-units gpu`
+moves the model off the CPU, and `--model-dir DIR` loads local `.mlmodelc`
+bundles instead of downloading.
+
+```bash
+# Near-end word recall / WER / far-end leakage on the AEC-Challenge synthetic mini set (auto-downloads)
+swift run -c release fluidaudiocli enhance-benchmark
+swift run -c release fluidaudiocli enhance-benchmark --max-files 50 --variants v1.3 --no-reference --output results.json
+# Split the run across machines: contiguous shard i of n, then merge + verify the shard reports
+swift run -c release fluidaudiocli enhance-benchmark --shard 0/5 --output shard0.json
+python3 Scripts/verify_localvqe_benchmark.py shard*.json --merged results.json --expected-files 200
+```
 
 ## Datasets
 

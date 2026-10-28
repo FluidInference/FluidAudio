@@ -2,8 +2,29 @@ import Foundation
 
 /// Model repositories on HuggingFace
 public enum Repo: String, CaseIterable, Sendable {
+    /// CUA-S1-FORMS form-option decision scorer. See Decision/CuaS1Forms.
+    case cuaS1Forms = "FluidInference/cua-s1-forms-coreml"
     case vad = "FluidInference/silero-vad-coreml"
+    /// LocalVQE speech enhancement (AEC + NS + dereverb). fp32 streaming
+    /// exports of the v1.3 (4.8M) and v1.2 (1.3M) checkpoints in 16 ms and
+    /// 256 ms chunk sizes; the variant key selects one file. See Enhancement/LocalVQE.
+    case localVqe = "FluidInference/localvqe-coreml"
     case parakeetV3 = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
+    /// Parakeet Redux: moondream's ternary ({-1, 0, +1}) re-training of
+    /// parakeet-tdt-0.6b-v3. Same tokenizer, 15 s window and decoder/joint
+    /// contract as v3; the encoder ships as exact 2-bit palettized weights
+    /// (~180 MB vs ~425 MB). Loaded through `AsrModelVersion.redux`.
+    case parakeetRedux = "FluidInference/parakeet-redux-coreml"
+    /// Parakeet Ultra: moondream's full-precision post-training of
+    /// parakeet-tdt-0.6b-v3. Same tokenizer, window and decoder/joint contract
+    /// as v3; int8-linear encoder (~595 MB). Loaded through `AsrModelVersion.ultra`.
+    case parakeetUltra = "FluidInference/parakeet-ultra-coreml"
+    /// Phonon-2: Fermion Research's quantization-aware re-training of
+    /// parakeet-tdt-0.6b-v3 (English). Same tokenizer, window and decoder/joint
+    /// contract as v3; the default encoder keeps the checkpoint's exact
+    /// five-value weights as a sparsity mask plus fp16 palettes (321 MB,
+    /// iOS 18+). Loaded through `AsrModelVersion.phonon2`.
+    case phonon2 = "FluidInference/phonon-2-coreml"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
     case parakeetCtc110m = "FluidInference/parakeet-ctc-110m-coreml"
     case parakeetCtc06b = "FluidInference/parakeet-ctc-0.6b-coreml"
@@ -51,6 +72,7 @@ public enum Repo: String, CaseIterable, Sendable {
     case kokoroAneZh = "FluidInference/kokoro-82m-coreml/ANE-zh"
     case kokoroAneJa = "FluidInference/kokoro-82m-coreml/ANE-ja"
     case sortformer = "FluidInference/diar-streaming-sortformer-coreml"
+    case nemotron3Diarization = "FluidInference/nemotron-3-diarization-coreml"
     case lseendAmi = "FluidInference/ls-eend-coreml/optimized/ami"
     case lseendCallHome = "FluidInference/ls-eend-coreml/optimized/ch"
     case lseendDihard2 = "FluidInference/ls-eend-coreml/optimized/dih2"
@@ -96,6 +118,12 @@ public enum Repo: String, CaseIterable, Sendable {
     /// Conversion lives in mobius (`models/tts/inflect-v2`).
     case inflectMicro = "FluidInference/inflect-v2-coreml/micro"
     case inflectNano = "FluidInference/inflect-v2-coreml/nano"
+    /// Paradee-8M (Kokoro-82M distilled to 8M, single voice). One repo with two
+    /// precision subdirectories (`int8/`, `fp32/`), each holding
+    /// `ParadeeText.mlmodelc` + `ParadeeAcoustic.mlmodelc` + `vocab.json`.
+    /// Conversion notes are on the model card.
+    case paradeeInt8 = "FluidInference/paradee-8m-coreml/int8"
+    case paradeeFp32 = "FluidInference/paradee-8m-coreml/fp32"
     /// Chatterbox Multilingual (ResembleAI, 23 languages, **beta**) — T3 Llama-520M
     /// AR speech-token generator (CFG batch 2, MLState KV decode) + S3Gen
     /// flow-matching mel decoder + HiFT vocoder. Repo root holds the
@@ -116,6 +144,8 @@ public enum Repo: String, CaseIterable, Sendable {
     /// Repository slug (without owner)
     public var name: String {
         switch self {
+        case .cuaS1Forms:
+            return "cua-s1-forms-coreml"
         case .chatterbox:
             return "chatterbox-multilingual-coreml"
         case .chatterboxNano:
@@ -126,8 +156,16 @@ public enum Repo: String, CaseIterable, Sendable {
             return "Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML"
         case .vad:
             return "silero-vad-coreml"
+        case .localVqe:
+            return "localvqe-coreml"
         case .parakeetV3:
             return "parakeet-tdt-0.6b-v3-coreml"
+        case .parakeetRedux:
+            return "parakeet-redux-coreml"
+        case .parakeetUltra:
+            return "parakeet-ultra-coreml"
+        case .phonon2:
+            return "phonon-2-coreml"
         case .parakeetV2:
             return "parakeet-tdt-0.6b-v2-coreml"
         case .parakeetCtc110m:
@@ -170,6 +208,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "kokoro-82m-coreml/ANE-ja"
         case .sortformer:
             return "diar-streaming-sortformer-coreml"
+        case .nemotron3Diarization:
+            return "nemotron-3-diarization-coreml"
         case .lseendAmi:
             return "ls-eend-coreml/optimized/ami"
         case .lseendCallHome:
@@ -198,6 +238,10 @@ public enum Repo: String, CaseIterable, Sendable {
             return "inflect-v2-coreml/micro"
         case .inflectNano:
             return "inflect-v2-coreml/nano"
+        case .paradeeInt8:
+            return "paradee-8m-coreml/int8"
+        case .paradeeFp32:
+            return "paradee-8m-coreml/fp32"
         }
     }
 
@@ -228,8 +272,25 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/StyleTTS-2-coreml"
         case .inflectMicro, .inflectNano:
             return "FluidInference/inflect-v2-coreml"
+        case .paradeeInt8, .paradeeFp32:
+            return "FluidInference/paradee-8m-coreml"
         default:
             return "FluidInference/\(name)"
+        }
+    }
+
+    /// Immutable Hugging Face revision used for downloads.
+    ///
+    /// Most repositories retain the historical `main` behavior. Repositories
+    /// with reviewed supply-chain metadata can opt into a pinned commit so a
+    /// mutable Hub branch cannot silently change the files loaded by a released
+    /// FluidAudio version.
+    public var revision: String {
+        switch self {
+        case .diarizer:
+            return "df2625ac79a7ac6b65ad868fee6d80f320da4232"
+        default:
+            return "main"
         }
     }
 
@@ -270,8 +331,37 @@ public enum Repo: String, CaseIterable, Sendable {
             return "micro"
         case .inflectNano:
             return "nano"
+        case .paradeeInt8:
+            return "int8"
+        case .paradeeFp32:
+            return "fp32"
         default:
             return nil
+        }
+    }
+
+    /// Whether a repo-root download (no `subPath`) also sweeps in every loose
+    /// `.json`/`.txt` file at the repository root, beyond the required-model
+    /// patterns. Most root-level repos rely on this allowance for tokenizer
+    /// and config files their required set does not name. Download-policy
+    /// detail consumed only by `ModelHub.download`; not public API.
+    ///
+    /// The kokoro root opts out. Its required set (`ModelNames.G2P.requiredModels`,
+    /// returned for every variant) already names `g2p_vocab.json`, and the
+    /// root also carries ~40 MB of per-language lexicon caches
+    /// (`us_`/`es_`/`fr_lexicon_cache.json`, `us_`/`gb_gold.json`,
+    /// `us_`/`gb_silver.json`) that the sweep pulled for every caller — most
+    /// of it never read by an English-only setup (#1044). Each language
+    /// frontend fetches its own lexicon on demand via
+    /// `KokoroAneResourceDownloader.ensureLexiconCache` /
+    /// `ensureEnglishLexicon` instead, so a bare `ModelHub.download(.kokoro)`
+    /// no longer leaves `us_lexicon_cache.json` in the cache.
+    var sweepsRootMetadata: Bool {
+        switch self {
+        case .kokoro:
+            return false
+        default:
+            return true
         }
     }
 
@@ -328,6 +418,10 @@ public enum Repo: String, CaseIterable, Sendable {
             return "inflect-v2-coreml/micro"
         case .inflectNano:
             return "inflect-v2-coreml/nano"
+        case .paradeeInt8:
+            return "paradee-8m-coreml/int8"
+        case .paradeeFp32:
+            return "paradee-8m-coreml/fp32"
         default:
             return name.replacingOccurrences(of: "-coreml", with: "")
         }
@@ -360,6 +454,16 @@ public enum ParakeetEncoderPrecision: String, Sendable, CaseIterable {
 
 /// Centralized model names for all FluidAudio components
 public enum ModelNames {
+
+    /// CUA-S1-FORMS model artifact names.
+    public enum CuaS1Forms {
+        /// Fixed 32-option FP16 decision scorer.
+        public static let model = "cua_s1_forms_fp16_options32"
+        /// Compiled scorer downloaded by the Swift manager.
+        public static let modelFile = model + ".mlmodelc"
+        /// Complete set of runtime model artifacts.
+        public static let requiredModels: Set<String> = [modelFile]
+    }
 
     /// Diarizer model names
     public enum Diarizer {
@@ -649,6 +753,42 @@ public enum ModelNames {
         ]
     }
 
+    /// LocalVQE speech-enhancement model names.
+    ///
+    /// One `.mlmodelc` per (checkpoint, chunk) pair, e.g.
+    /// `localvqe-v1.3-4.8M-256ms.mlmodelc`. The download variant key
+    /// (`"v1.3-256ms"`) narrows the required set to that single file.
+    public enum LocalVQE {
+        public static func modelFile(variant: LocalVqeVariant, chunk: LocalVqeChunk) -> String {
+            "\(variant.fileStem)-\(chunk.rawValue).mlmodelc"
+        }
+
+        public static func variantKey(variant: LocalVqeVariant, chunk: LocalVqeChunk) -> String {
+            "\(variant.rawValue)-\(chunk.rawValue)"
+        }
+
+        public static var allModels: Set<String> {
+            var files: Set<String> = []
+            for variant in LocalVqeVariant.allCases {
+                for chunk in LocalVqeChunk.allCases {
+                    files.insert(modelFile(variant: variant, chunk: chunk))
+                }
+            }
+            return files
+        }
+
+        /// Required files for a download variant key; the full set when the
+        /// key is absent or unrecognised.
+        public static func requiredModels(variant: String?) -> Set<String> {
+            for v in LocalVqeVariant.allCases {
+                for c in LocalVqeChunk.allCases where variantKey(variant: v, chunk: c) == variant {
+                    return [modelFile(variant: v, chunk: c)]
+                }
+            }
+            return allModels
+        }
+    }
+
     /// Parakeet EOU streaming model names
     public enum ParakeetEOU {
         public static let encoder = "streaming_encoder"
@@ -786,6 +926,27 @@ public enum ModelNames {
     }
 
     /// Sortformer streaming diarization model names
+    public enum Nemotron3 {
+        /// Root-level assets every preset needs (split-graph presets also need
+        /// `pre_encode_proj_t.bin`).
+        public static let silenceEmbeddingFile = "learnable_sil_emb.bin"
+        public static let preEncodeProjectionFile = "pre_encode_proj_t.bin"
+        public static let requiredAssets: Set<String> = [silenceEmbeddingFile, preEncodeProjectionFile]
+
+        /// Identifies which upstream checkpoint the published CoreML bundles were
+        /// converted from.
+        ///
+        /// The cache is keyed on this, not just on file presence: NVIDIA's general-access
+        /// checkpoint is a retrained model rather than a repack of the preview, so a client
+        /// holding preview bundles would otherwise keep serving superseded weights forever
+        /// — silently, since the file layout is identical. **Bump this whenever the
+        /// published weights change.**
+        public static let weightsVersion = "ga-2026-09-23"
+
+        /// Marker file recording `weightsVersion` for the cached bundles.
+        public static let weightsVersionFile = ".fluidaudio-nemotron3-weights"
+    }
+
     public enum Sortformer {
         /// Selects which weight-precision build of the model set to download.
         ///
@@ -837,6 +998,7 @@ public enum ModelNames {
                 }
             }
 
+            #if Diarizer
             public var defaultConfiguration: SortformerConfig {
                 switch self {
                 case .fastV2:
@@ -855,6 +1017,7 @@ public enum ModelNames {
                     return .efficientV2_1
                 }
             }
+            #endif
 
             /// Compiled-model path for this variant at the default (`.fp16`) precision.
             public var fileName: String {
@@ -866,9 +1029,11 @@ public enum ModelNames {
                 return "\(precision.subdirectory)/\(name).mlmodelc"
             }
 
+            #if Diarizer
             public func isCompatible(with config: SortformerConfig) -> Bool {
                 defaultConfiguration.isCompatible(with: config)
             }
+            #endif
         }
 
         /// Repo subdirectory holding the default (`.fp16`) model set. Both v3 sets are the
@@ -891,6 +1056,7 @@ public enum ModelNames {
             return variant.fileName(precision: precision)
         }
 
+        #if Diarizer
         /// Bundle name for a given configuration (honors `config.precision`)
         public static func bundle(for config: SortformerConfig) -> String? {
             guard let variant = config.modelVariant else {
@@ -899,6 +1065,7 @@ public enum ModelNames {
             assert(variant.isCompatible(with: config), "ERROR: Model variant and configuration are not compatible.")
             return variant.fileName(precision: config.precision)
         }
+        #endif
 
         /// Default bundle name
         public static var defaultBundle: String {
@@ -1044,6 +1211,11 @@ public enum ModelNames {
             public static let writeState = "write_state"
             public static let prefill = "prefill"
             public static let generate = "generate"
+            /// Small-model packs (`v4/<model>/`) only: Mimi decoder over its
+            /// own MLState buffers, and the fused per-frame function
+            /// (FlowLM step + flow head + Mimi) that `PocketTtsSmallEngine` uses.
+            public static let decode = "decode"
+            public static let generateDecode = "generate_decode"
         }
 
         public static let condStepFile = condStep + ".mlmodelc"
@@ -1225,9 +1397,13 @@ public enum ModelNames {
     /// JSON files. File names match the HuggingFace tree at
     /// `FluidInference/supertonic-3-coreml/`.
     public enum Supertonic3 {
-        public static let textEncoder = "TextEncoder"
-        public static let durationPredictor = "DurationPredictor"
-        public static let vectorEstimator = "VectorEstimator"
+        /// `_v2` builds emulate upstream's edge (replicate) padding at the right
+        /// edge of the valid region, so the T=128 text pad and the ANE latent
+        /// buckets no longer leak into the ConvNeXt convs. The Vocoder is causal
+        /// and unaffected, so it keeps its v1 name.
+        public static let textEncoder = "TextEncoder_v2"
+        public static let durationPredictor = "DurationPredictor_v2"
+        public static let vectorEstimator = "VectorEstimator_v2"
         public static let vocoder = "Vocoder"
 
         public static let textEncoderFile = textEncoder + ".mlmodelc"
@@ -1268,7 +1444,7 @@ public enum ModelNames {
         public static let variantsSubdir = "VectorEstimatorVariants"
 
         /// Bundle (dir) name of a VectorEstimator build, e.g.
-        /// `VectorEstimator`, `VectorEstimator_int4`, `VectorEstimator_L256_int8`.
+        /// `VectorEstimator_v2`, `VectorEstimator_v2_int4`, `VectorEstimator_v2_L256_int8`.
         public static func vectorEstimatorName(precisionSuffix: String?, bucket: Int?) -> String {
             var name = vectorEstimator
             if let bucket { name += "_L\(bucket)" }
@@ -1315,10 +1491,23 @@ public enum ModelNames {
             "synthesizer_f\(frames).mlmodelc"
         }
 
+        /// Synthesizer frame buckets; `InflectConstants.frameBuckets` reads these.
+        public static let frameBuckets = [256, 384, 512, 640, 768, 896, 1024, 2048]
+
         /// Encoder + all 8 synthesizer buckets (downloaded up front; buckets
-        /// load lazily). Buckets mirror `InflectConstants.frameBuckets`.
+        /// load lazily).
         public static let requiredModels: Set<String> = Set(
-            [encoderFile] + InflectConstants.frameBuckets.map { synthesizerFile(frames: $0) })
+            [encoderFile] + frameBuckets.map { synthesizerFile(frames: $0) })
+    }
+
+    /// Paradee-8M model names. File names match
+    /// `FluidInference/paradee-8m-coreml/<int8|fp32>/`.
+    public enum Paradee {
+        public static let textFile = "ParadeeText.mlmodelc"
+        public static let acousticFile = "ParadeeAcoustic.mlmodelc"
+        public static let vocabFile = "vocab.json"
+
+        public static let requiredModels: Set<String> = [textFile, acousticFile, vocabFile]
     }
 
     /// LuxTTS (ZipVoice-Distill) model names. The HF repo publishes the same
@@ -1411,21 +1600,33 @@ public enum ModelNames {
     ///     (`RangeDim(1, 108)`). CPU/GPU only — dynamic shapes block ANE.
     ///   - `decoderCacheExternalV2` — FP32, fixed `attention_mask` shape
     ///     `[1, 1, 1, 108]`. ANE-resident, ~1.6× faster decoder end-to-end
-    ///     on Apple Silicon. Drop-in replacement; `CoherePipeline`
-    ///     auto-detects the variant by inspecting the `attention_mask`
-    ///     input shape.
+    ///     on Apple Silicon.
+    ///   - `decoderCacheExternalV3` — same static graph as v2 with a 256-slot
+    ///     KV cache. Default. The 108-slot cache capped dense 35 s windows at
+    ///     ~99 output tokens and silently dropped the rest (#1013).
+    ///     `CoherePipeline` reads the cache length from the loaded model's
+    ///     `k_cache_0` shape, so all three variants load with the same code.
     public enum CohereTranscribe {
         public static let encoder = "cohere_encoder"
         public static let decoderCacheExternal = "cohere_decoder_cache_external"
         public static let decoderCacheExternalV2 = "cohere_decoder_cache_external_v2"
+        public static let decoderCacheExternalV3 = "cohere_decoder_cache_external_v3"
         public static let vocab = "vocab.json"
 
         public static let encoderCompiledFile = encoder + ".mlmodelc"
         public static let decoderCacheExternalCompiledFile = decoderCacheExternal + ".mlmodelc"
         public static let decoderCacheExternalV2CompiledFile = decoderCacheExternalV2 + ".mlmodelc"
+        public static let decoderCacheExternalV3CompiledFile = decoderCacheExternalV3 + ".mlmodelc"
 
-        /// Default required set — ships the ANE-friendly v2 decoder.
+        /// Default required set — ships the 256-slot static v3 decoder.
         public static let requiredModels: Set<String> = [
+            encoderCompiledFile,
+            decoderCacheExternalV3CompiledFile,
+            vocab,
+        ]
+
+        /// 108-slot static v2 decoder set (pre-v3).
+        public static let requiredModelsV2: Set<String> = [
             encoderCompiledFile,
             decoderCacheExternalV2CompiledFile,
             vocab,
@@ -1463,7 +1664,10 @@ public enum ModelNames {
         public static let albert = "KokoroAlbert.mlmodelc"
         public static let postAlbert = "KokoroPostAlbert.mlmodelc"
         public static let alignment = "KokoroAlignment.mlmodelc"
-        public static let prosody = "KokoroProsody.mlmodelc"
+        // v2: fp32 compute. The fp16 CPU/ANE path corrupts F0/N at the start of
+        // the utterance for many T_a >= 400 (quiet/garbled onset). Renamed (not
+        // overwritten) so cached clients re-download. See issue #947.
+        public static let prosody = "KokoroProsody_v2.mlmodelc"
         // v2: atan2 phase-correction in the noise-source STFT (removes broad-spectrum
         // HF noise / "sharpness"). Renamed (not overwritten) so cached clients
         // re-download. See mobius laishere-coreml docs/trials-and-errors.md.
@@ -1632,9 +1836,14 @@ public enum ModelNames {
             ]
         case .vad:
             return ModelNames.VAD.requiredModels
+        case .localVqe:
+            return ModelNames.LocalVQE.requiredModels(variant: variant)
         case .parakeetV3:
             let precision = ParakeetEncoderPrecision(rawValue: variant ?? "") ?? .int8
             return ModelNames.ASR.requiredModelsV3(precision: precision)
+        case .parakeetRedux, .parakeetUltra, .phonon2:
+            // Single encoder build; no precision variants.
+            return ModelNames.ASR.requiredModelsV3()
         case .parakeetV2:
             return ModelNames.ASR.requiredModels
         case .parakeetTdtCtc110m:
@@ -1645,6 +1854,8 @@ public enum ModelNames {
             return ModelNames.SenseVoice.requiredModels(precision: variant)
         case .campPlus:
             return ModelNames.CampPlus.requiredModels
+        case .cuaS1Forms:
+            return ModelNames.CuaS1Forms.requiredModels
         case .fsmnVad:
             return ModelNames.FsmnVad.requiredModels
         case .paraformerLargeZh:
@@ -1681,6 +1892,14 @@ public enum ModelNames {
                 return [variant]
             }
             return ModelNames.Sortformer.requiredModels
+        case .nemotron3Diarization:
+            // Downloads are driven by `Nemotron3Models.loadFromHuggingFace` via
+            // `download(subdirectory:)` (one preset bundle + the root .bin assets);
+            // provided for exhaustiveness.
+            if let variant = variant {
+                return [variant]
+            }
+            return ModelNames.Nemotron3.requiredAssets
         case .lseendAmi, .lseendCallHome, .lseendDihard2, .lseendDihard3:
             if let variant = variant {
                 return [variant + ".mlmodelc"]
@@ -1689,7 +1908,11 @@ public enum ModelNames {
         case .multilingualG2p:
             return ModelNames.MultilingualG2P.requiredModels
         case .cohereTranscribeCoreml:
-            return ModelNames.CohereTranscribe.requiredModels
+            switch variant {
+            case "v2": return ModelNames.CohereTranscribe.requiredModelsV2
+            case "v1": return ModelNames.CohereTranscribe.requiredModelsLegacy
+            default: return ModelNames.CohereTranscribe.requiredModels
+            }
         case .canary1bV2:
             return ModelNames.Canary.requiredModels(
                 precision: CanaryPrecision(rawValue: variant ?? "") ?? .int4)
@@ -1725,6 +1948,8 @@ public enum ModelNames {
             return ModelNames.LuxTts.requiredFiles(variant: variant)
         case .inflectMicro, .inflectNano:
             return ModelNames.Inflect.requiredModels
+        case .paradeeInt8, .paradeeFp32:
+            return ModelNames.Paradee.requiredModels
         }
     }
 }

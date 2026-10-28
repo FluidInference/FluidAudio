@@ -28,6 +28,11 @@ final class ModelNamesTests: XCTestCase {
         }
     }
 
+    func testDiarizerUsesImmutableModelRevision() {
+        XCTAssertEqual(Repo.diarizer.revision, "df2625ac79a7ac6b65ad868fee6d80f320da4232")
+        XCTAssertEqual(Repo.vad.revision, "main")
+    }
+
     func testRepoSubPathForVariants() {
         XCTAssertEqual(Repo.parakeetEou160.subPath, "160ms")
         XCTAssertEqual(Repo.parakeetEou320.subPath, "320ms")
@@ -182,6 +187,49 @@ final class ModelNamesTests: XCTestCase {
 
         // Should have no subpath (not a variant repo)
         XCTAssertNil(repo.subPath)
+    }
+
+    func testParakeetReduxRepoProperties() {
+        let repo = Repo.parakeetRedux
+        XCTAssertEqual(repo.remotePath, "FluidInference/parakeet-redux-coreml")
+        XCTAssertEqual(repo.name, "parakeet-redux-coreml")
+        XCTAssertEqual(repo.folderName, "parakeet-redux")
+        XCTAssertNil(repo.subPath)
+
+        // Single 2-bit encoder build (iOS 18+): the required set ignores the variant.
+        let required = ModelNames.getRequiredModelNames(for: repo, variant: nil)
+        XCTAssertEqual(required, ModelNames.ASR.requiredModelsV3())
+        XCTAssertEqual(required, ModelNames.getRequiredModelNames(for: repo, variant: "int4"))
+        XCTAssertTrue(required.contains(ModelNames.ASR.encoderFile))
+        XCTAssertTrue(required.contains(ModelNames.ASR.jointV3File))
+    }
+
+    func testPhonon2RepoProperties() {
+        let repo = Repo.phonon2
+        XCTAssertEqual(repo.remotePath, "FluidInference/phonon-2-coreml")
+        XCTAssertEqual(repo.name, "phonon-2-coreml")
+        XCTAssertEqual(repo.folderName, "phonon-2")
+        XCTAssertNil(repo.subPath)
+
+        // Single five-value encoder build (iOS 18+): the required set ignores the variant.
+        let required = ModelNames.getRequiredModelNames(for: repo, variant: nil)
+        XCTAssertEqual(required, ModelNames.ASR.requiredModelsV3())
+        XCTAssertEqual(required, ModelNames.getRequiredModelNames(for: repo, variant: "int8"))
+        XCTAssertTrue(required.contains(ModelNames.ASR.encoderFile))
+        XCTAssertTrue(required.contains(ModelNames.ASR.jointV3File))
+    }
+
+    func testParakeetUltraRepoProperties() {
+        let repo = Repo.parakeetUltra
+        XCTAssertEqual(repo.remotePath, "FluidInference/parakeet-ultra-coreml")
+        XCTAssertEqual(repo.name, "parakeet-ultra-coreml")
+        XCTAssertEqual(repo.folderName, "parakeet-ultra")
+        XCTAssertNil(repo.subPath)
+
+        // Single (iOS 17) encoder build: the required set ignores the variant.
+        let required = ModelNames.getRequiredModelNames(for: repo, variant: nil)
+        XCTAssertEqual(required, ModelNames.ASR.requiredModelsV3())
+        XCTAssertEqual(required, ModelNames.getRequiredModelNames(for: repo, variant: "int4"))
     }
 
     func testParakeetTdtCtc110mVocabulary() {

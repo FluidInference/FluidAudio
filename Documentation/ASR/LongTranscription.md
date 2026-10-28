@@ -127,6 +127,40 @@ The search keeps at least 6 encoder frames (480 ms) of overlap with the
 previous chunk so the overlap merger always has at least a handful of
 candidate tokens to align on.
 
+### Pause-Cut Windows (encoder ladder)
+
+With a **multifunction encoder** (`AsrModels.encoderLadder`, functions
+`enc_<ms>ms` for 5.04 / 10.16 / 15 s — Phonon-2 ships one) a window shorter
+than 15 s costs less Neural Engine time, so the chunker switches to a
+third strategy ahead of the two above: the window *ends* at the pause the
+next window starts from, with no overlap at that seam.
+
+- **Late-pause rule** (`latestPauseCut`). Frame energies are computed once
+  for the whole recording (`frameEnergySums`). Within a window's last 5 s
+  the rule takes the **latest run of at least 3 consecutive quiet frames**
+  (240 ms) and cuts at its midpoint; quiet is the reference engines' gate,
+  RMS below `0.18 ×` the window's peak frame RMS (floor 0.004), which admits
+  breath pauses rather than only dead silence. The decision is marked
+  `pauseCut`, and `process` trims the previous window's `audioEnd` to it.
+  Without a qualifying run the window falls back to the overlap rules above
+  and keeps its full length.
+- **Why latest, not quietest.** Neural Engine time is quantized in 64-frame
+  tiles of the encoder's time axis (10 s = 126 frames costs 12 ms, 11–15 s
+  all cost ~19 ms on an M5 Pro), so the gain comes from *fewer* windows,
+  not shorter ones: packing cuts toward 15 s turned a 3600 s file from 278
+  overlapping windows into ~265 pause-cut ones. A 2-frame run cut later
+  still but cost 0.3 WER points (more mid-phrase cuts) and probed more
+  gaps; a 5 %-of-median energy gate only matched deep silence and cut
+  *earlier* (308 windows).
+- **Accuracy.** Cutting at a pause removes the seam merge there entirely;
+  on the 1-hour Earnings-22 file WER improved 17.20 → 16.68 % with the
+  ladder path (both probe sizes below beat the overlap path). Reducing the
+  overlap *without* pause alignment is the opposite trade (1.0 s → 18.9 %,
+  0.5 s → 22.6 %) and is not done.
+- The strategy is gated on `AsrManager.hasEncoderLadder`: a single-shape
+  encoder would pay a full 15 s pass for a shortened window and only lose
+  the overlap, so it keeps the two-tier search unchanged.
+
 ## Warmup Prefix vs Mel Context
 
 Non-first chunks always include some samples from before the visible window,
@@ -334,8 +368,11 @@ punctuation-only pieces. Splices are then repaired at word granularity:
   head.
 
 The repair inspects only the tokenizer's own word-boundary marker, never
-transcript text, so it is language-agnostic. Without a vocabulary the merge
-is byte-for-byte unchanged.
+transcript text, so it is language-agnostic for scripts that mark word
+starts. The guard is off for unspaced scripts (`tdtJa`): no piece is
+word-initial there, so it would treat every piece as a mid-word continuation
+and drop tokens up to the next punctuation mark. Without a vocabulary the
+merge is byte-for-byte unchanged.
 
 A follow-up (PR #759) closed three residual *drop* paths in these repairs,
 where a seam with no splice-safe token available could silently discard
@@ -352,6 +389,89 @@ content instead of gluing it:
 
 The rule those three share: **a seam may produce a glued word in the worst
 case, but it must never delete real content.**
+
+### Seam Timing
+
+Token timestamps are emission frames, and they are not equally reliable
+across the window. Decoding the same audio at many window positions and
+comparing each word against the decodes that heard it mid-window:
+
+| Position in a 14.88 s window | Start bias | End bias | Words off by > 160 ms |
+|---|---|---|---|
+| 0.5 s – 13 s | within ±20 ms | within ±20 ms | 0–2 % |
+| 13 s – 14 s | ≈ −50 ms | ≈ −100 ms | 5–7 % |
+| last ≈ 0.9 s | ≈ −190 ms | ≈ −300 ms | ≈ 55 % |
+
+The first 0.5 s runs slightly late (≈ +70 to +100 ms); the last ≈ 1.4 s runs
+early, and word *ends* suffer most because the decoder is running out of
+right context. The curve was the same on English read speech, an English
+conference talk, and a German interview.
+
+The overlap exists so that each seam token is decoded twice, once in each
+position — but the matched-token merge kept the left window's copy, timing
+included, so the transcript carried the tail timings and discarded the good
+ones. A word at the end of one window followed by a word from the next then
+shows a gap that is not in the audio (`actually` 27.20–27.44, `go?` 28.16,
+where the speech is continuous).
+
+`mergeUsingMatches` now takes a matched token's `timestamp` and `duration`
+from the right window when that copy is at least
+`seamTimingHeadGuardFrames` (6 frames, 480 ms) past the right window's
+*decode start* — the frame its decoder began at, warm-up prefix included,
+since that is where the head bias begins — or, inside the guard, when the
+right copy is farther from its window's head than the left copy is from its
+window's end. The second clause is what a silence-aligned seam with only the
+6-frame minimum overlap relies on: every right copy there is inside the
+guard, and the rule still picks the copy decoded farther from an edge. The
+token's identity — piece, casing, confidence — still comes from the left
+window, which had real left context (see "Case-Folded Matching"). No audio
+is re-decoded: both copies already exist.
+
+Unmatched tokens between two matches move with the match before them (the
+left-sourced ones by that match's delta) and are held between their two
+neighbours, so the seam stays monotonic on its own; without this the clamp
+in `enforceMonotonicTimestamps` would flatten such a token onto the previous
+match, leaving a zero-length word and a wrong `gapStart` for the repair pass.
+
+The rule runs on every path that merges windows: the TDT batch path, the
+dual-decode arbitration path (`--dual-decode-arbitration`), and the Unified
+offline batch path (`UnifiedConfig.seamTimingRealignment`). `mergeChunks`
+takes the seam's windows as a required argument, so a caller that does not
+realign says so with `nil` rather than by omission.
+
+| Field | Default | Notes |
+|---|---|---|
+| `ASRConfig.seamTimingRealignment` | `true` | CLI: `--no-seam-timing-realignment` reproduces the previous timings exactly. |
+| `UnifiedConfig.seamTimingRealignment` | `true` | Same rule on the Unified offline path; the bias there has not been measured separately. |
+
+Measured on this branch (v0.17.7 base) on seam-tail words, against the
+mid-window reference, on both long-form paths. "Interior" is every other
+word under the same rule and is the floor the seam words are being brought
+down to:
+
+| Recording | Path | End off by > 160 ms, before | after | Interior words |
+|---|---|---|---|---|
+| English read speech (85 s, 6 seams) | v3 default (no mel, silence-aligned) | 50 % | 15 % | 3 % |
+| | `--mel-context` (fixed 2 s overlap) | 50 % | 5 % | 4 % |
+| English interview (304 s, 23 seams) | v3 default | 16 % | 10 % | 6 % |
+| | `--mel-context` | 33 % | 10 % | 5 % |
+
+Word starts move the same way (read speech, mel context: 18 % → 10 %;
+interview: 23 % → 6 %). The v3 default path starts from a smaller bias on
+conversational speech because its silence-aligned seams already fall at
+pauses, where the tail has less to get wrong.
+
+Limits:
+
+- The rule does not touch token identity, but later passes read timestamps
+  (`enforceMonotonicTimestamps`, `collapseSeamWordDuplicates`, the repair
+  pass), so text can change at a seam. In the recordings above it removed
+  one duplicated seam word (`along along`) on the read speech; the
+  interview text was identical on both paths.
+- The `mergeByMidpoint` fallback (too few tokens in the overlap to match)
+  keeps its existing behavior.
+- Gaps that open *inside* a window are a different failure and are not
+  addressed here.
 
 ## End-Aligned Final Window (issue #747)
 
@@ -563,7 +683,8 @@ window:
   directly on the dropped speech — with a gap-centred placement as
   fallback; each placement recovers spans the other misses.
 - Only tokens strictly inside the gap are spliced in (`spliceCandidate`),
-  starting at a word-initial piece (same rule as the seam merge, #683),
+  starting at a word-initial piece (same rule as the seam merge, #683;
+  except `tdtJa`, where the guard is off),
   with punctuation-aware, case-insensitive edge dedupe against the words
   bordering the gap. The probe can re-hear a bordering word at a slightly
   shifted frame, sometimes re-capitalized ("▁for" vs "▁For") — the merged
@@ -578,6 +699,18 @@ window:
   needs headroom beyond that — hence 32.
 - Genuine silence yields no in-gap tokens by construction and is left
   untouched.
+- **Probes run across the worker pool.** The probes of a round are
+  independent (each reads the round's starting token stream), so they are
+  collected first and decoded on every worker (`recoverSeamGap`), then
+  applied in gap order. On a 1-hour file this took the pass from 1.9 s to
+  0.75 s with a byte-identical transcript.
+- **Probe window with an encoder ladder.** When the model has one, the probe
+  runs on the ladder's *smallest* function (5.04 s for Phonon-2) rather
+  than a full 15 s window: the splice keeps in-gap tokens only and a
+  residual gap gets its own probe in the next round, so the short window
+  recovers as much at a third of the encoder time (1-hour file: 5.53 s vs
+  5.79 s, WER 16.68 vs 16.59 %). A window sized to each gap plus 2 s of
+  context was tried and lost on both counts (5.75 s, 16.90 %).
 
 ### Adaptive Speech-Energy Gate
 
@@ -677,6 +810,14 @@ the worker pool's clones each hold their own short-lived decoder/encoder
 buffers, so for the most memory-constrained environments setting
 `parallelChunkConcurrency = 1` and leaving streaming enabled is the lowest
 high-water-mark configuration.
+
+A 16-bit mono wav already at 16 kHz is mapped in place (`PcmWavLayout` +
+`DiskBackedAudioSampleSource.pcm16`): no conversion pass and no temporary
+float copy, so a 24-hour file opens in the time it takes to map it. Measured
+on the 24-hour Earnings-22 file with Phonon-2: 142.1 s → 133.8 s
+(608× → 646×), identical transcript, peak RSS 5.8 GB → 3.0 GB (the mapped
+wav itself). Every other format still streams through `AVAudioConverter`
+into a temporary float32 file.
 
 ## Validation Strategy
 
@@ -849,6 +990,7 @@ Useful focused checks:
 swift test --filter ChunkProcessorTests
 swift test --filter ChunkProcessorSeamResidualTests   # PR #759 drop-path fallbacks
 swift test --filter SeamGapRepairTests                # issue #758 gap splice + energy gate
+swift test --filter ChunkProcessorUnspacedScriptTests # tdtJa: splice guard off
 swift test --filter EndAlignedFinalWindowTests        # issue #747 final-window backfill
 swift test --filter TdtRefactoredComponentsTests
 swift test --filter TdtDecoderV2Tests

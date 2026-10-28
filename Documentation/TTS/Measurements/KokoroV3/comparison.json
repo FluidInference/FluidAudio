@@ -1,0 +1,198 @@
+{
+  "hardware": "Apple M5 Pro, 24 GiB",
+  "os": "macOS 27.0 (26A428)",
+  "sdkMergeCommit": "ca0cbe77843d7049f0be28db57244e21fae46566",
+  "modelRevision": "6c0750dd02ef9d981fb82f147d784a3f171755ee",
+  "warmups": 2,
+  "timedRuns": 5,
+  "method": "Serial isolated processes per language/policy. Same exact cached input IDs and style vectors. Timer around pipeline.synthesize through complete PCM, including native source/STFT. Excludes model load, G2P, WAV and statistics. Stage logging enabled only during discarded warmups. Policies rotate by language; timed iterations within a policy are consecutive. Existing desktop apps remain running. Local exploratory samples, not official benchmarks.",
+  "routing": "Local copy of released v3 pipeline. Only MLModelConfiguration.computeUnits is overridden for all models. Native operations remain CPU. Hybrid keeps released per-stage policies. Released v0.17.6 does not accept these global v3 overrides. cpuAndNeuralEngine permits CPU fallback and is not strict ANE-only. Compute-unit requests are not measured hardware attribution.",
+  "rows": [
+    {
+      "language": "en",
+      "policy": "hybrid",
+      "status": "passed",
+      "medianMs": 49.449666,
+      "minMs": 40.515875,
+      "maxMs": 66.98,
+      "audioSeconds": 3.35,
+      "peak": 0.5302734375,
+      "stageMedians": {
+        "Albert_64": 1.4937919974327087,
+        "Alignment": 1.232875019311905,
+        "Decoder_200": 2.793833017349243,
+        "NativeSource": 3.809750020503998,
+        "PostAlbert": 4.211416989564896,
+        "Prosody": 6.195915997028351,
+        "SourceGenerator": 26.96504098176956
+      }
+    },
+    {
+      "language": "en",
+      "policy": "cpuAndNeuralEngine",
+      "status": "passed",
+      "medianMs": 511.400542,
+      "minMs": 464.735209,
+      "maxMs": 526.832541,
+      "audioSeconds": 3.35,
+      "peak": 0.544921875,
+      "stageMedians": {
+        "Albert_64": 1.2941249907016754,
+        "Alignment": 0.3946250081062317,
+        "Decoder_200": 2.697499990463257,
+        "NativeSource": 2.48920801281929,
+        "PostAlbert": 2.7586250007152557,
+        "Prosody": 3.3506669998168945,
+        "SourceGenerator": 498.2420420050621
+      }
+    },
+    {
+      "language": "en",
+      "policy": "all",
+      "status": "failed (-6)",
+      "medianMs": null,
+      "minMs": null,
+      "maxMs": null,
+      "audioSeconds": null,
+      "peak": null,
+      "stageMedians": {},
+      "failureEvidence": "/AppleInternal/Library/BuildRoots/4~CV2iugCS017GRPdEjj32gfBJXr8YaxAcCWYlUuw/Library/Caches/com.apple.xbs/TemporaryDirectory.WK6jPd/Sources/MetalPerformanceShadersGraph/mpsgraph/MetalPerformanceShadersGraph/Runtimes/MPSRuntime/Operations/GPURNNOps.mm:1565: failed assertion `JIT not supported'"
+    },
+    {
+      "language": "en",
+      "policy": "cpuAndGPU",
+      "status": "failed (-6)",
+      "medianMs": null,
+      "minMs": null,
+      "maxMs": null,
+      "audioSeconds": null,
+      "peak": null,
+      "stageMedians": {},
+      "failureEvidence": "/AppleInternal/Library/BuildRoots/4~CV2iugCS017GRPdEjj32gfBJXr8YaxAcCWYlUuw/Library/Caches/com.apple.xbs/TemporaryDirectory.WK6jPd/Sources/MetalPerformanceShadersGraph/mpsgraph/MetalPerformanceShadersGraph/Runtimes/MPSRuntime/Operations/GPURNNOps.mm:1565: failed assertion `JIT not supported'"
+    },
+    {
+      "language": "ja",
+      "policy": "cpuAndNeuralEngine",
+      "status": "passed",
+      "medianMs": 474.447791,
+      "minMs": 451.964542,
+      "maxMs": 522.908959,
+      "audioSeconds": 3.05,
+      "peak": 0.5595703125,
+      "stageMedians": {
+        "Albert_64": 1.3007080256938934,
+        "Alignment": 0.4070829749107361,
+        "Decoder_200": 2.7335000038146973,
+        "NativeSource": 2.378792017698288,
+        "PostAlbert": 2.515082985162735,
+        "Prosody": 3.142916977405548,
+        "SourceGenerator": 461.57045900821686
+      }
+    },
+    {
+      "language": "ja",
+      "policy": "all",
+      "status": "failed (-6)",
+      "medianMs": null,
+      "minMs": null,
+      "maxMs": null,
+      "audioSeconds": null,
+      "peak": null,
+      "stageMedians": {},
+      "failureEvidence": "/AppleInternal/Library/BuildRoots/4~CV2iugCS017GRPdEjj32gfBJXr8YaxAcCWYlUuw/Library/Caches/com.apple.xbs/TemporaryDirectory.WK6jPd/Sources/MetalPerformanceShadersGraph/mpsgraph/MetalPerformanceShadersGraph/Runtimes/MPSRuntime/Operations/GPURNNOps.mm:1565: failed assertion `JIT not supported'"
+    },
+    {
+      "language": "ja",
+      "policy": "cpuAndGPU",
+      "status": "failed (-6)",
+      "medianMs": null,
+      "minMs": null,
+      "maxMs": null,
+      "audioSeconds": null,
+      "peak": null,
+      "stageMedians": {},
+      "failureEvidence": "/AppleInternal/Library/BuildRoots/4~CV2iugCS017GRPdEjj32gfBJXr8YaxAcCWYlUuw/Library/Caches/com.apple.xbs/TemporaryDirectory.WK6jPd/Sources/MetalPerformanceShadersGraph/mpsgraph/MetalPerformanceShadersGraph/Runtimes/MPSRuntime/Operations/GPURNNOps.mm:1565: failed assertion `JIT not supported'"
+    },
+    {
+      "language": "ja",
+      "policy": "hybrid",
+      "status": "passed",
+      "medianMs": 35.851334,
+      "minMs": 35.414625,
+      "maxMs": 36.358667,
+      "audioSeconds": 3.05,
+      "peak": 0.5419921875,
+      "stageMedians": {
+        "Albert_64": 1.21670800447464,
+        "Alignment": 0.28737500309944153,
+        "Decoder_200": 2.6525830030441284,
+        "NativeSource": 2.15412500500679,
+        "PostAlbert": 2.229374974966049,
+        "Prosody": 2.8358749747276306,
+        "SourceGenerator": 24.16687497496605
+      }
+    },
+    {
+      "language": "zh",
+      "policy": "all",
+      "status": "failed (-6)",
+      "medianMs": null,
+      "minMs": null,
+      "maxMs": null,
+      "audioSeconds": null,
+      "peak": null,
+      "stageMedians": {},
+      "failureEvidence": "/AppleInternal/Library/BuildRoots/4~CV2iugCS017GRPdEjj32gfBJXr8YaxAcCWYlUuw/Library/Caches/com.apple.xbs/TemporaryDirectory.WK6jPd/Sources/MetalPerformanceShadersGraph/mpsgraph/MetalPerformanceShadersGraph/Runtimes/MPSRuntime/Operations/GPURNNOps.mm:1565: failed assertion `JIT not supported'"
+    },
+    {
+      "language": "zh",
+      "policy": "cpuAndGPU",
+      "status": "failed (-6)",
+      "medianMs": null,
+      "minMs": null,
+      "maxMs": null,
+      "audioSeconds": null,
+      "peak": null,
+      "stageMedians": {},
+      "failureEvidence": "/AppleInternal/Library/BuildRoots/4~CV2iugCS017GRPdEjj32gfBJXr8YaxAcCWYlUuw/Library/Caches/com.apple.xbs/TemporaryDirectory.WK6jPd/Sources/MetalPerformanceShadersGraph/mpsgraph/MetalPerformanceShadersGraph/Runtimes/MPSRuntime/Operations/GPURNNOps.mm:1565: failed assertion `JIT not supported'"
+    },
+    {
+      "language": "zh",
+      "policy": "hybrid",
+      "status": "passed",
+      "medianMs": 53.97225,
+      "minMs": 45.457584,
+      "maxMs": 58.523583,
+      "audioSeconds": 3.675,
+      "peak": 0.6953125,
+      "stageMedians": {
+        "Albert_64": 1.4665409922599792,
+        "Alignment": 0.6295419931411743,
+        "Decoder_200": 3.028082996606827,
+        "NativeSource": 4.10979101061821,
+        "PostAlbert": 3.971457988023758,
+        "Prosody": 7.614499986171722,
+        "SourceGenerator": 32.09708300232887
+      }
+    },
+    {
+      "language": "zh",
+      "policy": "cpuAndNeuralEngine",
+      "status": "passed",
+      "medianMs": 584.190834,
+      "minMs": 505.655042,
+      "maxMs": 596.269708,
+      "audioSeconds": 3.675,
+      "peak": 0.681640625,
+      "stageMedians": {
+        "Albert_64": 1.2982079982757568,
+        "Alignment": 0.33283400535583496,
+        "Decoder_200": 2.689083009958267,
+        "NativeSource": 2.761209011077881,
+        "PostAlbert": 2.2730830013751984,
+        "Prosody": 3.4774169921875,
+        "SourceGenerator": 562.4224589765072
+      }
+    }
+  ]
+}

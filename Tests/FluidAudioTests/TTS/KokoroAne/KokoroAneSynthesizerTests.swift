@@ -3,6 +3,55 @@ import XCTest
 
 @testable import FluidAudio
 
+/// Stage bundle names must match the download set, including the renamed v2 bundles.
+final class KokoroAneStageBundleNameTests: XCTestCase {
+
+    func testStageBundlesMatchRequiredDownloadSet() {
+        let bundles = Set(KokoroAneStage.allCases.map(\.bundleName))
+        XCTAssertEqual(bundles, ModelNames.KokoroAne.requiredCoreMLModels)
+    }
+
+    func testProsodyUsesFp32ComputeBundle() {
+        // v1 fp16 Prosody corrupts F0/N at the utterance onset for many T_a >= 400 (#947).
+        XCTAssertEqual(KokoroAneStage.prosody.bundleName, "KokoroProsody_v2.mlmodelc")
+        XCTAssertEqual(ModelNames.KokoroAne.prosody, "KokoroProsody_v2.mlmodelc")
+    }
+}
+
+/// Joining per-chunk results for long text input (#712, #940).
+final class KokoroAneResultConcatenationTests: XCTestCase {
+
+    private func part(
+        samples: [Float], ids: [Int32], durations: [Int32], albertMs: Double
+    )
+        -> KokoroAneSynthesisResult
+    {
+        var timings = KokoroAneStageTimings()
+        timings.albert = albertMs
+        return KokoroAneSynthesisResult(
+            samples: samples, sampleRate: 24_000, encoderTokens: ids.count,
+            acousticFrames: Int(durations.reduce(0, +)), timings: timings,
+            inputIds: ids, predictedDurations: durations, normalizedText: "chunk", phonemes: "x")
+    }
+
+    func testConcatenatesInOrderAndSumsCounts() {
+        let a = part(samples: [0.1, 0.2], ids: [0, 5, 0], durations: [1, 2, 1], albertMs: 3)
+        let b = part(samples: [0.3], ids: [0, 7, 8, 0], durations: [1, 1, 1, 1], albertMs: 4)
+        let joined = KokoroAneSynthesisResult.concatenating([a, b])
+
+        XCTAssertEqual(joined.samples, [0.1, 0.2, 0.3])
+        XCTAssertEqual(joined.sampleRate, 24_000)
+        XCTAssertEqual(joined.inputIds, [0, 5, 0, 0, 7, 8, 0])
+        XCTAssertEqual(joined.predictedDurations, [1, 2, 1, 1, 1, 1, 1])
+        XCTAssertEqual(joined.inputIds.count, joined.predictedDurations.count)
+        XCTAssertEqual(joined.encoderTokens, 7)
+        XCTAssertEqual(joined.acousticFrames, 8)
+        XCTAssertEqual(joined.timings.albert, 7)
+        XCTAssertNil(joined.normalizedText)
+        XCTAssertEqual(joined.phonemes, "")
+    }
+}
+
 /// Lightweight tests for the pure duration-rounding helper (no models needed).
 final class KokoroAnePredictedDurationTests: XCTestCase {
 
@@ -58,6 +107,8 @@ final class KokoroAnePredictedDurationTests: XCTestCase {
 
         XCTAssertTrue(result.inputIds.isEmpty)
         XCTAssertTrue(result.predictedDurations.isEmpty)
+        XCTAssertNil(result.normalizedText)
+        XCTAssertEqual(result.phonemes, "")
     }
 }
 
@@ -99,6 +150,13 @@ final class KokoroAneSynthesizerTests: XCTestCase {
 
         let result = try await manager.synthesizeDetailed(
             text: "Hello world", voice: nil, speed: 1.0)
+
+        // Frontend provenance (issue #943): plain prose is left unchanged by
+        // normalization; `inputIds` is `phonemes` minus out-of-vocab scalars
+        // plus BOS/EOS, so it can never be longer than phonemes + 2.
+        XCTAssertEqual(result.normalizedText, "Hello world")
+        XCTAssertFalse(result.phonemes.isEmpty)
+        XCTAssertLessThanOrEqual(result.inputIds.count, result.phonemes.count + 2)
 
         XCTAssertEqual(result.sampleRate, KokoroAneConstants.sampleRate)
         XCTAssertGreaterThan(result.samples.count, 0)
@@ -158,6 +216,10 @@ final class KokoroAneSynthesizerTests: XCTestCase {
         // ones are dropped silently.
         let wav = try await manager.synthesizeFromPhonemes("həloʊ wɹld")
         XCTAssertGreaterThan(wav.count, 44)
+
+        let detailed = try await manager.synthesizeFromPhonemesDetailed("həloʊ wɹld")
+        XCTAssertNil(detailed.normalizedText, "bypass path has no text to normalize")
+        XCTAssertEqual(detailed.phonemes, "həloʊ wɹld")
     }
 
     func testSynthesizeWithoutInitializeAttemptsLoadAndProceeds() async throws {

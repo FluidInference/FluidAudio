@@ -1,4 +1,3 @@
-import Accelerate
 import CoreML
 import Foundation
 
@@ -27,7 +26,7 @@ enum ModelWarmup {
             shape: inputShape.map { NSNumber(value: $0) },
             dataType: .float32
         )
-        array.resetToZeros()
+        array.resetData(to: 0)
 
         let features = try MLDictionaryFeatureProvider(dictionary: [
             inputName: MLFeatureValue(multiArray: array)
@@ -85,13 +84,13 @@ enum ModelWarmup {
                 shape: featureShape.map { NSNumber(value: $0) },
                 dataType: .float32
             )
-            featureArray.resetToZeros()
+            featureArray.resetData(to: 0)
 
             let weightArray = try MLMultiArray(
                 shape: weightsShape.map { NSNumber(value: $0) },
                 dataType: .float32
             )
-            weightArray.resetToZeros()
+            weightArray.resetData(to: 0)
 
             let provider = try MLDictionaryFeatureProvider(dictionary: [
                 "fbank_features": MLFeatureValue(multiArray: featureArray),
@@ -110,7 +109,7 @@ enum ModelWarmup {
                 shape: [1, 1, 1, NSNumber(value: totalElements)],
                 dataType: .float32
             )
-            combinedArray.resetToZeros()
+            combinedArray.resetData(to: 0)
 
             let provider = try MLDictionaryFeatureProvider(dictionary: [
                 "audio_and_weights": MLFeatureValue(multiArray: combinedArray)
@@ -126,13 +125,13 @@ enum ModelWarmup {
             shape: [1, 1, NSNumber(value: audioSamples)],
             dataType: .float32
         )
-        audioArray.resetToZeros()
+        audioArray.resetData(to: 0)
 
         let weightArray = try MLMultiArray(
             shape: [1, NSNumber(value: weightFrames)],
             dataType: .float32
         )
-        weightArray.resetToZeros()
+        weightArray.resetData(to: 0)
 
         let provider = try MLDictionaryFeatureProvider(dictionary: [
             "audio": MLFeatureValue(multiArray: audioArray),
@@ -140,14 +139,5 @@ enum ModelWarmup {
         ])
 
         _ = try model.prediction(from: provider)
-    }
-}
-
-extension MLMultiArray {
-    fileprivate func resetToZeros() {
-        let pointer = dataPointer.assumingMemoryBound(to: Float.self)
-        let count = self.count
-        var zero: Float = 0
-        vDSP_vfill(&zero, pointer, 1, vDSP_Length(count))
     }
 }

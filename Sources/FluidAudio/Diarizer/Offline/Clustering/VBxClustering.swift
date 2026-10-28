@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 import Foundation
 import OSLog
@@ -774,3 +775,4 @@ struct VBxClustering {
         )
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -10,7 +11,7 @@ extension PocketTtsSynthesizer {
 
     /// Whether the current OS can run the `.aneState` placement.
     static var isStatePlacementAvailable: Bool {
-        if #available(macOS 15.0, iOS 18.0, *) {
+        if #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) {
             return true
         }
         return false
@@ -72,7 +73,7 @@ extension PocketTtsSynthesizer {
         let bosEmb = try createBosEmbedding(constants.bosEmbedding)
         let seedValue = seed ?? UInt64.random(in: 0...UInt64.max)
 
-        let session = PocketTtsSession(
+        let session = try PocketTtsSession(
             stateModels: stateModels,
             voiceData: voiceData,
             mimiState: mimiState,
@@ -89,3 +90,4 @@ extension PocketTtsSynthesizer {
         return session
     }
 }
+#endif

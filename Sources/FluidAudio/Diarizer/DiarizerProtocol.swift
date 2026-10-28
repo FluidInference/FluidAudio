@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 
 // MARK: - Diarizer Protocol
@@ -115,3 +116,4 @@ public protocol Diarizer: AnyObject {
     @discardableResult
     func finalizeSession() throws -> DiarizerTimelineUpdate?
 }
+#endif

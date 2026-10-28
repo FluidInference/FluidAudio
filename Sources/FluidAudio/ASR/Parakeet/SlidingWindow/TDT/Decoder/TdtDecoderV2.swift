@@ -72,15 +72,6 @@ internal struct TdtDecoderV2 {
             consecutiveBlankLimit: tdt.consecutiveBlankLimit
         )
 
-        return ASRConfig(
-            sampleRate: config.sampleRate,
-            tdtConfig: adaptedTdt,
-            encoderHiddenSize: config.encoderHiddenSize,
-            parallelChunkConcurrency: config.parallelChunkConcurrency,
-            streamingEnabled: config.streamingEnabled,
-            streamingThreshold: config.streamingThreshold,
-            melChunkContext: config.melChunkContextOverride,
-            dualDecodeArbitration: config.dualDecodeArbitration
-        )
+        return config.replacing(tdtConfig: adaptedTdt)
     }
 }

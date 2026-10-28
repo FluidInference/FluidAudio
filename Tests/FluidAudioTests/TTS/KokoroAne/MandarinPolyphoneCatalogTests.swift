@@ -19,13 +19,14 @@ final class MandarinPolyphoneCatalogTests: XCTestCase {
         都\tㄉㄨ
         """
 
-    func testParsesCharsInOrder() throws {
+    func testCharsAreSortedByCodePoint() throws {
         let cat = try MandarinPolyphoneCatalog(text: Self.sample)
-        XCTAssertEqual(cat.chars, ["行", "长", "都"])
-        // Reverse map matches the order.
+        // File order is 行 长 都; upstream g2pW indexes `char_ids`
+        // over `sorted(chars)` → 行 (U+884C) 都 (U+90FD) 长 (U+957F).
+        XCTAssertEqual(cat.chars, ["行", "都", "长"])
         XCTAssertEqual(cat.charIndex["行"], 0)
-        XCTAssertEqual(cat.charIndex["长"], 1)
-        XCTAssertEqual(cat.charIndex["都"], 2)
+        XCTAssertEqual(cat.charIndex["都"], 1)
+        XCTAssertEqual(cat.charIndex["长"], 2)
     }
 
     func testLabelsAreSortedUnique() throws {
@@ -69,6 +70,22 @@ final class MandarinPolyphoneCatalogTests: XCTestCase {
         XCTAssertEqual(MandarinPolyphoneCatalog.toneDigitForm("ㄉㄡ"), "ㄉㄡ1")
         // Empty input returns empty.
         XCTAssertEqual(MandarinPolyphoneCatalog.toneDigitForm(""), "")
+    }
+
+    func testDigitToneLabelsPassThrough() {
+        // The shipped POLYPHONIC_CHARS.txt already uses tone digits.
+        XCTAssertEqual(MandarinPolyphoneCatalog.toneDigitForm("ㄒㄧㄥ2"), "ㄒㄧㄥ2")
+        XCTAssertEqual(MandarinPolyphoneCatalog.toneDigitForm("ㄉㄜ5"), "ㄉㄜ5")
+        XCTAssertEqual(MandarinPolyphoneCatalog.toneDigitForm("ㄓ1"), "ㄓ1")
+    }
+
+    func testDigitToneFileParsesAndIndexes() throws {
+        let digits = "一\tㄧ1\n一\tㄧ2\n一\tㄧ4\n丁\tㄉㄧㄥ1\n丁\tㄓㄥ1\n"
+        let cat = try MandarinPolyphoneCatalog(text: digits)
+        XCTAssertEqual(cat.chars, ["一", "丁"])
+        XCTAssertEqual(cat.labels, ["ㄉㄧㄥ1", "ㄓㄥ1", "ㄧ1", "ㄧ2", "ㄧ4"])
+        XCTAssertEqual(cat.candidates(for: "一"), [2, 3, 4])
+        XCTAssertEqual(cat.candidates(for: "丁"), [0, 1])
     }
 
     func testRejectsMalformedRow() {

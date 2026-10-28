@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Pinyin syllable → Bopomofo + tone digit string, matching
@@ -83,35 +84,16 @@ public enum MandarinBopomofoMap {
     ///   when the next vowel is not already `u`.
     /// * `yu` / `yue` / `yuan` / `yun` → `v` / `ve` / `van` / `vn`.
     static func normalizePinyinForLookup(_ syllable: String) -> String {
-        if syllable.isEmpty { return syllable }
-        // Order matters — yu* before yi* / y* fallthrough.
-        switch syllable {
-        case "yi": return "i"
-        case "ya": return "ia"
-        case "ye": return "ie"
-        case "yao": return "iao"
-        case "you": return "iou"
-        case "yan": return "ian"
-        case "yin": return "in"
-        case "yang": return "iang"
-        case "ying": return "ing"
-        case "yong": return "iong"
-        case "wu": return "u"
-        case "wa": return "ua"
-        case "wo": return "uo"
-        case "wai": return "uai"
-        case "wei": return "uei"
-        case "wan": return "uan"
-        case "wen": return "uen"
-        case "wang": return "uang"
-        case "weng": return "ueng"
-        case "yu": return "v"
-        case "yue": return "ve"
-        case "yuan": return "van"
-        case "yun": return "vn"
-        default: return syllable
-        }
+        canonicalFinalForStandalone[syllable] ?? syllable
     }
+
+    /// Inverse of `standaloneFinalSpelling` (`yi` → `i`, `wu` → `u`,
+    /// `yue` → `ve`, …).
+    static let canonicalFinalForStandalone: [String: String] = {
+        var out: [String: String] = [:]
+        for (canonical, spelled) in standaloneFinalSpelling { out[spelled] = canonical }
+        return out
+    }()
 
     /// Apply the `i → ii / iii` rule for sibilant initials, matching
     /// `_get_initials_finals` in misaki. Mutates `final` in-place.
@@ -191,6 +173,99 @@ public enum MandarinBopomofoMap {
         return out.isEmpty ? nil : out
     }
 
+    /// Bopomofo initial → pinyin initial (inverse of `initialMap`).
+    static let bopomofoInitialMap: [Character: String] = {
+        var out: [Character: String] = [:]
+        for (pinyin, bo) in initialMap { out[Character(bo)] = pinyin }
+        return out
+    }()
+
+    /// Full bopomofo final → canonical pinyin final. Unlike `finalMap`
+    /// (which targets the v1.1-zh vocab's compound tokens) these are the
+    /// plain Zhuyin spellings g2pW labels use, so `ㄧㄥ` is `ing`, not
+    /// `应`. `ㄨㄥ` is `ueng` here; `decode` rewrites it to `ong` after
+    /// an initial. `ㄝ` (ê), `ㄧㄞ` (yai) and `ㄩㄤ` are left out on
+    /// purpose: the zh vocab has no token for them, so `decode` returns
+    /// `nil` and the caller keeps the dict reading instead of emitting a
+    /// syllable `encode` would drop.
+    static let bopomofoFinalMap: [String: String] = [
+        "ㄚ": "a", "ㄛ": "o", "ㄜ": "e", "ㄞ": "ai", "ㄟ": "ei",
+        "ㄠ": "ao", "ㄡ": "ou", "ㄢ": "an", "ㄣ": "en",
+        "ㄤ": "ang", "ㄥ": "eng", "ㄦ": "er",
+        "ㄧ": "i", "ㄧㄚ": "ia", "ㄧㄝ": "ie", "ㄧㄠ": "iao",
+        "ㄧㄡ": "iou", "ㄧㄢ": "ian", "ㄧㄣ": "in", "ㄧㄤ": "iang",
+        "ㄧㄥ": "ing",
+        "ㄨ": "u", "ㄨㄚ": "ua", "ㄨㄛ": "uo", "ㄨㄞ": "uai",
+        "ㄨㄟ": "uei", "ㄨㄢ": "uan", "ㄨㄣ": "uen", "ㄨㄤ": "uang",
+        "ㄨㄥ": "ueng",
+        "ㄩ": "v", "ㄩㄝ": "ve", "ㄩㄢ": "van", "ㄩㄣ": "vn",
+        "ㄩㄥ": "iong",
+    ]
+
+    /// Standalone-final spelling (no initial), as pypinyin writes it.
+    static let standaloneFinalSpelling: [String: String] = [
+        "i": "yi", "ia": "ya", "ie": "ye", "iao": "yao", "iou": "you",
+        "ian": "yan", "in": "yin", "iang": "yang", "ing": "ying",
+        "iong": "yong",
+        "u": "wu", "ua": "wa", "uo": "wo", "uai": "wai", "uei": "wei",
+        "uan": "wan", "uen": "wen", "uang": "wang", "ueng": "weng",
+        "v": "yu", "ve": "yue", "van": "yuan", "vn": "yun",
+    ]
+
+    /// Parse a g2pW label (`<bopomofo><tone digit>`, e.g. `ㄏㄤ2`) into
+    /// the same pinyin `Syllable` the dict path produces (`hang`, 2),
+    /// so a disambiguated reading flows through sandhi, erhua and
+    /// `encode` exactly like a dict reading. The spelling follows
+    /// pypinyin's TONE3 output (`xing`, `ju`, `liu`, `gong`, `weng`,
+    /// `zhi`, `lv`), which is what `encode` and the sandhi rules key
+    /// on. Returns `nil` for labels outside the standard inventory.
+    public static func decode(bopomofo label: String) -> MandarinPinyinNormalizer.Syllable? {
+        let digitForm = MandarinPolyphoneCatalog.toneDigitForm(label)
+        guard let last = digitForm.last, let tone = Int(String(last)), (1...5).contains(tone)
+        else { return nil }
+        var body = Substring(digitForm.dropLast())
+        guard let first = body.first else { return nil }
+
+        var initial = ""
+        if let ini = bopomofoInitialMap[first] {
+            initial = ini
+            body = body.dropFirst()
+        }
+
+        var final: String
+        if body.isEmpty {
+            // Bare sibilant (`ㄓ`, `ㄗ`, …): pinyin spells the buzzing
+            // vowel as `i`. A bare non-sibilant initial is malformed.
+            switch initial {
+            case "zh", "ch", "sh", "r", "z", "c", "s":
+                final = "i"
+            default:
+                return nil
+            }
+        } else {
+            guard let mapped = bopomofoFinalMap[String(body)] else { return nil }
+            final = mapped
+        }
+
+        if initial.isEmpty {
+            final = standaloneFinalSpelling[final] ?? final
+        } else {
+            switch final {
+            case "ueng": final = "ong"
+            case "iou": final = "iu"
+            case "uei": final = "ui"
+            case "uen": final = "un"
+            default: break
+            }
+            // j/q/x drop the umlaut in pinyin orthography (`ju`, `que`,
+            // `xuan`, `jun`); `encode` restores it.
+            if initial == "j" || initial == "q" || initial == "x", final.hasPrefix("v") {
+                final = "u" + final.dropFirst()
+            }
+        }
+        return MandarinPinyinNormalizer.Syllable(base: initial + final, tone: tone)
+    }
+
     /// Longest-prefix initial split. The empty initial is allowed.
     static func splitInitialFinal(_ syllable: String) -> (String, String)? {
         for ini in initials {
@@ -202,3 +277,4 @@ public enum MandarinBopomofoMap {
         return ("", syllable)
     }
 }
+#endif

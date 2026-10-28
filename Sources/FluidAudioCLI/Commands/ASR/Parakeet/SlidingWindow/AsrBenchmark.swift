@@ -715,11 +715,18 @@ extension ASRBenchmark {
                         modelVersion = .v2
                     case "v3", "3":
                         modelVersion = .v3
+                    case "redux":
+                        modelVersion = .redux
+                    case "ultra":
+                        modelVersion = .ultra
+                    case "phonon2", "phonon-2":
+                        modelVersion = .phonon2
                     case "tdt-ctc-110m", "110m":
                         modelVersion = .tdtCtc110m
                     default:
                         logger.error(
-                            "Invalid model version: \(arguments[i + 1]). Use 'v2', 'v3', or 'tdt-ctc-110m'")
+                            "Invalid model version: \(arguments[i + 1]). Use 'v2', 'v3', 'redux', 'ultra', 'phonon2', or 'tdt-ctc-110m'"
+                        )
                         exit(1)
                     }
                     i += 1
@@ -763,6 +770,9 @@ extension ASRBenchmark {
         switch modelVersion {
         case .v2: versionLabel = "v2"
         case .v3: versionLabel = "v3"
+        case .redux: versionLabel = "redux"
+        case .ultra: versionLabel = "ultra"
+        case .phonon2: versionLabel = "phonon2"
         case .tdtCtc110m: versionLabel = "tdt-ctc-110m"
         case .tdtJa: versionLabel = "tdt-ja"
         }

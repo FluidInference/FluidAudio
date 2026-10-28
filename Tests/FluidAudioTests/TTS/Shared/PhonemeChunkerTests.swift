@@ -80,4 +80,20 @@ final class PhonemeChunkerTests: XCTestCase {
         let roundTrip = chunks.joined().replacingOccurrences(of: " ", with: "")
         XCTAssertEqual(roundTrip, original)
     }
+
+    // MARK: - Unicode-scalar counting
+
+    func testScalarCountingKeepsCombiningMarksUnderTheCap() {
+        // "ɑ̃" is one Character but two scalars (U+0251 U+0303): 4 words of
+        // 6 scalars + spaces = 27 scalars, 15 Characters.
+        let word = String(repeating: "ɑ̃", count: 3)
+        let text = [word, word, word, word].joined(separator: " ")
+        XCTAssertEqual(PhonemeChunker.chunk(text, maxLength: 15), [text])
+
+        let chunks = PhonemeChunker.chunk(text, maxLength: 14, countsUnicodeScalars: true)
+        XCTAssertEqual(chunks, ["\(word) \(word)", "\(word) \(word)"])
+        for piece in chunks {
+            XCTAssertLessThanOrEqual(piece.unicodeScalars.count, 14)
+        }
+    }
 }

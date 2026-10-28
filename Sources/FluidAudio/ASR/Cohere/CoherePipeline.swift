@@ -336,6 +336,16 @@ public actor CoherePipeline {
         /// `attention_mask` build at decode time without re-probing the
         /// model's input shape.
         public let decoderVariant: DecoderVariant
+        /// KV-cache slots in the loaded decoder (`k_cache_0` shape `[1, H, slots, D]`).
+        /// Shared by the language prompt and the generated tokens; see
+        /// `resolveMaxNewTokens` for the resulting output budget.
+        public let cacheLength: Int
+        /// Element type the decoder was compiled with for its caches and masks.
+        public let cacheDataType: MLMultiArrayDataType
+        /// Compute units the encoder was loaded with.
+        public let encoderComputeUnits: MLComputeUnits
+        /// Compute units the decoder was loaded with.
+        public let decoderComputeUnits: MLComputeUnits
     }
 
     private let melExtractor: CohereMelSpectrogram
@@ -346,11 +356,15 @@ public actor CoherePipeline {
 
     /// Cache-external decoder variant selector.
     ///
-    /// Both decoders share the same input/output contract except for the
-    /// `attention_mask` shape and how position is sourced.
+    /// All variants share the same input/output contract except for the
+    /// `attention_mask` shape, the KV-cache length and how position is
+    /// sourced.
     public enum DecoderVariant: Sendable {
+        /// `cohere_decoder_cache_external_v3.mlmodelc` — static shapes like
+        /// v2 with a 256-slot KV cache. Default.
+        case v3
         /// `cohere_decoder_cache_external_v2.mlmodelc` — fixed
-        /// `attention_mask` shape `[1, 1, 1, 108]`, ANE-friendly. Default.
+        /// `attention_mask` shape `[1, 1, 1, 108]`, ANE-friendly.
         case v2
         /// `cohere_decoder_cache_external.mlmodelc` — dynamic
         /// `attention_mask` (`RangeDim(1, 108)`), CPU/GPU only.
@@ -358,6 +372,7 @@ public actor CoherePipeline {
 
         public var compiledFileName: String {
             switch self {
+            case .v3: return ModelNames.CohereTranscribe.decoderCacheExternalV3CompiledFile
             case .v2: return ModelNames.CohereTranscribe.decoderCacheExternalV2CompiledFile
             case .v1: return ModelNames.CohereTranscribe.decoderCacheExternalCompiledFile
             }
@@ -368,11 +383,32 @@ public actor CoherePipeline {
         /// takes a `[1, 1, 1, step+1]` zero-filled mask.
         public var usesStaticSelfMask: Bool {
             switch self {
-            case .v2: return true
+            case .v3, .v2: return true
             case .v1: return false
             }
         }
     }
+
+    /// Compute units the encoder loads with unless the caller picks some.
+    ///
+    /// The INT8 encoder stays INT8 on the Neural Engine. Under `.all`,
+    /// Core ML may route it to the GPU instead, where the 1.8 GB of INT8
+    /// weights are materialised at full precision: the process keeps ~10 GB
+    /// more memory resident after the first `transcribe` (12.4 GB footprint
+    /// in #1045, M5 Pro, macOS 26.6) and that first call takes over a
+    /// minute. On the ANE the footprint stays near 130 MB for the whole
+    /// run, at the cost of a slower warm encoder (~1.2 s vs ~0.5 s per 35 s
+    /// window on M5 Pro). Pass `encoderComputeUnits: .all` or `.cpuAndGPU`
+    /// to opt into the GPU on machines that can afford the memory. See
+    /// Documentation/ASR/Cohere.md, "Compute units and memory".
+    public static let defaultEncoderComputeUnits: MLComputeUnits = .cpuAndNeuralEngine
+
+    /// Compute units the decoder loads with unless the caller picks some.
+    ///
+    /// The FP16 cache-external decoder is 291 MB and ANE-resident with its
+    /// static shapes. Moving it to `.all` changes its time by a few percent
+    /// and adds ~100 MB, so it shares the encoder's default.
+    public static let defaultDecoderComputeUnits: MLComputeUnits = .cpuAndNeuralEngine
 
     /// Load encoder, decoder and vocabulary from (potentially different) directories.
     ///
@@ -380,19 +416,32 @@ public actor CoherePipeline {
     /// the same URL to both for a single-precision setup.
     ///
     /// `decoderVariant` selects which cache-external decoder file to load
-    /// from `decoderDir`. The default (`.v2`) is the ANE-friendly
-    /// static-shape build; pass `.v1` for the legacy FP16 dynamic-shape
-    /// decoder. The runtime automatically adapts the `attention_mask`
-    /// build to whichever variant is loaded.
+    /// from `decoderDir`. The default (`.v3`) is the ANE-friendly
+    /// static-shape build with a 256-slot cache; `.v2` is the 108-slot
+    /// static build and `.v1` the legacy FP16 dynamic-shape decoder. The
+    /// runtime reads the cache length from the loaded model and adapts the
+    /// `attention_mask` build to whichever variant is loaded.
+    ///
+    /// Compute units are resolved per model: `encoderComputeUnits` /
+    /// `decoderComputeUnits` win, then the shared `computeUnits`, then
+    /// `defaultEncoderComputeUnits` / `defaultDecoderComputeUnits` (both
+    /// `.cpuAndNeuralEngine`). Keep the encoder off the GPU unless you can
+    /// spare ~10 GB; see `defaultEncoderComputeUnits`.
     public static func loadModels(
         encoderDir: URL,
         decoderDir: URL,
         vocabDir: URL,
-        decoderVariant: DecoderVariant = .v2,
-        computeUnits: MLComputeUnits = .all
+        decoderVariant: DecoderVariant = .v3,
+        computeUnits: MLComputeUnits? = nil,
+        encoderComputeUnits: MLComputeUnits? = nil,
+        decoderComputeUnits: MLComputeUnits? = nil
     ) async throws -> LoadedModels {
-        let config = MLModelConfiguration()
-        config.computeUnits = computeUnits
+        let units = resolveComputeUnits(
+            shared: computeUnits, encoder: encoderComputeUnits, decoder: decoderComputeUnits)
+        let encoderConfig = MLModelConfiguration()
+        encoderConfig.computeUnits = units.encoder
+        let decoderConfig = MLModelConfiguration()
+        decoderConfig.computeUnits = units.decoder
 
         let encoderURL = encoderDir.appendingPathComponent(
             ModelNames.CohereTranscribe.encoderCompiledFile)
@@ -403,24 +452,118 @@ public actor CoherePipeline {
                 "Decoder not found at \(decoderURL.path) (variant: \(decoderVariant)).")
         }
 
-        pipelineLogger.info("Loading encoder from \(encoderURL.path)")
-        let encoder = try await MLModel.load(contentsOf: encoderURL, configuration: config)
-        pipelineLogger.info("Loading decoder from \(decoderURL.path)")
-        let decoder = try await MLModel.load(contentsOf: decoderURL, configuration: config)
+        pipelineLogger.info(
+            "Loading encoder from \(encoderURL.path) (\(describe(units.encoder)))")
+        let encoder = try await MLModel.load(contentsOf: encoderURL, configuration: encoderConfig)
+        pipelineLogger.info(
+            "Loading decoder from \(decoderURL.path) (\(describe(units.decoder)))")
+        let decoder = try await MLModel.load(contentsOf: decoderURL, configuration: decoderConfig)
 
-        // Sanity: decoder must expose k_cache_0 (cache-external variant).
-        let decoderInputs = decoder.modelDescription.inputDescriptionsByName.keys
-        guard decoderInputs.contains("k_cache_0") else {
-            throw CohereAsrError.decodingFailed(
-                "Decoder at \(decoderURL.path) is not cache-external (missing k_cache_0).")
-        }
+        let cacheLength = try Self.probeCacheLength(
+            decoder: decoder, variant: decoderVariant, path: decoderURL.path)
+        let cacheDataType =
+            decoder.modelDescription.inputDescriptionsByName["k_cache_0"]?
+            .multiArrayConstraint?.dataType ?? .float16
+        pipelineLogger.info("Decoder \(decoderVariant): \(cacheLength)-slot KV cache")
 
         let vocab = try loadVocabulary(vocabDir: vocabDir)
         return LoadedModels(
             encoder: encoder,
             decoder: decoder,
             vocabulary: vocab,
-            decoderVariant: decoderVariant)
+            decoderVariant: decoderVariant,
+            cacheLength: cacheLength,
+            cacheDataType: cacheDataType,
+            encoderComputeUnits: units.encoder,
+            decoderComputeUnits: units.decoder)
+    }
+
+    /// Per-model compute units for `loadModels`: the per-model value wins,
+    /// then the shared value, then the model's default.
+    static func resolveComputeUnits(
+        shared: MLComputeUnits?, encoder: MLComputeUnits?, decoder: MLComputeUnits?
+    ) -> (encoder: MLComputeUnits, decoder: MLComputeUnits) {
+        return (
+            encoder: encoder ?? shared ?? defaultEncoderComputeUnits,
+            decoder: decoder ?? shared ?? defaultDecoderComputeUnits
+        )
+    }
+
+    /// Log label for a compute-unit choice.
+    public static func describe(_ units: MLComputeUnits) -> String {
+        switch units {
+        case .cpuOnly: return "cpu-only"
+        case .cpuAndGPU: return "cpu-gpu"
+        case .cpuAndNeuralEngine: return "cpu-ane"
+        case .all: return "all"
+        @unknown default: return "unknown"
+        }
+    }
+
+    /// Read the KV-cache length from the decoder's `k_cache_0` input shape
+    /// (`[1, heads, slots, headDim]`) instead of assuming a constant, so the
+    /// 108-slot and 256-slot exports load through the same path. Static
+    /// variants must declare a matching `[1, 1, 1, slots]` `attention_mask`.
+    static func probeCacheLength(
+        decoder: MLModel, variant: DecoderVariant, path: String
+    ) throws -> Int {
+        let inputs = decoder.modelDescription.inputDescriptionsByName
+        guard let kDesc = inputs["k_cache_0"], kDesc.type == .multiArray,
+            let kConstraint = kDesc.multiArrayConstraint, kConstraint.shape.count == 4
+        else {
+            throw CohereAsrError.decodingFailed(
+                "Decoder at \(path) is not cache-external (missing rank-4 k_cache_0).")
+        }
+        let slots = Self.maxExtent(of: kConstraint, dimension: 2)
+        guard slots > 0 else {
+            throw CohereAsrError.decodingFailed(
+                "Decoder at \(path) declares an empty KV cache (k_cache_0 shape \(kConstraint.shape)).")
+        }
+        if variant.usesStaticSelfMask {
+            guard let mDesc = inputs["attention_mask"], mDesc.type == .multiArray,
+                let mConstraint = mDesc.multiArrayConstraint, !mConstraint.shape.isEmpty,
+                Self.maxExtent(of: mConstraint, dimension: mConstraint.shape.count - 1) == slots
+            else {
+                throw CohereAsrError.decodingFailed(
+                    "Decoder at \(path): static attention_mask length does not match the "
+                        + "\(slots)-slot KV cache (variant \(variant)).")
+            }
+        }
+        return slots
+    }
+
+    /// Largest size an input can take along `dimension`: the declared size for
+    /// a fixed shape, the upper bound of a range, or the widest enumerated
+    /// shape. The shipped exports are fixed-shape; the fallback keeps a
+    /// flexible export from reporting its (small) default shape as capacity.
+    static func maxExtent(of constraint: MLMultiArrayConstraint, dimension: Int) -> Int {
+        return maxExtent(
+            shape: constraint.shape,
+            shapeConstraint: constraint.shapeConstraint,
+            dimension: dimension)
+    }
+
+    static func maxExtent(
+        shape: [NSNumber], shapeConstraint: MLMultiArrayShapeConstraint?, dimension: Int
+    ) -> Int {
+        guard dimension >= 0, dimension < shape.count else { return 0 }
+        guard let shapeConstraint else { return shape[dimension].intValue }
+        switch shapeConstraint.type {
+        case .range:
+            let ranges = shapeConstraint.sizeRangeForDimension
+            guard dimension < ranges.count else { return shape[dimension].intValue }
+            let range = ranges[dimension].rangeValue
+            return range.location + range.length - 1
+        case .enumerated:
+            let widest = shapeConstraint.enumeratedShapes.compactMap { shape -> Int? in
+                dimension < shape.count ? shape[dimension].intValue : nil
+            }.max()
+            return widest ?? shape[dimension].intValue
+        case .unspecified:
+            return shape[dimension].intValue
+        @unknown default:
+            return shape[dimension].intValue
+        }
     }
 
     private static func loadVocabulary(vocabDir: URL) throws -> [Int: String] {
@@ -447,13 +590,40 @@ public actor CoherePipeline {
         public let encoderSeconds: Double
         public let decoderSeconds: Double
         public let totalSeconds: Double
+        /// Number of 35 s windows whose decode loop exhausted the token
+        /// budget without emitting EOS. Non-zero means the tail of those
+        /// windows was dropped; the budget is `maxNewTokens` or, by default,
+        /// the decoder's cache length minus the prompt.
+        public let cappedWindows: Int
+    }
+
+    /// Output-token budget for one window: the caller's `maxNewTokens` if
+    /// given, otherwise everything the KV cache can hold. The decode loop
+    /// runs at most `cacheLength` steps (one cache slot each); the last
+    /// prompt step already yields the first output, so the prompt costs
+    /// `promptCount - 1` steps and the capacity is `cacheLength - promptCount + 1`
+    /// (99 with a 108-slot cache, 247 with 256). Either way the budget never
+    /// exceeds the cache.
+    static func resolveMaxNewTokens(
+        requested: Int?, cacheLength: Int, promptCount: Int
+    ) -> Int {
+        let capacity = max(0, cacheLength - promptCount + 1)
+        guard let requested = requested else { return capacity }
+        return max(0, min(requested, capacity))
+    }
+
+    /// Decode steps needed to emit `maxNewTokens` outputs after a
+    /// `promptCount`-token prompt, bounded by the cache. Outputs start at step
+    /// `promptCount - 1`, so `steps - (promptCount - 1)` tokens come out.
+    static func decodeStepCount(maxNewTokens: Int, promptCount: Int, cacheLength: Int) -> Int {
+        return max(0, min(maxNewTokens + promptCount - 1, cacheLength))
     }
 
     public func transcribe(
         audio: [Float],
         models: LoadedModels,
         language: CohereAsrConfig.Language = .english,
-        maxNewTokens: Int = 108,
+        maxNewTokens: Int? = nil,
         repetitionPenalty: Float = 1.1,
         noRepeatNgram: Int = 3
     ) async throws -> TranscriptionResult {
@@ -475,26 +645,38 @@ public actor CoherePipeline {
 
         // 3) Cache-external decode
         let dec0 = CFAbsoluteTimeGetCurrent()
-        let outputTokens = try await decodeCacheExternal(
+        let budget = Self.resolveMaxNewTokens(
+            requested: maxNewTokens,
+            cacheLength: models.cacheLength,
+            promptCount: language.promptSequence.count)
+        let decoded = try await decodeCacheExternal(
             encoderHidden: encoderHidden,
             encoderValidFrames: encoderValid,
             language: language,
-            maxNewTokens: maxNewTokens,
+            maxNewTokens: budget,
             repetitionPenalty: repetitionPenalty,
             noRepeatNgram: noRepeatNgram,
             decoder: models.decoder,
+            cacheLength: models.cacheLength,
+            cacheDType: models.cacheDataType,
             useStaticSelfMask: models.decoderVariant.usesStaticSelfMask)
         let decoderSecs = CFAbsoluteTimeGetCurrent() - dec0
+        if decoded.hitCap {
+            pipelineLogger.warning(
+                "Window hit the \(budget)-token decode cap without EOS "
+                    + "(\(models.cacheLength)-slot cache); trailing speech in this window was dropped.")
+        }
 
         // 4) Detokenize
-        let text = Self.convertTokensToText(outputTokens, vocabulary: models.vocabulary)
+        let text = Self.convertTokensToText(decoded.tokens, vocabulary: models.vocabulary)
 
         return TranscriptionResult(
             text: text,
-            tokenIds: outputTokens,
+            tokenIds: decoded.tokens,
             encoderSeconds: encoderSecs,
             decoderSeconds: decoderSecs,
-            totalSeconds: CFAbsoluteTimeGetCurrent() - total0)
+            totalSeconds: CFAbsoluteTimeGetCurrent() - total0,
+            cappedWindows: decoded.hitCap ? 1 : 0)
     }
 
     // MARK: Long-form (sliding-window over the 35 s single-chunk encoder)
@@ -516,7 +698,7 @@ public actor CoherePipeline {
         audio: [Float],
         models: LoadedModels,
         language: CohereAsrConfig.Language = .english,
-        maxNewTokens: Int = 108,
+        maxNewTokens: Int? = nil,
         repetitionPenalty: Float = 1.1,
         noRepeatNgram: Int = 3
     ) async throws -> TranscriptionResult {
@@ -540,6 +722,7 @@ public actor CoherePipeline {
         var mergedTokens: [Int] = []
         var encoderSecs: Double = 0
         var decoderSecs: Double = 0
+        var cappedWindows = 0
         var start = 0
         var chunkIndex = 0
 
@@ -563,6 +746,12 @@ public actor CoherePipeline {
 
             encoderSecs += result.encoderSeconds
             decoderSecs += result.decoderSeconds
+            cappedWindows += result.cappedWindows
+            pipelineLogger.debug(
+                "Window \(chunkIndex) [\(start / sr)s, \(end / sr)s): \(result.tokenIds.count) tokens, "
+                    + "encoder \(String(format: "%.2f", result.encoderSeconds))s, "
+                    + "decoder \(String(format: "%.2f", result.decoderSeconds))s"
+                    + (result.cappedWindows > 0 ? ", hit cap" : ""))
 
             mergedTokens = Self.mergeTokenStreams(prefix: mergedTokens, suffix: result.tokenIds)
 
@@ -577,22 +766,36 @@ public actor CoherePipeline {
             tokenIds: mergedTokens,
             encoderSeconds: encoderSecs,
             decoderSeconds: decoderSecs,
-            totalSeconds: CFAbsoluteTimeGetCurrent() - total0)
+            totalSeconds: CFAbsoluteTimeGetCurrent() - total0,
+            cappedWindows: cappedWindows)
     }
 
     /// Merge two adjacent chunk token streams using longest-common-substring.
     ///
     /// Both chunks transcribe ~5 s of identical audio at their seam, so their
-    /// token IDs share a common subsequence near the prefix's tail / the
-    /// suffix's head. We search a bounded window (`windowTokens` tokens at the
-    /// boundary) for the longest common substring of length ≥ `minMatch`. On a
-    /// hit we drop the prefix's matched suffix and concatenate the suffix
-    /// verbatim. On a miss we concatenate plainly — better to duplicate a few
-    /// tokens than to lose content.
+    /// token IDs share a common run near the prefix's tail / the suffix's
+    /// head. We search a bounded window (`windowTokens` tokens at the
+    /// boundary) for the longest common substring of length ≥ `minMatch`. On
+    /// a hit the seam is cut at the end of the matched run: the prefix is
+    /// kept up to and including the run, the suffix from just after it. Both
+    /// sides' copies of the overlap audio beyond the run are therefore
+    /// dropped exactly once — keeping the whole prefix would emit the audio
+    /// after the run twice (once per window). On a miss we concatenate
+    /// plainly — better to duplicate a few tokens than to lose content.
+    ///
+    /// Ties between equally long runs go to the one closest to the prefix's
+    /// end, so a phrase repeated inside the prefix window does not cut the
+    /// seam early and drop the text between its two occurrences.
+    ///
+    /// For a genuine seam the prefix tokens after the run plus the suffix
+    /// tokens up to the run's end together cover the overlap audio once, so
+    /// their sum is about the overlap's token count (~30 for dense speech). A
+    /// match whose cut would drop more than `windowTokens` tokens in total is
+    /// a chance repeat of a common phrase, not the seam, and is ignored.
     static func mergeTokenStreams(
         prefix: [Int],
         suffix: [Int],
-        windowTokens: Int = 32,
+        windowTokens: Int = 48,
         minMatch: Int = 4
     ) -> [Int] {
         if prefix.isEmpty { return suffix }
@@ -607,6 +810,7 @@ public actor CoherePipeline {
         // Classic LCS-substring DP (O(m·n), m,n ≤ windowTokens).
         var dp = [Int](repeating: 0, count: n + 1)
         var bestLen = 0
+        var bestPEnd = 0  // index in pTail (exclusive) where the match ends
         var bestSEnd = 0  // index in sHead (exclusive) where the match ends
         for i in 1...m {
             var prev = 0
@@ -614,8 +818,11 @@ public actor CoherePipeline {
                 let temp = dp[j]
                 if pTail[i - 1] == sHead[j - 1] {
                     dp[j] = prev + 1
-                    if dp[j] > bestLen {
+                    // Ties go to the later prefix position (larger i); for the
+                    // same prefix position the earliest suffix position wins.
+                    if dp[j] > bestLen || (dp[j] == bestLen && i > bestPEnd) {
                         bestLen = dp[j]
+                        bestPEnd = i
                         bestSEnd = j
                     }
                 } else {
@@ -626,11 +833,11 @@ public actor CoherePipeline {
         }
 
         guard bestLen >= minMatch else { return prefix + suffix }
+        let prefixDrop = m - bestPEnd
+        guard prefixDrop + bestSEnd <= windowTokens else { return prefix + suffix }
 
-        // Keep the prefix as-is (it already contains one copy of the overlap
-        // tokens) and drop the suffix's matched head so the seam is not
-        // duplicated.
-        return prefix + Array(suffix.dropFirst(bestSEnd))
+        // Cut both streams at the end of the matched run.
+        return Array(prefix.prefix(prefix.count - prefixDrop)) + Array(suffix.dropFirst(bestSEnd))
     }
 
     // MARK: Encoder
@@ -677,6 +884,12 @@ public actor CoherePipeline {
 
     // MARK: Decoder (cache-external with corrected mask + penalties)
 
+    private struct DecodeOutput {
+        let tokens: [Int]
+        /// The loop ran out of budget before the model emitted EOS.
+        let hitCap: Bool
+    }
+
     private func decodeCacheExternal(
         encoderHidden: MLMultiArray,
         encoderValidFrames: Int,
@@ -685,26 +898,16 @@ public actor CoherePipeline {
         repetitionPenalty: Float,
         noRepeatNgram: Int,
         decoder: MLModel,
+        cacheLength: Int,
+        cacheDType: MLMultiArrayDataType,
         useStaticSelfMask: Bool
-    ) async throws -> [Int] {
+    ) async throws -> DecodeOutput {
         let cacheShape: [NSNumber] = [
             1,
             NSNumber(value: CohereAsrConfig.numDecoderHeads),
-            NSNumber(value: CohereAsrConfig.maxSeqLen),
+            NSNumber(value: cacheLength),
             NSNumber(value: CohereAsrConfig.headDim),
         ]
-
-        // Probe the expected cache dtype from the model description to match
-        // whatever precision the .mlmodelc was compiled with.
-        let cacheDType: MLMultiArrayDataType = {
-            if let desc = decoder.modelDescription.inputDescriptionsByName["k_cache_0"],
-                desc.type == .multiArray,
-                let arrCon = desc.multiArrayConstraint
-            {
-                return arrCon.dataType
-            }
-            return .float16
-        }()
 
         var kCaches: [MLMultiArray] = []
         var vCaches: [MLMultiArray] = []
@@ -729,7 +932,9 @@ public actor CoherePipeline {
         var allTokens: [Int] = []
         var outputTokens: [Int] = []
         var currentToken = prompt[0]
-        let effectiveMax = min(maxNewTokens + prompt.count, CohereAsrConfig.maxSeqLen)
+        var sawEos = false
+        let effectiveMax = Self.decodeStepCount(
+            maxNewTokens: maxNewTokens, promptCount: prompt.count, cacheLength: cacheLength)
 
         for step in 0..<effectiveMax {
             if step < prompt.count { currentToken = prompt[step] }
@@ -741,7 +946,7 @@ public actor CoherePipeline {
             positionId[0] = NSNumber(value: step)
 
             let selfMask = try Self.buildSelfAttentionMask(
-                step: step, useStatic: useStaticSelfMask, dtype: cacheDType)
+                step: step, length: cacheLength, useStatic: useStaticSelfMask, dtype: cacheDType)
 
             var inputs: [String: MLFeatureValue] = [
                 "input_id": MLFeatureValue(multiArray: inputId),
@@ -779,6 +984,7 @@ public actor CoherePipeline {
             allTokens.append(currentToken)
 
             if step >= prompt.count - 1, nextToken == CohereAsrConfig.SpecialTokens.eosToken {
+                sawEos = true
                 break
             }
             if step >= prompt.count - 1 {
@@ -800,7 +1006,7 @@ public actor CoherePipeline {
             currentToken = (step < prompt.count - 1) ? prompt[step + 1] : nextToken
         }
 
-        return outputTokens
+        return DecodeOutput(tokens: outputTokens, hitCap: !sawEos)
     }
 
     // MARK: Helpers
@@ -810,12 +1016,13 @@ public actor CoherePipeline {
     /// Dynamic path (RangeDim decoder): shape `[1, 1, 1, step+1]`, all zeros.
     /// The model's attended K/V slice is exactly `step+1` long.
     ///
-    /// Static path (fixed-shape decoder): shape `[1, 1, 1, maxSeqLen]`. The
-    /// decoder attends over the full cache; positions `[0..=step]` get `0`
-    /// (attend) and `[step+1..maxSeqLen-1]` get `-1e4` (masked — the cache
-    /// slots aren't written yet).
+    /// Static path (fixed-shape decoder): shape `[1, 1, 1, length]` where
+    /// `length` is the decoder's cache length. The decoder attends over the
+    /// full cache; positions `[0..=step]` get `0` (attend) and
+    /// `[step+1..length-1]` get `-1e4` (masked — the cache slots aren't
+    /// written yet).
     static func buildSelfAttentionMask(
-        step: Int, useStatic: Bool, dtype: MLMultiArrayDataType
+        step: Int, length: Int, useStatic: Bool, dtype: MLMultiArrayDataType
     ) throws -> MLMultiArray {
         if !useStatic {
             let mask = try MLMultiArray(
@@ -824,7 +1031,6 @@ public actor CoherePipeline {
             return mask
         }
 
-        let length = CohereAsrConfig.maxSeqLen
         let mask = try MLMultiArray(
             shape: [1, 1, 1, NSNumber(value: length)], dataType: dtype)
         zeroFill(mask)

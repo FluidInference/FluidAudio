@@ -9,7 +9,7 @@ import Foundation
 ///
 /// The decoder carries no KV cache: each step re-runs the full `[1, 256]` token
 /// sequence (matches the converted CoreML model). The 15 s window is fixed; audio
-/// longer than 15 s is truncated (chunking is a future addition).
+/// longer than 15 s is split into overlapping windows and merged at the seams.
 ///
 /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 public actor CanaryManager {
@@ -23,6 +23,21 @@ public actor CanaryManager {
         self.prompt = prompt
     }
 
+    /// Build a manager for transcription (`source == target`) or speech
+    /// translation (`source != target`, en ↔ any supported language).
+    ///
+    /// - Throws: `ASRError.processingFailed` for unsupported (non-English ↔
+    ///   non-English) translation pairs.
+    public init(
+        models: CanaryModels,
+        source: CanaryLanguage,
+        target: CanaryLanguage,
+        pnc: Bool = true
+    ) throws {
+        let prompt = try CanaryConfig.makePrompt(source: source, target: target, pnc: pnc)
+        self.init(models: models, prompt: prompt)
+    }
+
     /// Load models from the default cache (downloading if needed), then build a manager.
     public static func load(
         precision: CanaryPrecision = .int4,
@@ -30,6 +45,26 @@ public actor CanaryManager {
     ) async throws -> CanaryManager {
         let models = try await CanaryModels.downloadAndLoad(precision: precision, progressHandler: progressHandler)
         return CanaryManager(models: models)
+    }
+
+    /// Load models, then build a manager that transcribes (`source == target`)
+    /// or translates the speech (`source != target`).
+    public static func load(
+        precision: CanaryPrecision = .int4,
+        source: CanaryLanguage,
+        target: CanaryLanguage,
+        pnc: Bool = true,
+        progressHandler: ProgressHandler? = nil
+    ) async throws -> CanaryManager {
+        let models = try await CanaryModels.downloadAndLoad(precision: precision, progressHandler: progressHandler)
+        return try CanaryManager(models: models, source: source, target: target, pnc: pnc)
+    }
+
+    /// Whether the prompt requests translation (source ≠ target language slot).
+    private var isTranslationPrompt: Bool {
+        let s = CanaryConfig.promptSourceLangIndex
+        let t = CanaryConfig.promptTargetLangIndex
+        return prompt.count > t && prompt[s] != prompt[t]
     }
 
     /// Transcribe a 16 kHz mono audio file.
@@ -52,6 +87,87 @@ public actor CanaryManager {
             return detokenize(try transcribeWindow(audio: audio))
         }
 
+        if isTranslationPrompt {
+            // Each window translates independently and translated text is not
+            // token-stable across the overlap the way a transcript is, so the
+            // LCS seam merge can duplicate or drop content at window seams.
+            Self.logger.warning(
+                "Translating \(audio.count) samples (> 15 s) via overlap chunking; seam merges are "
+                    + "unreliable for translation output. Use transcribe(audio:vad:) to split at pauses.")
+        }
+        return detokenize(try transcribeOverlapping(audio: audio))
+    }
+
+    /// Transcribe or translate long audio by decoding pause-aligned pieces.
+    ///
+    /// `speechSegments` (from `VadManager.segmentSpeech`) are packed into
+    /// contiguous spans of at most 15 s, each decoded as one window. Pieces never
+    /// overlap, so no seam merge runs — this is the path for speech translation,
+    /// where translated text is not token-stable across an overlap. Silence
+    /// between packed segments is kept so the model sees natural phrasing. A
+    /// single segment longer than 15 s falls back to overlap chunking.
+    public func transcribe(audio: [Float], speechSegments: [VadSegment]) throws -> String {
+        let sampleRate = CanaryConfig.sampleRate
+        let ranges = speechSegments.compactMap { segment -> Range<Int>? in
+            let start = max(0, min(segment.startSample(sampleRate: sampleRate), audio.count))
+            let end = max(start, min(segment.endSample(sampleRate: sampleRate), audio.count))
+            return end > start ? start..<end : nil
+        }
+        let maxN = CanaryConfig.maxSamples
+        var pieces: [String] = []
+        for span in Self.packSegments(ranges, maxSamples: maxN) {
+            let slice = Array(audio[span])
+            let tokens =
+                slice.count <= maxN ? try transcribeWindow(audio: slice) : try transcribeOverlapping(audio: slice)
+            let text = detokenize(tokens).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty { pieces.append(text) }
+        }
+        return pieces.joined(separator: " ")
+    }
+
+    /// Run VAD, then decode pause-aligned pieces (see `transcribe(audio:speechSegments:)`).
+    public func transcribe(
+        audio: [Float],
+        vad: VadManager,
+        segmentation: VadSegmentationConfig = CanaryConfig.vadSegmentation()
+    ) async throws -> String {
+        let segments = try await vad.segmentSpeech(audio, config: segmentation)
+        return try transcribe(audio: audio, speechSegments: segments)
+    }
+
+    /// Run VAD on a file, then decode pause-aligned pieces.
+    public func transcribe(
+        audioURL: URL,
+        vad: VadManager,
+        segmentation: VadSegmentationConfig = CanaryConfig.vadSegmentation()
+    ) async throws -> String {
+        let converter = AudioConverter(sampleRate: Double(CanaryConfig.sampleRate))
+        let samples = try converter.resampleAudioFile(audioURL)
+        return try await transcribe(audio: samples, vad: vad, segmentation: segmentation)
+    }
+
+    /// Pack ascending, non-overlapping sample ranges into contiguous spans of at
+    /// most `maxSamples`. A span runs from its first segment's start to its last
+    /// segment's end. A segment longer than `maxSamples` becomes its own span.
+    static func packSegments(_ segments: [Range<Int>], maxSamples: Int) -> [Range<Int>] {
+        var spans: [Range<Int>] = []
+        var current: Range<Int>?
+        for segment in segments where !segment.isEmpty {
+            if let span = current, segment.upperBound - span.lowerBound <= maxSamples {
+                current = span.lowerBound..<segment.upperBound
+                continue
+            }
+            if let span = current { spans.append(span) }
+            current = segment
+        }
+        if let span = current { spans.append(span) }
+        return spans
+    }
+
+    /// Overlap-chunked decode for audio longer than one window; returns merged token ids.
+    private func transcribeOverlapping(audio: [Float]) throws -> [Int] {
+        let maxN = CanaryConfig.maxSamples
+        if audio.count <= maxN { return try transcribeWindow(audio: audio) }
         let hop = maxN - CanaryConfig.chunkOverlapSamples
         var merged: [Int] = []
         var start = 0
@@ -69,16 +185,18 @@ public actor CanaryManager {
             if end >= audio.count { break }
             start += hop
         }
-        return detokenize(merged)
+        return merged
     }
 
     /// Run the 4-stage pipeline over a single ≤15 s window; returns generated
     /// token ids (prompt stripped, EOS excluded).
     private func transcribeWindow(audio: [Float]) throws -> [Int] {
-        let (mel, melLength) = try runPreprocessor(audio: audio)
-        let (encoder, encoderLength) = try runEncoder(mel: mel, melLength: melLength)
-        let (embeddings, encoderMask) = try makeDecoderContext(encoder: encoder, encoderLength: encoderLength)
-        return try greedyDecode(embeddings: embeddings, encoderMask: encoderMask)
+        try autoreleasepool {
+            let (mel, melLength) = try runPreprocessor(audio: audio)
+            let (encoder, encoderLength) = try runEncoder(mel: mel, melLength: melLength)
+            let (embeddings, encoderMask) = try makeDecoderContext(encoder: encoder, encoderLength: encoderLength)
+            return try greedyDecode(embeddings: embeddings, encoderMask: encoderMask)
+        }
     }
 
     /// Merge two adjacent window token streams using longest-common-substring.
@@ -232,44 +350,57 @@ public actor CanaryManager {
         var pos = promptLen
 
         let hidden = try MLMultiArray(shape: [1, CanaryConfig.encoderHidden as NSNumber], dataType: .float32)
-        let hptr = hidden.dataPointer.assumingMemoryBound(to: Float32.self)
         let d = CanaryConfig.encoderHidden
 
         var generated: [Int] = []
-        while pos < s {
-            let input = try MLDictionaryFeatureProvider(dictionary: [
-                "input_ids": MLFeatureValue(multiArray: inputIds),
-                "decoder_mask": MLFeatureValue(multiArray: decoderMask),
-                "encoder_embeddings": MLFeatureValue(multiArray: embeddings),
-                "encoder_mask": MLFeatureValue(multiArray: encoderMask),
-            ])
-            let out = try models.decoder.prediction(from: input)
-            guard let dec = out.featureValue(for: "decoder")?.multiArrayValue else {
-                throw ASRError.processingFailed("Canary decoder produced no `decoder`")
+        var reachedEos = false
+        while pos < s && !reachedEos {
+            // Each step autoreleases MB-scale IOSurface-backed outputs; drain
+            // per step or long runs exhaust IOSurface allocation (crash).
+            try autoreleasepool {
+                // Re-derive pointers inside the pool: UnsafeMutablePointer is not
+                // Sendable, so capturing the outer ones is a region-isolation error.
+                let idptr = inputIds.dataPointer.assumingMemoryBound(to: Int32.self)
+                let mkptr = decoderMask.dataPointer.assumingMemoryBound(to: Float32.self)
+                let hptr = hidden.dataPointer.assumingMemoryBound(to: Float32.self)
+
+                let input = try MLDictionaryFeatureProvider(dictionary: [
+                    "input_ids": MLFeatureValue(multiArray: inputIds),
+                    "decoder_mask": MLFeatureValue(multiArray: decoderMask),
+                    "encoder_embeddings": MLFeatureValue(multiArray: embeddings),
+                    "encoder_mask": MLFeatureValue(multiArray: encoderMask),
+                ])
+                let out = try models.decoder.prediction(from: input)
+                guard let dec = out.featureValue(for: "decoder")?.multiArrayValue else {
+                    throw ASRError.processingFailed("Canary decoder produced no `decoder`")
+                }
+
+                // hidden state at the last valid position (decoder output may be stride-padded)
+                let decStrides = dec.strides.map { $0.intValue }
+                let rowBase = (pos - 1) * decStrides[1]
+                let elemStride = decStrides[2]
+                let readDec = floatReader(dec)
+                for h in 0..<d { hptr[h] = readDec(rowBase + h * elemStride) }
+
+                let projInput = try MLDictionaryFeatureProvider(dictionary: [
+                    "hidden": MLFeatureValue(multiArray: hidden)
+                ])
+                let projOut = try models.projection.prediction(from: projInput)
+                guard let logits = projOut.featureValue(for: "logits")?.multiArrayValue else {
+                    throw ASRError.processingFailed("Canary projection produced no `logits`")
+                }
+
+                let next = argmax(logits)
+                if next == CanaryConfig.eosId {
+                    reachedEos = true
+                    return
+                }
+
+                generated.append(next)
+                idptr[pos] = Int32(next)
+                mkptr[pos] = 1
+                pos += 1
             }
-
-            // hidden state at the last valid position (decoder output may be stride-padded)
-            let decStrides = dec.strides.map { $0.intValue }
-            let rowBase = (pos - 1) * decStrides[1]
-            let elemStride = decStrides[2]
-            let readDec = floatReader(dec)
-            for h in 0..<d { hptr[h] = readDec(rowBase + h * elemStride) }
-
-            let projInput = try MLDictionaryFeatureProvider(dictionary: [
-                "hidden": MLFeatureValue(multiArray: hidden)
-            ])
-            let projOut = try models.projection.prediction(from: projInput)
-            guard let logits = projOut.featureValue(for: "logits")?.multiArrayValue else {
-                throw ASRError.processingFailed("Canary projection produced no `logits`")
-            }
-
-            let next = argmax(logits)
-            if next == CanaryConfig.eosId { break }
-
-            generated.append(next)
-            idptr[pos] = Int32(next)
-            mkptr[pos] = 1
-            pos += 1
         }
         return generated
     }

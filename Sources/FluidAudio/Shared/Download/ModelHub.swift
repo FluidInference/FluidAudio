@@ -167,6 +167,7 @@ public enum ModelHub {
     ) async {
         guard !offlineMode else { return }
         let repoPath = directory.appendingPathComponent(repo.folderName)
+        let revision = ModelRegistry.mapRevision(repo.remotePath, default: repo.revision)
         let subPath = repo.subPath
         var patterns: [String] = []
         for model in requiredFiles {
@@ -179,6 +180,7 @@ public enum ModelHub {
         do {
             let remote = try await HFTreeLister.listTree(
                 repoRemotePath: repo.remotePath,
+                revision: revision,
                 startingAt: subPath ?? "",
                 include: { itemPath, isDirectory in
                     if isDirectory {
@@ -244,11 +246,16 @@ public enum ModelHub {
     ) async throws -> T {
         await SystemInfo.logOnce(using: logger)
         let repoPath = directory.appendingPathComponent(repo.folderName)
+        let revision = ModelRegistry.mapRevision(repo.remotePath, default: repo.revision)
         let additionalModelNames = requiredFiles.subtracting(
             ModelNames.getRequiredModelNames(for: repo, variant: variant))
 
         func ensureCacheComplete() async throws {
-            let incomplete = ModelCache.incompleteFiles(at: repoPath, requiredFiles: requiredFiles)
+            let revisionMatches = ModelCache.matchesRevision(at: repoPath, revision: revision)
+            let incomplete =
+                revisionMatches
+                ? ModelCache.incompleteFiles(at: repoPath, requiredFiles: requiredFiles)
+                : requiredFiles.sorted()
             if incomplete.isEmpty {
                 logger.info("Found \(repo.folderName) locally, no download needed")
                 return
@@ -322,6 +329,7 @@ public enum ModelHub {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let repoPath = directory.appendingPathComponent(repo.folderName)
+        let revision = ModelRegistry.mapRevision(repo.remotePath, default: repo.revision)
         let requiredModels = ModelNames.getRequiredModelNames(for: repo, variant: variant)
         // The caller-supplied `modelNames` may include files outside the repo's
         // default "required" set (e.g. CtcHead.mlmodelc inside parakeet-ctc-110m
@@ -332,11 +340,15 @@ public enum ModelHub {
         let effectiveModels = requiredModels.union(extraModelNames)
         let reporter = ProgressReporter(handler: progressHandler, downloadPhaseWeight: 0.5)
 
-        if !ModelCache.allModelsExist(at: repoPath, models: effectiveModels) {
+        let revisionMatches = ModelCache.matchesRevision(at: repoPath, revision: revision)
+        if !revisionMatches || !ModelCache.allModelsExist(at: repoPath, models: effectiveModels) {
             // In offline mode surface a typed error listing the
             // missing files instead of attempting a HuggingFace fetch.
             if offlineMode {
-                let missing = ModelCache.missingModels(at: repoPath, models: effectiveModels)
+                let missing =
+                    revisionMatches
+                    ? ModelCache.missingModels(at: repoPath, models: effectiveModels)
+                    : effectiveModels.sorted()
                 logger.error(
                     "Offline mode: required models missing at \(repoPath.path): \(missing)"
                 )
@@ -425,7 +437,7 @@ public enum ModelHub {
         }
 
         let repoPath = directory.appendingPathComponent(repo.folderName)
-        try FileManager.default.createDirectory(at: repoPath, withIntermediateDirectories: true)
+        let revision = ModelRegistry.mapRevision(repo.remotePath, default: repo.revision)
 
         let requiredModels = ModelNames.getRequiredModelNames(for: repo, variant: variant)
             .union(additionalModelNames)
@@ -441,7 +453,8 @@ public enum ModelHub {
             }
         }
 
-        let include = Self.repoIncludeRule(subPath: subPath, patterns: patterns)
+        let include = Self.repoIncludeRule(
+            subPath: subPath, patterns: patterns, sweepsRootMetadata: repo.sweepsRootMetadata)
 
         // Repo loads: download occupies 0-0.5, CoreML compile 0.5-1.0.
         let reporter = ProgressReporter(handler: progressHandler, downloadPhaseWeight: 0.5)
@@ -451,6 +464,7 @@ public enum ModelHub {
         let treeFetch = HFTreeLister.fetch(using: listingSession)
         var filesToDownload: [RemoteFile] = try await HFTreeLister.listTree(
             repoRemotePath: repo.remotePath,
+            revision: revision,
             startingAt: subPath ?? "",
             include: include,
             fetch: treeFetch
@@ -480,6 +494,7 @@ public enum ModelHub {
                 let names = Set(missingAux)
                 filesToDownload += try await HFTreeLister.listTree(
                     repoRemotePath: repo.remotePath,
+                    revision: revision,
                     include: { itemPath, isDirectory in
                         !isDirectory && names.contains((itemPath as NSString).lastPathComponent)
                     },
@@ -488,6 +503,16 @@ public enum ModelHub {
             }
         }
 
+        let requestedPaths = Set(filesToDownload.map(\.path))
+        // Validate all cached variants before stamping the shared marker,
+        // but only fetch files selected for this caller's download.
+        filesToDownload = try await filesForLegacyAdoption(
+            filesToDownload, at: repoPath, repo: repo, revision: revision, subPath: subPath,
+            includeRepoRootFiles: true, fetch: treeFetch)
+        try ModelCache.adoptLegacyCache(
+            at: repoPath, revision: revision, files: filesToDownload, subPath: subPath)
+        try ModelCache.prepareForDownload(at: repoPath, revision: revision)
+        filesToDownload.removeAll { !requestedPaths.contains($0.path) }
         logger.info("Found \(filesToDownload.count) files to download")
 
         // Compute total known bytes for byte-weighted progress.
@@ -516,6 +541,7 @@ public enum ModelHub {
                 file: file,
                 from: repo.remotePath,
                 at: destPath,
+                revision: revision,
                 recoveringBlockedPaths: true,
                 config: config,
                 configuration: configuration,
@@ -596,12 +622,23 @@ public enum ModelHub {
         // Subdirectory downloads have no compile phase: download spans 0-1.
         let reporter = ProgressReporter(handler: progressHandler, downloadPhaseWeight: 1.0)
         reporter.listing()
-        let filesToDownload: [RemoteFile] = try await HFTreeLister.listTree(
+        let revision = ModelRegistry.mapRevision(repo.remotePath, default: repo.revision)
+        var filesToDownload: [RemoteFile] = try await HFTreeLister.listTree(
             repoRemotePath: repo.remotePath,
+            revision: revision,
             startingAt: subdirectory,
             include: { itemPath, _ in shouldSkip?(itemPath) != true },
             fetch: HFTreeLister.fetch(using: listingSession)
         )
+        let revisionCache = repoDirectory.appendingPathComponent(subdirectory)
+        let requestedPaths = Set(filesToDownload.map(\.path))
+        filesToDownload = try await filesForLegacyAdoption(
+            filesToDownload, at: revisionCache, repo: repo, revision: revision, subPath: subdirectory,
+            includeRepoRootFiles: false, fetch: HFTreeLister.fetch(using: listingSession))
+        try ModelCache.adoptLegacyCache(
+            at: revisionCache, revision: revision, files: filesToDownload, subPath: subdirectory)
+        try ModelCache.prepareForDownload(at: revisionCache, revision: revision)
+        filesToDownload.removeAll { !requestedPaths.contains($0.path) }
         let totalFiles = filesToDownload.count
         logger.info("Found \(totalFiles) files in \(subdirectory)")
 
@@ -634,6 +671,7 @@ public enum ModelHub {
                     try await downloadSubdirectoryFile(
                         file, index: index, repo: repo, subdirectory: subdirectory,
                         repoDirectory: repoDirectory, totalFiles: totalFiles,
+                        revision: revision,
                         config: config, configuration: configuration, progress: progress)
                 }
             }
@@ -648,6 +686,41 @@ public enum ModelHub {
         logger.info("Downloaded \(subdirectory) from \(repo.folderName)")
     }
 
+    /// A legacy marker covers every cached variant, so extend the calling
+    /// variant's listing to all local compiled bundles and plain files first.
+    private static func filesForLegacyAdoption(
+        _ files: [RemoteFile], at repoPath: URL, repo: Repo, revision: String, subPath: String?,
+        includeRepoRootFiles: Bool, fetch: HFTreeLister.Fetch
+    ) async throws -> [RemoteFile] {
+        guard let contents = try ModelCache.legacyCacheContents(at: repoPath, revision: revision) else { return files }
+        var additional = try await HFTreeLister.listTree(
+            repoRemotePath: repo.remotePath, revision: revision, startingAt: subPath ?? "",
+            include: { path, isDirectory in
+                let local = ModelCache.localPath(for: path, subPath: subPath)
+                let inBundle = contents.bundles.contains {
+                    $0.isEmpty || local == $0 || local.hasPrefix($0 + "/")
+                        || (isDirectory && $0.hasPrefix(local + "/"))
+                }
+                let plainFile =
+                    contents.files.contains(local)
+                    || (isDirectory && contents.files.contains { $0.hasPrefix(local + "/") })
+                return inBundle || plainFile
+            }, fetch: fetch)
+        let covered = Set((files + additional).map { ModelCache.localPath(for: $0.path, subPath: subPath) })
+        let missingRoots = Set(contents.files.filter { !$0.contains("/") }).subtracting(covered)
+        // Only repo downloads flatten a subPath and can share root auxiliaries.
+        // Subdirectory downloads preserve remote paths and never use root files.
+        if includeRepoRootFiles, subPath != nil, !missingRoots.isEmpty {
+            additional += try await HFTreeLister.listTree(
+                repoRemotePath: repo.remotePath, revision: revision,
+                include: { path, isDirectory in !isDirectory && missingRoots.contains(path) }, fetch: fetch)
+        }
+        var merged = files
+        var paths = Set(files.map(\.path))
+        for file in additional where paths.insert(file.path).inserted { merged.append(file) }
+        return merged
+    }
+
     /// One file of a subdirectory download, run inside the bounded task group.
     private static func downloadSubdirectoryFile(
         _ file: RemoteFile,
@@ -656,6 +729,7 @@ public enum ModelHub {
         subdirectory: String,
         repoDirectory: URL,
         totalFiles: Int,
+        revision: String,
         config: DownloadConfig,
         configuration: URLSessionConfiguration?,
         progress: ConcurrentProgress
@@ -675,6 +749,7 @@ public enum ModelHub {
             file: file,
             from: repo.remotePath,
             at: destPath,
+            revision: revision,
             recoveringBlockedPaths: false,
             config: config,
             configuration: configuration,
@@ -737,8 +812,14 @@ public enum ModelHub {
     ///   roughly half of a first-run parakeetEou/kokoroAne download was never
     ///   loaded (#826). Skipping applies to directory traversal too, so the
     ///   tree lister does not recurse into excluded bundles.
+    ///
+    /// For root-level repos (no subPath), `sweepsRootMetadata` controls the
+    /// loose `.json`/`.txt` allowance at the repository root. It is on for
+    /// most repos (tokenizer/config files their required set does not name)
+    /// and off for `Repo.kokoro`, whose root holds ~40 MB of per-language
+    /// lexicon caches that the shared G2P download must not drag in (#1044).
     static func repoIncludeRule(
-        subPath: String?, patterns: [String]
+        subPath: String?, patterns: [String], sweepsRootMetadata: Bool = true
     ) -> (String, Bool) -> Bool {
         { itemPath, isDirectory in
             let isBundlePath =
@@ -772,8 +853,10 @@ public enum ModelHub {
             }
             // Patterns carry a trailing "/" (bundle directories); a required root-level
             // *file* (e.g. `tokenizer.model`) matches when the pattern is exactly its path.
-            return patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) || $0 == itemPath + "/" }
-                || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")
+            if patterns.isEmpty || patterns.contains(where: { itemPath.hasPrefix($0) || $0 == itemPath + "/" }) {
+                return true
+            }
+            return sweepsRootMetadata && (itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt"))
         }
     }
 }

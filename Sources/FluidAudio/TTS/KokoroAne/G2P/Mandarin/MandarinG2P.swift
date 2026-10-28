@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Hanzi → Bopomofo + tone-digit string for the Kokoro v1.1-zh
@@ -28,9 +29,10 @@ import Foundation
 ///      encodes tone.
 ///   5. **Diacritic → digit** — each pinyin syllable is normalized to
 ///      `(base, tone)` via `MandarinPinyinNormalizer`.
-///   6. **Erhua merge** — `MandarinErhua.merge` folds trailing `儿`
+///   6. **Erhua merge** — `MandarinErhua.merge` folds a word-final `儿`
 ///      into the previous syllable so `小孩儿` emits a single
-///      r-coloured token (`ㄒㄧㄠ3ㄏㄞㄦ2`).
+///      r-coloured token (`ㄒㄧㄠ3ㄏㄞㄦ2`). Other characters read `er`
+///      (`二`, `而`, `耳`, `尔`) keep their own syllable.
 ///   7. **Tone sandhi** — 3+3 → 2+3, 不 / 一 contextual rules
 ///      (`MandarinToneSandhi`).
 ///   8. **Pinyin → Bopomofo** — `MandarinBopomofoMap.encode` produces
@@ -96,7 +98,7 @@ public struct MandarinG2P: Sendable {
 
         // Polyphone disambiguation: when a g2pW model is wired and the
         // segmenter flagged candidate Hanzi, run the classifier and
-        // splice in `.bopomofoOverride` cases. The classifier sees the
+        // splice in `.disambiguated` cases. The classifier sees the
         // full normalized sentence so it can pick by context.
         if let g2pw, !result.polyphoneTargets.isEmpty {
             do {
@@ -106,8 +108,14 @@ public struct MandarinG2P: Sendable {
                 )
                 for target in result.polyphoneTargets {
                     guard let bopomofo = picks[target.charPos] else { continue }
-                    let digit = MandarinPolyphoneCatalog.toneDigitForm(bopomofo)
-                    segments[target.segmentIdx] = .bopomofoOverride(digit)
+                    guard let syllable = MandarinBopomofoMap.decode(bopomofo: bopomofo) else {
+                        Self.logger.warning(
+                            "g2pW label '\(bopomofo)' for '\(normalizedChars[target.charPos])' "
+                                + "is not a known syllable — keeping dict pick")
+                        continue
+                    }
+                    segments[target.segmentIdx] = .disambiguated(
+                        syllable, hanzi: normalizedChars[target.charPos])
                 }
             } catch {
                 Self.logger.warning(
@@ -118,8 +126,12 @@ public struct MandarinG2P: Sendable {
 
         var output = ""
         var pendingSyllables: [MandarinPinyinNormalizer.Syllable] = []
+        // The Hanzi behind `pendingSyllables`, so the erhua pass can tell
+        // `儿` from `二` / `而` / `耳` / `尔`, which all read `er`.
+        var pendingHanzi: [Character] = []
 
         func flushPending() {
+            defer { pendingHanzi.removeAll(keepingCapacity: true) }
             guard !pendingSyllables.isEmpty else { return }
             // Order: erhua first (it shrinks the buffer), then sandhi
             // operates on the merged result so 3+3 promotion sees the
@@ -141,17 +153,30 @@ public struct MandarinG2P: Sendable {
 
         for seg in segments {
             switch seg {
-            case .pinyin(let list, _):
-                for py in list {
-                    pendingSyllables.append(MandarinPinyinNormalizer.normalize(py))
+            case .pinyin(let list, let word):
+                var syllables = list.map(MandarinPinyinNormalizer.normalize)
+                let chars = Array(word)
+                // Readings line up one per character; a phrase entry that
+                // doesn't leaves no character to check, so nothing folds.
+                if chars.count == syllables.count, let last = syllables.indices.last,
+                    syllables[last].base == "er",
+                    MandarinErhua.isSuffix(word: chars, preceding: pendingHanzi)
+                {
+                    syllables[last].isErhuaSuffix = true
                 }
+                pendingSyllables.append(contentsOf: syllables)
+                pendingHanzi.append(contentsOf: chars)
             case .syllables(let list):
                 // User-lexicon pinyin tokens — already in
                 // (base, tone) form. They join the same syllable buffer
                 // so sandhi runs across user/dict boundaries naturally
                 // (e.g. user word ending in tone-3 followed by dict
-                // word starting with tone-3 → 3+3 promotion).
+                // word starting with tone-3 → 3+3 promotion). They are
+                // taken literally for erhua: their `er` tokens stay
+                // unflagged, and a `儿` after them has no Hanzi context
+                // to fold by.
                 pendingSyllables.append(contentsOf: list)
+                pendingHanzi.removeAll(keepingCapacity: true)
             case .punctuation(let s):
                 // Sandhi never crosses punctuation; emit accumulated
                 // syllables first.
@@ -163,13 +188,16 @@ public struct MandarinG2P: Sendable {
                 // silently drop the rest.
                 flushPending()
                 output.append(s)
-            case .bopomofoOverride(let s):
-                // g2pW already encoded the bopomofo + tone — emit
-                // verbatim and break the sandhi window so the next
-                // syllable starts fresh. (Cross-syllable sandhi
-                // through a g2pW pick is a documented limitation.)
-                flushPending()
-                output.append(s)
+            case .disambiguated(var syllable, let hanzi):
+                // A g2pW pick joins the buffer like a dict reading so
+                // sandhi, erhua and the vocab encoding treat it the same.
+                if syllable.base == "er",
+                    MandarinErhua.isSuffix(word: [hanzi], preceding: pendingHanzi)
+                {
+                    syllable.isErhuaSuffix = true
+                }
+                pendingSyllables.append(syllable)
+                pendingHanzi.append(hanzi)
             }
         }
         flushPending()
@@ -204,20 +232,21 @@ public struct MandarinG2P: Sendable {
     // MARK: - Segmentation
 
     enum Segment {
-        /// Diacritic-form pinyin syllables. `hanziCount` is the number
-        /// of Hanzi consumed from the input — needed by the polyphone
-        /// pass to know whether a segment is a single-char fallback
-        /// (eligible for g2pW override) or a phrase match (which the
-        /// dict already context-disambiguated).
-        case pinyin([String], hanziCount: Int)
+        /// Diacritic-form pinyin syllables for `word`, the Hanzi consumed
+        /// from the input. A one-character `word` is a single-char fallback
+        /// (eligible for g2pW override); a longer one is a phrase match,
+        /// which the dict already context-disambiguated. The text itself
+        /// is what lets the erhua pass tell `儿` from other `er` readings.
+        case pinyin([String], word: String)
         /// Pre-parsed syllables (user-lexicon source).
         case syllables([MandarinPinyinNormalizer.Syllable])
         case punctuation(String)  // ASCII punctuation passthrough.
         case literal(String)  // Anything else (ASCII letters, digits,
         // already-phonemised bopomofo, etc.)
-        /// Pre-encoded bopomofo + tone digit from a polyphone
-        /// disambiguator. Bypasses normalization and sandhi.
-        case bopomofoOverride(String)
+        /// Single-char reading chosen by the polyphone disambiguator,
+        /// already in `(base, tone)` form. `hanzi` is the source char so
+        /// the erhua pass keeps its context.
+        case disambiguated(MandarinPinyinNormalizer.Syllable, hanzi: Character)
     }
 
     /// Segmentation result: the segment list plus a side-channel of
@@ -271,7 +300,7 @@ public struct MandarinG2P: Sendable {
             for word in words {
                 let wordCharCount = word.count
                 if wordCharCount >= 2, let pinyin = dict.phrases[word] {
-                    segments.append(.pinyin(pinyin, hanziCount: wordCharCount))
+                    segments.append(.pinyin(pinyin, word: word))
                     offsetInRun += wordCharCount
                     continue
                 }
@@ -289,7 +318,7 @@ public struct MandarinG2P: Sendable {
                                 PolyphoneTarget(
                                     segmentIdx: segments.count, charPos: absPos))
                         }
-                        segments.append(.pinyin([pinyin[0]], hanziCount: 1))
+                        segments.append(.pinyin([pinyin[0]], word: String(ch)))
                     } else {
                         // Unknown char — fall through as literal so
                         // KokoroAneVocab can have a shot at it.
@@ -342,7 +371,7 @@ public struct MandarinG2P: Sendable {
                         if let pinyin = dict.phrases[candidate] {
                             flushHanziRun()
                             flushLiteral()
-                            segments.append(.pinyin(pinyin, hanziCount: len))
+                            segments.append(.pinyin(pinyin, word: candidate))
                             i += len
                             matched = true
                             break
@@ -446,3 +475,4 @@ public struct MandarinG2P: Sendable {
         return out.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
+#endif

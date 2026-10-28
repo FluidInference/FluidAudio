@@ -1,5 +1,6 @@
 #if os(macOS)
 @preconcurrency import AVFoundation
+import CoreML
 import FluidAudio
 import Foundation
 
@@ -204,14 +205,20 @@ enum TranscribeCommand {
         var wordTimestamps = false
         var outputJsonPath: String?
         var modelVersion: AsrModelVersion = .v3
+        /// `--model-version unified`: Parakeet Unified 0.6B (English, punctuation and capitalization) through
+        /// `UnifiedAsrManager`, which is not an `AsrModelVersion`.
+        var unified = false
         var modelDir: String?
+        var localModelDir: String?
         var customVocabPath: String?
         var parakeetVariant: StreamingModelVariant?
         var language: Language?
         var encoderPrecision: ParakeetEncoderPrecision = .int8
+        var encoderComputeUnits: MLComputeUnits?  // nil = library default (ANE)
         var melChunkContext: Bool? = nil
         var dualDecodeArbitration = false
         var seamGapRepair = true
+        var seamTimingRealignment = true
         var streamingMode = false
 
         // Streaming mode (SlidingWindowAsrConfig)
@@ -249,6 +256,31 @@ enum TranscribeCommand {
                 parsed.showMetadata = true
             case "--word-timestamps":
                 parsed.wordTimestamps = true
+            case "--encoder-compute-units":
+                guard i + 1 < args.count else {
+                    fputs("ERROR: --encoder-compute-units needs a value: 'ane', 'gpu', 'cpu', or 'all'\n", stderr)
+                    fflush(stderr)
+                    return nil
+                }
+                do {
+                    switch args[i + 1].lowercased() {
+                    case "ane", "cpuandneuralengine", "neural-engine":
+                        parsed.encoderComputeUnits = .cpuAndNeuralEngine
+                    case "gpu", "cpuandgpu":
+                        parsed.encoderComputeUnits = .cpuAndGPU
+                    case "cpu", "cpuonly":
+                        parsed.encoderComputeUnits = .cpuOnly
+                    case "all":
+                        parsed.encoderComputeUnits = .all
+                    default:
+                        fputs(
+                            "ERROR: Invalid --encoder-compute-units: \(args[i + 1]). Use 'ane', 'gpu', 'cpu', or 'all'\n",
+                            stderr)
+                        fflush(stderr)
+                        return nil
+                    }
+                    i += 1
+                }
             case "--output-json":
                 if i + 1 < args.count {
                     parsed.outputJsonPath = args[i + 1]
@@ -261,19 +293,34 @@ enum TranscribeCommand {
                         parsed.modelVersion = .v2
                     case "v3", "3":
                         parsed.modelVersion = .v3
+                    case "redux":
+                        parsed.modelVersion = .redux
+                    case "ultra":
+                        parsed.modelVersion = .ultra
+                    case "phonon2", "phonon-2":
+                        parsed.modelVersion = .phonon2
                     case "tdt-ctc-110m", "110m":
                         parsed.modelVersion = .tdtCtc110m
                     case "tdt-ja", "ja":
                         parsed.modelVersion = .tdtJa
+                    case "unified":
+                        parsed.unified = true
                     default:
                         fputs(
-                            "ERROR: Invalid model version: \(args[i + 1]). Use 'v2', 'v3', 'tdt-ctc-110m', or 'tdt-ja'\n",
+                            "ERROR: Invalid model version: \(args[i + 1]). Use 'v2', 'v3', 'redux', 'ultra', 'phonon2', 'tdt-ctc-110m', 'tdt-ja', or 'unified'\n",
                             stderr)
                         fflush(stderr)
                         return nil
                     }
                     i += 1
                 }
+            case "--local-model-dir":
+                guard i + 1 < args.count else {
+                    fputs("ERROR: --local-model-dir requires a directory\n", stderr)
+                    return nil
+                }
+                parsed.localModelDir = args[i + 1]
+                i += 1
             case "--model-dir":
                 if i + 1 < args.count {
                     parsed.modelDir = args[i + 1]
@@ -325,6 +372,8 @@ enum TranscribeCommand {
                 parsed.dualDecodeArbitration = true
             case "--no-seam-gap-repair":
                 parsed.seamGapRepair = false
+            case "--no-seam-timing-realignment":
+                parsed.seamTimingRealignment = false
 
             // Streaming mode config
             case "--chunk-seconds":
@@ -406,6 +455,10 @@ enum TranscribeCommand {
             i += 1
         }
 
+        guard parsed.localModelDir == nil || (parsed.modelDir == nil && parsed.parakeetVariant == nil) else {
+            fputs("ERROR: --local-model-dir cannot be combined with --model-dir or --parakeet-variant\n", stderr)
+            return nil
+        }
         return parsed
     }
 
@@ -429,7 +482,10 @@ enum TranscribeCommand {
             exit(1)
         }
 
-        if let variant = parsed.parakeetVariant {
+        if parsed.unified {
+            logger.info("Using Parakeet Unified (batch) with token timings\n")
+            await runUnified(audioFile: audioFile, args: parsed)
+        } else if let variant = parsed.parakeetVariant {
             logger.info("Using \(variant.displayName) via StreamingAsrManager protocol.\n")
             await runWithVariant(audioFile: audioFile, args: parsed)
         } else if parsed.streamingMode {
@@ -441,28 +497,119 @@ enum TranscribeCommand {
         }
     }
 
+    // MARK: - Unified Mode
+
+    /// Batch transcription with Parakeet Unified, written through the same text, `--output-json`,
+    /// `--word-timestamps` and `--metadata` paths as the TDT models, so word timings are available to callers
+    /// that need them (aligning with diarization, seeking).
+    private static func runUnified(audioFile: String, args: ParsedArgs) async {
+        // UnifiedAsrManager loads and places its own models, so these options do not apply to it.
+        var ignored: [String] = []
+        if args.modelDir != nil { ignored.append("--model-dir") }
+        if args.localModelDir != nil { ignored.append("--local-model-dir") }
+        if args.customVocabPath != nil { ignored.append("--custom-vocab") }
+        if args.parakeetVariant != nil { ignored.append("--parakeet-variant") }
+        if args.language != nil { ignored.append("--language") }
+        if args.encoderPrecision != .int8 { ignored.append("--encoder-precision") }
+        if args.encoderComputeUnits != nil { ignored.append("--encoder-compute-units") }
+        if args.streamingMode { ignored.append("--streaming") }
+        if !ignored.isEmpty {
+            logger.warning("\(ignored.joined(separator: ", ")) not supported with --model-version unified; ignoring")
+        }
+
+        do {
+            let samples = try AudioConverter().resampleAudioFile(path: audioFile)
+            let duration = Double(samples.count) / 16000.0
+            let manager = UnifiedAsrManager()
+            try await manager.loadModels()
+            let start = Date()
+            let result = try await manager.transcribeWithTimings(samples)
+            let processingTime = Date().timeIntervalSince(start)
+            let rtfx = processingTime > 0 ? Float(duration / processingTime) : 0
+            let confidence =
+                result.tokenTimings.isEmpty
+                ? Float(0) : result.tokenTimings.map(\.confidence).reduce(0, +) / Float(result.tokenTimings.count)
+            let wordTimings = WordTimingMerger.mergeTokensIntoWords(result.tokenTimings)
+
+            logger.info(String(repeating: "=", count: 50))
+            logger.info("UNIFIED TRANSCRIPTION RESULTS")
+            logger.info(String(repeating: "=", count: 50))
+            logger.info("Final transcription:")
+            print(result.text)
+
+            if let outputJsonPath = args.outputJsonPath {
+                let output = TranscriptionJSONOutput(
+                    audioFile: audioFile,
+                    mode: "batch",
+                    modelVersion: "unified",
+                    text: result.text,
+                    durationSeconds: duration,
+                    processingTimeSeconds: processingTime,
+                    rtfx: rtfx,
+                    confidence: confidence,
+                    wordTimings: wordTimings,
+                    timingsConfirmed: nil
+                )
+                try writeJsonOutput(output, to: outputJsonPath)
+                logger.info("💾 JSON results saved to: \(outputJsonPath)")
+            }
+
+            if args.wordTimestamps {
+                logger.info("\nWord-level timestamps:")
+                for (index, word) in wordTimings.enumerated() {
+                    logger.info(
+                        "  [\(index)] \(String(format: "%.3f", word.startTime))s - \(String(format: "%.3f", word.endTime))s: \"\(word.word)\" (conf: \(String(format: "%.3f", word.confidence)))"
+                    )
+                }
+            }
+
+            if args.showMetadata {
+                logger.info("Metadata:")
+                logger.info("  Confidence: \(String(format: "%.3f", confidence))")
+                logger.info("  Duration: \(String(format: "%.3f", duration))s")
+                logger.info(
+                    "  Processing time: \(String(format: "%.3f", processingTime))s (\(String(format: "%.1f", rtfx))x)")
+            }
+        } catch {
+            logger.error("Unified transcription failed: \(error)")
+            fputs("ERROR: Unified transcription failed: \(error)\n", stderr)
+            exit(1)
+        }
+    }
+
     // MARK: - Batch Mode
+
+    /// One place for the local-dir / model-dir / download choice and the encoder options, shared by the batch
+    /// and streaming paths.
+    private static func loadModels(_ args: ParsedArgs) async throws -> AsrModels {
+        if let localModelDir = args.localModelDir {
+            return try AsrModels.loadLocal(
+                from: URL(fileURLWithPath: localModelDir), version: args.modelVersion,
+                encoderPrecision: args.encoderPrecision, encoderComputeUnits: args.encoderComputeUnits)
+        }
+        if let modelDir = args.modelDir {
+            return try await AsrModels.load(
+                from: URL(fileURLWithPath: modelDir), version: args.modelVersion,
+                encoderPrecision: args.encoderPrecision, encoderComputeUnits: args.encoderComputeUnits)
+        }
+        return try await AsrModels.downloadAndLoad(
+            version: args.modelVersion, encoderPrecision: args.encoderPrecision,
+            encoderComputeUnits: args.encoderComputeUnits)
+    }
 
     private static func runBatch(
         audioFile: String, args: ParsedArgs
     ) async {
         do {
-            let models: AsrModels
-            if let modelDir = args.modelDir {
-                let dir = URL(fileURLWithPath: modelDir)
-                models = try await AsrModels.load(
-                    from: dir, version: args.modelVersion, encoderPrecision: args.encoderPrecision)
-            } else {
-                models = try await AsrModels.downloadAndLoad(
-                    version: args.modelVersion, encoderPrecision: args.encoderPrecision)
-            }
+            let models = try await loadModels(args)
             let tdtConfig = TdtConfig(blankId: args.modelVersion.blankId)
             let asrConfig = ASRConfig(
                 tdtConfig: tdtConfig,
                 encoderHiddenSize: args.modelVersion.encoderHiddenSize,
                 melChunkContext: args.melChunkContext,
                 dualDecodeArbitration: args.dualDecodeArbitration,
-                seamGapRepair: args.seamGapRepair
+                seamGapRepair: args.seamGapRepair,
+                seamTimingRealignment: args.seamTimingRealignment
             )
             let asrManager = AsrManager(config: asrConfig)
             try await asrManager.loadModels(models)
@@ -572,6 +719,9 @@ enum TranscribeCommand {
                 switch args.modelVersion {
                 case .v2: modelVersionLabel = "v2"
                 case .v3: modelVersionLabel = "v3"
+                case .redux: modelVersionLabel = "redux"
+                case .ultra: modelVersionLabel = "ultra"
+                case .phonon2: modelVersionLabel = "phonon2"
                 case .tdtCtc110m: modelVersionLabel = "tdt-ctc-110m"
                 case .tdtJa: modelVersionLabel = "tdt-ja"
                 }
@@ -688,16 +838,7 @@ enum TranscribeCommand {
         let streamingAsr = SlidingWindowAsrManager(config: config)
 
         do {
-            // Pass encoder precision + model dir to model loading when available
-            let models: AsrModels
-            if let modelDir = args.modelDir {
-                let dir = URL(fileURLWithPath: modelDir)
-                models = try await AsrModels.load(
-                    from: dir, version: args.modelVersion, encoderPrecision: args.encoderPrecision)
-            } else {
-                models = try await AsrModels.downloadAndLoad(
-                    version: args.modelVersion, encoderPrecision: args.encoderPrecision)
-            }
+            let models = try await loadModels(args)
 
             if let vocabPath = args.customVocabPath {
                 logger.info("Configuring vocabulary boosting for streaming mode from: \(vocabPath)")
@@ -839,6 +980,9 @@ enum TranscribeCommand {
                 switch args.modelVersion {
                 case .v2: modelVersionLabel = "v2"
                 case .v3: modelVersionLabel = "v3"
+                case .redux: modelVersionLabel = "redux"
+                case .ultra: modelVersionLabel = "ultra"
+                case .phonon2: modelVersionLabel = "phonon2"
                 case .tdtCtc110m: modelVersionLabel = "tdt-ctc-110m"
                 case .tdtJa: modelVersionLabel = "tdt-ja"
                 }
@@ -1028,9 +1172,11 @@ enum TranscribeCommand {
                 --streaming                    Use streaming mode with chunk simulation
                 --metadata                     Show confidence, start time, and end time
                 --word-timestamps              Show word-level timestamps in results
+                --encoder-compute-units <u>    Encoder placement: ane (default), gpu, cpu, all
                 --output-json <file>           Save full transcription to JSON
-                --model-version <v2|v3|110m>   ASR model version (default: v3)
-                --model-dir <path>             Local model directory (skips download)
+                --model-version <name>         v2, v3, redux, ultra, phonon2, tdt-ctc-110m, tdt-ja, unified (default: v3)
+                --model-dir <path>             Repository model cache directory
+                --local-model-dir <path>       Exact compiled model directory; never downloads
                 --encoder-precision <int8|int8-v2|int4> Encoder quantization (default: int8;
                                                int8-v2 = int8-linear rebuild, avoids #760)
                 --language <code>              Language hint (e.g., en, de, fr, es)
@@ -1039,6 +1185,8 @@ enum TranscribeCommand {
                                                (default: disabled on v3, enabled otherwise)
                 --mel-context                  Force-enable the mel-context prepend (v3 opt-in)
                 --dual-decode-arbitration      Enable v3/no-mel long-form boundary arbitration
+                --no-seam-gap-repair           Skip the post-merge re-decode of chunk-seam gaps (#758)
+                --no-seam-timing-realignment   Keep the left window's timing for seam tokens (pre-fix timings)
 
             STREAMING MODE OPTIONS (--streaming, SlidingWindowAsrManager):
                 --chunk-seconds <sec>                Audio chunk size (default: 11.0)

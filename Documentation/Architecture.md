@@ -426,7 +426,9 @@ characteristics in ways the diarizer's clustering wasn't tuned for.
   by anything that hits ANE in a hot loop (TDT decoder, VAD, segmentation,
   embedding).
 - `AppLogger` — category-based `os.Logger` wrapper. One logger per
-  component.
+  component. Host apps can set `AppLogger.minimumLevel` and
+  `AppLogger.mirrorsToConsole` at startup (e.g. to keep transcript-bearing
+  debug lines off stderr in Debug builds).
 - `MLModelConfigurationUtils` — default `MLComputeUnits` selection,
   CI overrides.
 - `ModelHub` (+ `Shared/Download/` primitives: HFClient, RetryPolicy, HFTreeLister, FileDownloader, ModelCache, ProgressReporter) — HuggingFace fetch + caching + token resolution.

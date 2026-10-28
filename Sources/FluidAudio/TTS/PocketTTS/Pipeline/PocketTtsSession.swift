@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -73,6 +74,7 @@ public actor PocketTtsSession {
     private let temperature: Float
     private let language: PocketTtsLanguage
     private let maxTokensPerChunk: Int
+    private let voiceCachePosition: Int
     private var mimiState: PocketTtsSynthesizer.MimiState
     private var rng: SeededRNG
 
@@ -110,7 +112,7 @@ public actor PocketTtsSession {
         seed: UInt64,
         language: PocketTtsLanguage = .english,
         maxTokensPerChunk: Int = PocketTtsConstants.maxTokensPerChunk
-    ) {
+    ) throws {
         self.voiceKVSnapshot = voiceKVSnapshot
         self.mimiState = mimiState
         self.constants = constants
@@ -127,7 +129,11 @@ public actor PocketTtsSession {
         self.bosEmb = bosEmb
         self.temperature = temperature
         self.language = language
-        self.maxTokensPerChunk = maxTokensPerChunk
+        let voicePosition = Int(voiceKVSnapshot.positions[0][0].floatValue)
+        self.voiceCachePosition = voicePosition
+        self.maxTokensPerChunk = try PocketTtsSynthesizer.effectiveMaxTokensPerChunk(
+            requested: maxTokensPerChunk, voiceCachePosition: voicePosition
+        )
         self.rng = SeededRNG(seed: seed)
         self.stateModels = nil
         self.stateVoiceData = nil
@@ -164,7 +170,7 @@ public actor PocketTtsSession {
         seed: UInt64,
         language: PocketTtsLanguage = .english,
         maxTokensPerChunk: Int = PocketTtsConstants.maxTokensPerChunk
-    ) {
+    ) throws {
         self.voiceKVSnapshot = nil
         self.mimiState = mimiState
         self.constants = constants
@@ -181,7 +187,11 @@ public actor PocketTtsSession {
         self.bosEmb = bosEmb
         self.temperature = temperature
         self.language = language
-        self.maxTokensPerChunk = maxTokensPerChunk
+        let voicePosition = PocketTtsSynthesizer.voiceCachePosition(for: voiceData)
+        self.voiceCachePosition = voicePosition
+        self.maxTokensPerChunk = try PocketTtsSynthesizer.effectiveMaxTokensPerChunk(
+            requested: maxTokensPerChunk, voiceCachePosition: voicePosition
+        )
         self.rng = SeededRNG(seed: seed)
         self.stateModels = stateModels
         self.stateVoiceData = voiceData
@@ -201,8 +211,12 @@ public actor PocketTtsSession {
 
     /// Start the generation loop. Must be called once after init.
     func start() {
-        generationTask = Task { [weak self] in
-            guard let self else { return }
+        // Strong capture on purpose: one-shot callers (synthesizeStreamingStateful)
+        // keep only `frames`, so the session can be released before this task
+        // body runs; a weak capture then returned without finishing the stream
+        // and the consumer waited forever. The task holds the session until the
+        // text stream is finished or `cancel()` is called.
+        generationTask = Task {
             await self.generateLoop()
         }
         frameContinuation.onTermination = { [weak self] _ in
@@ -225,7 +239,11 @@ public actor PocketTtsSession {
 
                 let chunks = PocketTtsSynthesizer.chunkTextWithMetadata(
                     trimmed, tokenizer: constants.tokenizer,
-                    maxTokens: maxTokensPerChunk, language: language
+                    maxTokens: maxTokensPerChunk,
+                    preferredMaxTokens: min(
+                        PocketTtsConstants.preferredTokensPerChunk, maxTokensPerChunk),
+                    voiceCachePosition: voiceCachePosition,
+                    language: language
                 )
                 Self.logger.info(
                     "Session enqueued '\(trimmed)', \(chunks.count) chunk(s)")
@@ -260,7 +278,7 @@ public actor PocketTtsSession {
             // `.aneState`: MLState multifunction pipeline. The store refuses
             // to load these models on pre-15/18 OSes, so this gate is
             // unreachable in practice — it exists for the compiler.
-            guard #available(macOS 15.0, iOS 18.0, *) else {
+            guard #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) else {
                 throw PocketTTSError.processingFailed(
                     "PocketTTS `.aneState` placement requires macOS 15+/iOS 18+")
             }
@@ -296,7 +314,9 @@ public actor PocketTtsSession {
         )
 
         // Generation loop
-        let maxGenLen = PocketTtsSynthesizer.estimateMaxFrames(text: text)
+        let cachePosition = try PocketTtsSynthesizer.kvCachePosition(in: kvState)
+        let maxGenLen = PocketTtsSynthesizer.boundedGenerationFrameCount(
+            text: text, cachePosition: cachePosition)
         var eosStep: Int?
         var sequence = try PocketTtsSynthesizer.createBosStartSequence(
             bosEmbedding: constants.bosEmbedding,
@@ -359,13 +379,21 @@ public actor PocketTtsSession {
             // Autoregressive feedback
             sequence = try PocketTtsSynthesizer.createSequenceFromLatent(latent)
         }
+
+        if !Task.isCancelled {
+            try PocketTtsSynthesizer.validateGenerationCompleted(
+                generatedFrameLimit: maxGenLen,
+                cachePosition: cachePosition,
+                eosStep: eosStep,
+                framesAfterEos: totalFramesAfterEos)
+        }
     }
 
     // MARK: - Stateful (`.aneState`) Generation — mobius Trial 23
 
     /// The lazily-created `PocketTtsStateEngine` for this session. One engine
     /// (and one underlying `MLState`) per session, reused across utterances.
-    @available(macOS 15.0, iOS 18.0, *)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
     private func stateEngine() throws -> PocketTtsStateEngine {
         if let engine = stateEngineRef as? PocketTtsStateEngine {
             return engine
@@ -384,7 +412,7 @@ public actor PocketTtsSession {
     /// Computed once: shipped voices convert their pre-baked snapshot
     /// directly; cloned voices run the `[bos_before_voice, voice...]` block
     /// through the stateful prefill once and capture the resulting state.
-    @available(macOS 15.0, iOS 18.0, *)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
     private func stateVoiceFp16Snapshot(
         engine: PocketTtsStateEngine
     ) async throws -> PocketTtsStateEngine.Fp16Snapshot {
@@ -434,7 +462,7 @@ public actor PocketTtsSession {
     /// noise draws BEFORE the post-EOS break is evaluated, so the draw
     /// stream differs from the IO placements after the final frame — seeds
     /// are reproducible within a placement, not across placements).
-    @available(macOS 15.0, iOS 18.0, *)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
     private func generateChunkStateful(
         text: String,
         isMidSentence: Bool,
@@ -468,7 +496,8 @@ public actor PocketTtsSession {
         // Generation loop. BOS = the BOS latent passed as `sequence`
         // (the fused graph has no NaN-BOS protocol — same contract as the
         // rank-4 `.ane` models).
-        let maxGenLen = PocketTtsSynthesizer.estimateMaxFrames(text: text)
+        let maxGenLen = PocketTtsSynthesizer.boundedGenerationFrameCount(
+            text: text, cachePosition: Int(prefilledPosition))
         var eosStep: Int?
         var sequence = constants.bosEmbedding
         let totalFramesAfterEos = framesAfterEos + PocketTtsConstants.extraFramesAfterDetection
@@ -522,5 +551,14 @@ public actor PocketTtsSession {
             // Autoregressive feedback
             sequence = latent
         }
+
+        if !Task.isCancelled {
+            try PocketTtsSynthesizer.validateGenerationCompleted(
+                generatedFrameLimit: maxGenLen,
+                cachePosition: Int(prefilledPosition),
+                eosStep: eosStep,
+                framesAfterEos: totalFramesAfterEos)
+        }
     }
 }
+#endif

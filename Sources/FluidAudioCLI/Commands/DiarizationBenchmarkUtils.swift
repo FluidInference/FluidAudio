@@ -12,8 +12,20 @@ enum DiarizationBenchmarkUtils {
     }
 
     /// Dataset corpora supported by diarization benchmarks.
+    ///
+    /// Card-protocol conditions (NVIDIA Nemotron 3 model card):
+    /// `ami` = AMI test MHM (Mix-Headset), `amiSdm` = AMI test SDM (Array1-01),
+    /// `alimeetingFar` = channel 0 of the far-field array, `alimeetingNear` =
+    /// equal-weight mix of per-speaker headset channels (both pre-materialized by
+    /// `Scripts/materialize_alimeeting_card_audio.py`), `notsofarMhm`/`notsofarSc` =
+    /// NOTSOFAR1 eval mixes (see `Scripts/materialize_notsofar_card_audio.py`).
     enum Dataset: String {
         case ami = "ami"
+        case amiSdm = "ami-sdm"
+        case alimeetingFar = "alimeeting-far"
+        case alimeetingNear = "alimeeting-near"
+        case notsofarMhm = "notsofar-mhm"
+        case notsofarSc = "notsofar-sc"
         case voxconverse = "voxconverse"
         case callhome = "callhome"
     }
@@ -36,17 +48,47 @@ enum DiarizationBenchmarkUtils {
 
     // MARK: - File Paths
 
-    static func getAMIFiles(split: AMISplit = .test, maxFiles: Int?) -> [String] {
+    static func getAMIFiles(split: AMISplit = .test, dataset: Dataset = .ami, maxFiles: Int?) -> [String] {
         let allMeetings = getAMIMeetings(split: split)
 
         var availableMeetings: [String] = []
         for meeting in DatasetDownloader.officialAMITestSet {
-            let path = getAudioPath(for: meeting, dataset: .ami)
+            let path = getAudioPath(for: meeting, dataset: dataset)
             if FileManager.default.fileExists(atPath: path) {
                 availableMeetings.append(meeting)
             }
         }
 
+        if let max = maxFiles {
+            return Array(availableMeetings.prefix(max))
+        }
+        return availableMeetings
+    }
+
+    /// Enumerates meetings for datasets whose audio lives in a flat directory of
+    /// `<meeting>.wav` files with a matching reference RTTM per meeting.
+    static func getDirectoryFiles(dataset: Dataset, maxFiles: Int?) -> [String] {
+        let sampleAudioPath = getAudioPath(for: "PROBE", dataset: dataset)
+        let audioDir = URL(fileURLWithPath: sampleAudioPath).deletingLastPathComponent()
+
+        guard
+            let files = try? FileManager.default.contentsOfDirectory(
+                at: audioDir, includingPropertiesForKeys: nil)
+        else {
+            return []
+        }
+
+        var availableMeetings: [String] = []
+        for file in files where file.pathExtension == "wav" {
+            let name = file.deletingPathExtension().lastPathComponent
+            if let rttmURL = getRTTMURL(for: name, dataset: dataset),
+                FileManager.default.fileExists(atPath: rttmURL.path)
+            {
+                availableMeetings.append(name)
+            }
+        }
+
+        availableMeetings.sort()
         if let max = maxFiles {
             return Array(availableMeetings.prefix(max))
         }
@@ -102,6 +144,26 @@ enum DiarizationBenchmarkUtils {
             return homeDir.appendingPathComponent(
                 "FluidAudioDatasets/ami_official/sdm/\(meeting).Mix-Headset.wav"
             ).path
+        case .amiSdm:
+            return homeDir.appendingPathComponent(
+                "FluidAudioDatasets/ami_official/sdm_true/\(meeting).Array1-01.wav"
+            ).path
+        case .alimeetingFar:
+            return homeDir.appendingPathComponent(
+                "FluidAudioDatasets/alimeeting/card/far_ch0/\(meeting).wav"
+            ).path
+        case .alimeetingNear:
+            return homeDir.appendingPathComponent(
+                "FluidAudioDatasets/alimeeting/card/near_mix/\(meeting).wav"
+            ).path
+        case .notsofarMhm:
+            return homeDir.appendingPathComponent(
+                "FluidAudioDatasets/notsofar/card/eval_mhm/\(meeting).wav"
+            ).path
+        case .notsofarSc:
+            return homeDir.appendingPathComponent(
+                "FluidAudioDatasets/notsofar/card/eval_sc/\(meeting).wav"
+            ).path
         case .voxconverse:
             return homeDir.appendingPathComponent(
                 "FluidAudioDatasets/voxconverse/voxconverse_test_wav/\(meeting).wav"
@@ -114,16 +176,27 @@ enum DiarizationBenchmarkUtils {
     }
 
     static func getRTTMURL(for meeting: String, dataset: Dataset) -> URL? {
+        let homeDir = FileManager.default.homeDirectoryForCurrentUser
         switch dataset {
-        case .ami:
+        case .ami, .amiSdm:
+            // MHM and SDM share the same forced-alignment references; only the
+            // audio condition differs.
             return getAMIRTTMURL(for: meeting)
+        case .alimeetingFar, .alimeetingNear:
+            // nttcslab-sp/diar-forced-alignment publishes one reference set per
+            // meeting (Test_Ali_far); Near/Far are the same meetings.
+            return homeDir.appendingPathComponent(
+                "FluidAudioDatasets/diar-forced-alignment/AliMeeting/Test_Ali_far/\(meeting).rttm"
+            )
+        case .notsofarMhm, .notsofarSc:
+            return homeDir.appendingPathComponent(
+                "FluidAudioDatasets/notsofar/card/rttm/\(meeting).rttm"
+            )
         case .voxconverse:
-            let homeDir = FileManager.default.homeDirectoryForCurrentUser
             return homeDir.appendingPathComponent(
                 "FluidAudioDatasets/voxconverse/rttm_repo/test/\(meeting).rttm"
             )
         case .callhome:
-            let homeDir = FileManager.default.homeDirectoryForCurrentUser
             return homeDir.appendingPathComponent(
                 "FluidAudioDatasets/callhome_eng/rttm/\(meeting).rttm"
             )
@@ -227,8 +300,10 @@ enum DiarizationBenchmarkUtils {
     /// Returns files for the given dataset, filtering by availability.
     static func getFiles(for dataset: Dataset, maxFiles: Int?) -> [String] {
         switch dataset {
-        case .ami:
-            return getAMIFiles(maxFiles: maxFiles)
+        case .ami, .amiSdm:
+            return getAMIFiles(dataset: dataset, maxFiles: maxFiles)
+        case .alimeetingFar, .alimeetingNear, .notsofarMhm, .notsofarSc:
+            return getDirectoryFiles(dataset: dataset, maxFiles: maxFiles)
         case .voxconverse:
             return getVoxConverseFiles(maxFiles: maxFiles)
         case .callhome:
@@ -237,6 +312,18 @@ enum DiarizationBenchmarkUtils {
     }
 
     // MARK: - Summary & Output
+
+    /// Speaker-counting metrics as defined on the NVIDIA Nemotron 3 model card:
+    /// SCA = percentage of files where predicted speaker count equals ground truth;
+    /// MAE = mean of `|predicted - ground truth|` over files.
+    static func speakerCountMetrics(results: [BenchmarkResult]) -> (sca: Double, mae: Double) {
+        guard !results.isEmpty else { return (0, 0) }
+        let exact = results.filter { $0.detectedSpeakers == $0.groundTruthSpeakers }.count
+        let absErrors = results.map { abs($0.detectedSpeakers - $0.groundTruthSpeakers) }
+        let sca = Double(exact) / Double(results.count) * 100
+        let mae = Double(absErrors.reduce(0, +)) / Double(results.count)
+        return (sca, mae)
+    }
 
     /// Prints a formatted benchmark summary table.
     ///

@@ -108,6 +108,54 @@ public enum SystemInfo {
         return info.resident_size
     }
 
+    /// Returns the physical footprint of this process, if available. This is
+    /// the figure Xcode's memory gauge and Activity Monitor report; unlike
+    /// `resident_size` it includes compressed and IOKit-mapped pages such as
+    /// GPU-resident model weights.
+    public static func currentPhysicalFootprintBytes() -> UInt64? {
+        var info = task_vm_info_data_t()
+        var count =
+            mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size)
+            / mach_msg_type_number_t(MemoryLayout<natural_t>.size)
+
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(
+                    get_current_task_port(),
+                    task_flavor_t(TASK_VM_INFO),
+                    $0,
+                    &count)
+            }
+        }
+
+        guard result == KERN_SUCCESS else { return nil }
+        return UInt64(info.phys_footprint)
+    }
+
+    /// Returns the peak physical footprint of this process, if available.
+    /// Catches transient spikes such as a Core ML model's first-call
+    /// weight materialisation on the GPU, which `currentPhysicalFootprintBytes`
+    /// misses once the pages are released.
+    public static func peakPhysicalFootprintBytes() -> UInt64? {
+        var info = task_vm_info_data_t()
+        var count =
+            mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size)
+            / mach_msg_type_number_t(MemoryLayout<natural_t>.size)
+
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(
+                    get_current_task_port(),
+                    task_flavor_t(TASK_VM_INFO),
+                    $0,
+                    &count)
+            }
+        }
+
+        guard result == KERN_SUCCESS else { return nil }
+        return UInt64(info.ledger_phys_footprint_peak)
+    }
+
     /// Returns the peak resident memory usage for this process, if available.
     public static func peakResidentMemoryBytes() -> UInt64? {
         var info = task_vm_info_data_t()

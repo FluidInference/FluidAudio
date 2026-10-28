@@ -1,9 +1,15 @@
+#if TTS
 import Foundation
 
 /// Available TTS synthesis backends.
 public enum TtsBackend: Sendable {
     /// PocketTTS — flow-matching language model, autoregressive streaming synthesis.
     case pocketTts
+    /// PocketTTS small models (pocket-tts 4.0.0: 18m / 7m / 2m English, with
+    /// reward-fine-tuned twins) — the FlowLM runs on the Neural Engine through
+    /// one MLState multifunction package, the Mimi decoder in fp32 on the CPU
+    /// (`PocketTtsSmallManager`, `mimiPrecision`). macOS 15+/iOS 18+ only.
+    case pocketTtsSmall
     /// laishere/kokoro 7-stage CoreML chain (ALBERT → PostAlbert → Alignment →
     /// Prosody → Noise → Vocoder → Tail) with per-stage ANE/GPU assignment.
     case kokoroAne
@@ -71,4 +77,13 @@ public enum TtsBackend: Sendable {
     ///
     /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
     case chatterboxNano
+    /// Paradee-8M (beta) — Kokoro-82M distilled to 8.07M params, one voice
+    /// (`af_heart`), 24 kHz English. Two CoreML graphs (text side → host
+    /// duration expansion + source noise → acoustic side with the in-graph
+    /// phase-lock filter); KokoroAne's English frontend feeds it. CPU / ANE
+    /// only (the LSTMs abort on the GPU).
+    ///
+    /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
+    case paradee
 }
+#endif

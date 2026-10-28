@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Interprets say-as content based on interpret-as type
@@ -411,3 +412,4 @@ public enum SayAsInterpreter {
         return "\(numeratorWord) \(denominatorWord)"
     }
 }
+#endif

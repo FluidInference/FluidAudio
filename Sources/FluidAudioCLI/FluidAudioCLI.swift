@@ -34,6 +34,10 @@ struct FluidAudioCLI {
             await VadBenchmark.runVadBenchmark(arguments: Array(arguments.dropFirst(2)))
         case "vad-analyze":
             await VadAnalyzeCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "enhance":
+            await EnhanceCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "enhance-benchmark":
+            await EnhanceBenchmarkCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "asr-benchmark":
             await ASRBenchmark.runASRBenchmark(arguments: Array(arguments.dropFirst(2)))
         case "unified-benchmark":
@@ -68,6 +72,12 @@ struct FluidAudioCLI {
             await EmissionDelayBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
         case "sortformer":
             await SortformerCommand.run(arguments: Array(arguments.dropFirst(2)))
+        case "nemotron3-diarize":
+            await Nemotron3DiarizeCommand.runDiarize(arguments: Array(arguments.dropFirst(2)))
+        case "nemotron3-benchmark":
+            await Nemotron3DiarizeCommand.runBenchmark(arguments: Array(arguments.dropFirst(2)))
+        case "nemotron3-batch":
+            await Nemotron3DiarizeCommand.runBatch(arguments: Array(arguments.dropFirst(2)))
         case "sortformer-benchmark":
             await SortformerBenchmark.run(arguments: Array(arguments.dropFirst(2)))
         case "lseend":
@@ -130,6 +140,8 @@ struct FluidAudioCLI {
                 vad-benchmark           Run VAD-specific benchmark
                 vad-analyze             Inspect VAD segmentation and streaming events
                 fsmn-vad-segment        Detect speech segments with FSMN-VAD (beta)
+                enhance                 LocalVQE echo cancellation + noise suppression on a mic (+ reference) file (beta)
+                enhance-benchmark       Near-end word recall / far-end leakage of LocalVQE on the AEC-Challenge synthetic set
                 asr-benchmark           Run ASR benchmark on LibriSpeech
                 fleurs-benchmark        Run multilingual ASR benchmark on FLEURS dataset
                 transcribe              Transcribe audio file using streaming ASR

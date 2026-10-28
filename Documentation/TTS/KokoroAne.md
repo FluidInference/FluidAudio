@@ -1,9 +1,128 @@
-# Kokoro ANE (7-Stage)
+# Kokoro ANE
 
-Splits the Kokoro 82M graph into 7 CoreML stages so the ANE-friendly layers
-(Albert / PostAlbert / Alignment / Vocoder) stay resident on the Neural Engine
-while Prosody / Noise / Tail run on CPU+GPU. Yields **3-11× RTFx** on Apple
-Silicon.
+## ANE version 3
+
+Available in **FluidAudio v0.17.6**. Opt in with `version: .v3`. Existing callers continue to use `.legacy`.
+ANE-v3 requires macOS 15 or iOS 18 and uses a hybrid pipeline: static
+Albert and masked decoder graphs on CPU/ANE, native Accelerate source/STFT
+processing, and a CPU/GPU generator adapted from
+[mattmireles/kokoro-coreml](https://github.com/mattmireles/kokoro-coreml).
+Core ML chooses hardware within each requested compute-unit policy; this
+is not an ANE-only runtime. V3 currently accepts only the default compute
+policy (or `.aneTailGpu`). The v3 route is fixed and includes GPU execution,
+even when the legacy OS-dependent default would select CPU. Spanish and French
+remain supported by `.legacy`; requesting them with `.v3` fails before downloading.
+
+### Compute routing and measured latency
+
+| Stage | Requested policy |
+| --- | --- |
+| Albert, PostAlbert, Alignment, Prosody, masked decoder | `.cpuAndNeuralEngine` |
+| Fast generator; fallback Noise/Tail | `.cpuAndGPU` |
+| Fallback Vocoder | `.cpuAndNeuralEngine` |
+| Native source/STFT | CPU / Accelerate |
+
+Hybrid does not mean `.all`, and CPU+ANE still allows CPU fallback. Selected
+M5 Pro / macOS 27.0 runs measured 49.45 / 35.85 / 53.97 ms median for the English /
+Japanese / Mandarin demo inputs, excluding G2P and loading. CPU+ANE throughout
+was 10–13× slower; `.all` and CPU+GPU throughout aborted in the GPU RNN path.
+Those overrides were tested in a local harness, not exposed by the v3 public API.
+See [protocol and live-demo timing boundaries](Benchmarks.md#kokoro-ane-v3-selected-m5-pro-measurements)
+and [placement versus actual ANE activity](../ANE_Profiler.md#kokoro-ane-v3).
+
+### Usage and assets
+
+```swift
+import FluidAudio
+
+let english = KokoroAneManager(version: .v3)
+try await english.initialize(preloadVoices: ["af_bella"])
+let enWav = try await english.synthesize(text: "Hello world.", voice: "af_bella")
+
+let mandarin = KokoroAneManager(variant: .mandarin, version: .v3)
+let zhWav = try await mandarin.synthesize(text: "你好世界。", voice: "zm_010")
+
+// Native Japanese text frontend; dictionary assets download on first use.
+let japanese = KokoroAneManager(variant: .japanese, version: .v3)
+let jaWav = try await japanese.synthesize(text: "こんにちは、世界。", voice: "jm_kumo")
+```
+
+The SDK downloads the following immutable release from
+[`FluidInference/kokoro-82m-coreml`](https://huggingface.co/FluidInference/kokoro-82m-coreml/tree/6c0750dd02ef9d981fb82f147d784a3f171755ee/ANE-v3):
+
+| Language | HF directory | Default voice | Additional examples |
+|----------|--------------|---------------|---------------------|
+| English | `ANE-v3` | `af_heart` | `af_bella`, `am_adam`, `am_michael` |
+| Japanese | `ANE-v3/ja` | `jf_alpha` | `jf_gongitsune`, `jf_nezumi`, `jm_kumo` |
+| Mandarin | `ANE-v3/zh` | `zf_001` | `zf_002`, `zm_009`, `zm_010` |
+
+V3 checks the pinned manifest and model-file hashes, fetches its pinned
+seven-stage dependencies, and compiles source `.mlpackage` files on the
+target device. The first load includes downloads and compilation. Later
+loads use the locally compiled `.mlmodelc` bundles only: once a stage is
+compiled, its source `.mlpackage` is neither re-hashed nor re-downloaded, so
+an app may delete the `.mlpackage` sources after the first load to roughly
+halve the on-disk footprint (#1043). A compiled bundle that later fails to
+load is discarded: the source is recompiled on the spot, or, if it was
+deleted, fetched and compiled again on the next load. Its cache
+is separate from legacy assets:
+`<Models>/kokoro-82m-coreml/ANE-v3/<release revision>/<en|ja|zh>/`.
+Passing `directory:` overrides the `<Models>` root. Voice packs download
+on demand; English JSON voice rows are converted to the runtime's binary
+layout. The text-frontend assets (English BART G2P + Misaki lexicon cache,
+French CharsiuG2P + lexicon, Spanish lexicon) follow the same root, under
+`<Models>/kokoro/`, so an app that passes `directory:` keeps every
+Kokoro file under it (#1023).
+
+The SDK adopts `KokoroProsody_v2` (fp32 prosody) and `KokoroTail_v2`
+(COLA-corrected output level) from the pinned base revision instead of reverting
+those fixes when enabling v3. Those two stages, and Mandarin `KokoroNoise_v2`,
+use published compiled bundles because complete source packages are unavailable.
+All downloaded model files are verified against the pinned tree's content hashes.
+
+Albert uses 32/64-token buckets, including boundary tokens, then the dynamic
+Albert model for longer requests. Decoder buckets cover 120/200 acoustic
+frames. Above 200 frames (five seconds of generated audio), synthesis uses
+the original vocoder and tail. The overall input limit remains 510 phonemes;
+V3 also rejects requests exceeding 2,000 predicted acoustic frames.
+Chunk longer speech upstream to benefit from the fast path.
+
+```swift
+let result = try await english.synthesizeDetailed(text: "Hello world.")
+print(result.usedFastVocoder) // True only when every chunk used the fast vocoder.
+print(result.timings.nativeSource, result.timings.decoder, result.timings.generator)
+print(result.timings.totalMs) // Sum of timed stages, excluding downloads and text processing.
+```
+
+The CLI exposes the same selection:
+
+```bash
+swift run -c release fluidaudiocli tts "Hello world." \
+  --backend kokoro-ane --kokoro-version v3 --voice af_bella --output en.wav
+swift run -c release fluidaudiocli tts "你好世界。" \
+  --backend kokoro-ane --kokoro-version v3 --variant zh --output zh.wav
+swift run -c release fluidaudiocli tts "こんにちは、世界。" \
+  --backend kokoro-ane --kokoro-version v3 --variant ja --output ja.wav
+```
+
+The bounded real-model integration test is opt-in with
+`FLUIDAUDIO_RUN_KOKORO_V3=1 swift test --filter KokoroAneV3Tests`.
+Set `KOKORO_V3_TEST_CACHE` to override its model cache root. It covers both
+fast decoder sizes, dynamic/long-input fallback, alternate voices, reload,
+English, Mandarin and Japanese text, and explicit phoneme input. Local Apple Silicon
+checks are development evidence. The dedicated workflow builds for iOS devices
+and runs API/frontend tests in an iPhone simulator. Neither simulator tests nor
+compilation validate physical-device ANE/GPU inference or sustained stability.
+The existing OS 26.4+/iOS 27 Core ML crash advisories still apply; v3 is not a
+confirmed workaround. Physical-device validation remains outstanding for this opt-in runtime.
+
+## Legacy seven-stage runtime
+
+Splits Kokoro 82M into seven Core ML stages. The legacy default requests
+CPU+ANE for Albert, PostAlbert, Alignment, Prosody and Vocoder. Noise/Tail request
+CPU+GPU on older OS versions and CPU-only on OS 27+. Core ML decides placement;
+these policies do not imply that every eligible stage runs on ANE. See the
+[historical benchmark results](Benchmarks.md#historical-corpus-benchmark-setup).
 
 Derived from [laishere/kokoro-coreml](https://github.com/laishere/kokoro-coreml),
 used with the author's permission. Conversion lives in
@@ -13,17 +132,51 @@ used with the author's permission. Conversion lives in
 
 | Aspect           | `KokoroAneManager`                              |
 |------------------|-------------------------------------------------|
-| Compute          | 4 stages on ANE, 3 on GPU                       |
-| Voices           | Variant catalogs (54 English / 103 zh / 5 ja)   |
+| Compute          | Per-stage policies; OS-dependent legacy routing, fixed hybrid v3 routing |
+| Voices           | Variant catalogs (54 en / 103 zh / 5 ja / 3 es / 1 fr) |
 | Input length     | ≤ 510 phoneme characters / utterance             |
 | Custom lexicon   | No                                              |
 | SSML             | No                                              |
-| Languages        | English (`ANE/`), Mandarin (`ANE-zh/`), Japanese (`ANE-ja/`) |
+| Languages        | English, Spanish, French (`ANE/`), Mandarin (`ANE-zh/`), Japanese (`ANE-ja/`) |
 
 For multi-voice / SSML / long-form, use `PocketTtsSynthesizer` or
 `StyleTTS2Manager` instead.
 
+### Legacy hardware compatibility
+
+A validated minimum chip has not been established for the legacy seven-stage
+runtime. In [#979](https://github.com/FluidInference/FluidAudio/issues/979),
+A14 is the reporter's intended application floor, not an SDK support guarantee;
+physical A14+ comparison runs on iOS 18 remain outstanding.
+
+The report covers an iPhone XR (A12, 3 GB RAM) on iOS 18.7.10, with FluidAudio
+revision `20d4f0b` and model revision `006395f6`. With Noise/Tail forced to CPU
+via `aneTailCpu` and Vocoder requesting CPU+ANE, the process was repeatedly
+jetsam-killed at the per-process memory limit while loading Vocoder. The reported
+roughly 1,750 MB available before loading is not a measured Vocoder allocation
+or a universal memory requirement. Moving Vocoder to CPU allowed all stages to
+load at a reported 259 MB peak footprint, but synthesis then hit a Noise
+stack-guard fault (see [Known OS issues](#known-os-issues)); loading alone did
+not establish a working synthesis configuration.
+
+Forcing `aneTailCpu` differs from the iOS 18 library default, which requests
+CPU+GPU for Noise/Tail. For this **legacy iOS 18** case, the maintainer proposed
+overriding only Vocoder, retaining those CPU+GPU initializer defaults:
+
+```swift
+let manager = KokoroAneManager(
+    computeUnits: KokoroAneComputeUnits(vocoder: .cpuOnly)
+)
+```
+
+This is an unverified diagnostic experiment, not a confirmed workaround or an
+OS 27 routing recommendation. These legacy observations do not validate v3;
+simulator results cannot establish physical-device ANE/GPU compatibility.
+
 ## Variants
+
+For English pronunciation lookup, fallback behavior and a bounded word-level
+comparison, see [Kokoro English dictionary and G2P comparison](KokoroEnglishG2P.md).
 
 The 7-stage chain is language-agnostic by construction (input ids, voice
 slices, and per-stage I/O contracts are identical across variants). Only the
@@ -32,9 +185,14 @@ text-to-phoneme frontend differ.
 
 | Variant       | HF subdir   | Vocab | Default voice | Voice layout                | Frontend                                   |
 |---------------|-------------|-------|---------------|-----------------------------|--------------------------------------------|
-| `.english`    | `ANE/`      | 177   | `af_heart`    | flat (`<voice>.bin`)        | G2P CoreML (BART seq2seq) → IPA            |
+| `.english`    | `ANE/`      | 114   | `af_heart`    | flat (`<voice>.bin`)        | G2P CoreML (BART seq2seq) → IPA            |
 | `.mandarin`   | `ANE-zh/`   | 171   | `zf_001`      | nested (`voices/<voice>.bin`) | Rule-based dict lookup → Bopomofo + tones |
 | `.japanese`   | `ANE-ja/`   | 114   | `jf_alpha`    | nested (`voices/<voice>.bin`) | MeCab (unidic-lite) + Cutlet rules → IPA |
+| `.spanish`    | `ANE/`      | 114   | `ef_dora`     | flat (`<voice>.bin`)        | Spelling rules + `es_lexicon_cache.json` exceptions → IPA |
+| `.french`     | `ANE/`      | 114   | `ff_siwis`    | flat (`<voice>.bin`)        | `fr_lexicon_cache.json` + CharsiuG2P → IPA |
+
+Spanish and French use the same Kokoro-82M v1.0 weights as English, so they
+share the `ANE/` bundle (and its cache); only the frontend differs.
 
 Pick the variant on construction:
 
@@ -42,6 +200,8 @@ Pick the variant on construction:
 let english  = KokoroAneManager(variant: .english)   // default
 let mandarin = KokoroAneManager(variant: .mandarin)
 let japanese = KokoroAneManager(variant: .japanese)
+let spanish  = KokoroAneManager(variant: .spanish)
+let french   = KokoroAneManager(variant: .french)
 ```
 
 ## Quick Start
@@ -63,6 +223,12 @@ swift run fluidaudiocli tts "你好世界，今天天气真好。" \
 swift run fluidaudiocli tts "今日は良い天気です。" \
   --backend kokoro-ane --variant ja \
   --output ~/Desktop/demo_ja.wav
+
+# Spanish / French
+swift run fluidaudiocli tts "¿Dónde está el capítulo?" \
+  --backend kokoro-ane --variant es --output ~/Desktop/demo_es.wav
+swift run fluidaudiocli tts "Bonjour, je m'appelle Marie." \
+  --backend kokoro-ane --variant fr --output ~/Desktop/demo_fr.wav
 ```
 
 First invocation downloads the 7 `.mlmodelc` bundles + `vocab.json` +
@@ -78,7 +244,14 @@ additionally fetches the G2P pinyin dictionaries from
 on first synthesis (~10 MB, cached at `<repoDir>/g2p/`).
 Japanese plain-text synthesis lazily downloads the trimmed unidic-lite
 dictionary and Cutlet word list (about 115 MB) on first use. IPA bypass
-calls do not download them.
+calls do not download them. Spanish and French fetch `es_lexicon_cache.json`
+(4 MB) / `fr_lexicon_cache.json` (13 MB) from the repo root at
+`initialize()`, next to the English `us_lexicon_cache.json`; French also
+fetches the CharsiuG2P CoreML pair. The English frontend (and StyleTTS2 /
+Inflect, which share the phonemizer) fetches the BART G2P assets from the
+repo root (`G2PEncoder.mlmodelc`, `G2PDecoder.mlmodelc`, `g2p_vocab.json`,
+about 1.5 MB); that download takes only those three items, not the other
+root-level lexicon JSONs, which are fetched per language as above (#1044).
 
 ### Swift
 
@@ -112,6 +285,35 @@ print("  albert=\(t.albert) postAlbert=\(t.postAlbert) alignment=\(t.alignment)"
 print("  prosody=\(t.prosody) noise=\(t.noise) vocoder=\(t.vocoder) tail=\(t.tail)")
 print("  total: \(t.totalMs) ms")
 ```
+
+### Word timing
+
+`synthesizeDetailed` also returns the frontend's provenance: `normalizedText`
+is the text after written-form normalization (`"$45"` → `"forty five dollars"`),
+`phonemes` is the IPA string handed to the vocab encoder, and `inputIds` /
+`predictedDurations` give per-token acoustic-frame counts. Split `phonemes` (or
+`inputIds` on the vocab space token) to get one duration group per spoken word,
+then align those to the words of `normalizedText` rather than the original text.
+
+```swift
+let result = try await manager.synthesizeDetailed(text: "Pay $45 by 2024.")
+let spokenWords = result.normalizedText?.split(separator: " ") ?? []
+// ["Pay", "forty", "five", "dollars", "by", "twenty", "twenty", "four."]
+// (with the default NemoTextProcessing trait; the regex baseline used
+// when the trait is off does not expand currency)
+```
+
+`normalizedText` is `nil` whenever the input was treated as phonemes:
+`synthesizeFromPhonemesDetailed`, Japanese pre-computed IPA, or Mandarin text
+with no Hanzi. The Mandarin and Japanese G2P pipelines fold digits and
+punctuation further before tokenizing.
+
+Word groups do not always map 1:1 to normalized words. The English frontend
+spells all-caps initialisms (`FBI`) as one space-separated group per letter,
+splits hyphenated compounds missing from the lexicon into one group per part,
+drops a word the G2P fallback cannot resolve, and emits leading punctuation as
+its own group. `inputIds` also omits characters absent from `vocab.json`, so
+its length can be shorter than `phonemes.count + 2`.
 
 ### Bypass G2P
 
@@ -219,12 +421,17 @@ Asset footprint (downloaded on first synthesis, cached at
 |-----------------------|--------|-----------------------------------------|
 | `pinyin_phrases.bin`  | 9.5 MB | `kokoro-82m-coreml/ANE-zh/assets/`      |
 | `pinyin_single.bin`   | 480 KB | same                                    |
+| `jieba_hmm_*.bin`     | 3 MB   | same (HMM word segmentation for OOV runs) |
+| `g2pw/g2pw.mlmodelc`  | 152 MB | `kokoro-82m-coreml/ANE-zh/g2pw/` (int8 BERT polyphone classifier) |
+| `g2pw/vocab.txt`, `g2pw/POLYPHONIC_CHARS.txt` | 210 KB | same (`bert-base-chinese` vocab + 3582-char Traditional inventory) |
 
-What the Mandarin G2P intentionally does **not** ship: jieba HMM
-fallback, POS-aware tone sandhi, neural polyphone disambiguation
-(g2pW-style), erhua handling, number/date verbalization. These are all
-viable upgrades — the current pipeline trades them for a zero-network
-~10 MB footprint that handles short conversational text well.
+On top of the dict lookup the pipeline runs jieba-HMM segmentation for
+out-of-vocabulary runs, tone sandhi, erhua folding and g2pW polyphone
+disambiguation. g2pW only fires on single-char dict fallbacks whose
+Hanzi exists in its Traditional inventory (e.g. `行`, `重`, `好`);
+simplified-only polyphones such as `还` / `长` / `发` keep the dict's
+first reading. Every g2pW asset is optional — if the bundle or its text
+files are missing, synthesis continues dict-only.
 
 ## Japanese G2P
 
@@ -265,12 +472,82 @@ synthesized; `synthesizeFromPhonemes` never needs them. A TTS → ASR round
 trip through the Japanese ASR model (`transcribe --model-version tdt-ja`)
 returns the documentation sentences verbatim.
 
+## Spanish G2P
+
+Kokoro's Spanish voices were trained on espeak-ng `es` (Castilian) IPA after
+Misaki's `EspeakG2P` post-processing, so `SpanishG2P` reproduces those
+conventions rather than a textbook transcription. Spanish spelling is regular
+enough that it is rules only, with no lexicon:
+
+- letter-to-sound with θ for c/z, x for j/g, ʎ for ll, and glide resolution
+  (`tiempo` → `tjˈempo`), including hiatus after a liquid onset (`cliente` →
+  `kliˈɛnte`);
+- stress from the written accent or the penultimate/final rule, marked
+  before the nucleus vowel, with espeak's alternating secondary stress
+  (`ˌimbestˌiɣaθjˈon`) and double stress on `-mente` adverbs;
+- Misaki's diphthong ligatures (`ai` → `I`, `ei` → `A`, `au` → `W`);
+- phrase-level b/d/g lenition (`la βˈiða`, but `ˈum bˈaso` after a nasal or a
+  pause), nasal assimilation, and unstressed or secondary-stressed function
+  words that regain stress before a pause.
+
+Spanish spelling is regular enough that the rules match espeak on 91% of
+the 605k words in ipa-dict's `es_ES` list plus the proper nouns of the
+English lexicon. The other 51.5k (stressed `éis`/`áis` without the ligature,
+`ny` → `ɲ`, loanwords and names, …) ship as `es_lexicon_cache.json`, the
+English lexicon-cache schema holding only those exceptions. Lexicon entries
+keep espeak's word-internal allophones; only their first consonant adapts to
+the previous word. Without it the rules run alone. NeMo text normalization runs
+first, as for the other variants.
+
+## French G2P
+
+`FrenchG2P` looks words up in `fr_lexicon_cache.json`: the 244k-word
+ipa-dict `fr_FR` vocabulary plus 9k proper nouns from the English lexicon,
+with espeak-ng `fr-fr` pronunciations (so names get espeak's own mix of
+French and English readings), in the
+English lexicon-cache schema plus an `hAspire` list taken from ipa-dict.
+Words it does not list go through the CharsiuG2P CoreML model
+(`MultilingualG2PModel`), cached per session, and are rewritten into
+espeak-ng conventions: `ɥ` → `y`, `ɲ` → `nj`, `ɔ` → `o` in open
+non-final syllables, eu → `ø` outside the final syllable, schwa deletion
+(`devenu` → `dəvny`), stress on the last full vowel, unstressed clitics,
+elision, and liaison (`lez otʁ`, `ˈɔ̃t eɡalmˈɑ̃`, blocked before h aspiré).
+Initialisms without a vowel are spelled out (`SNCF` → `ˌɛsˌɛnsˌeˈɛf`).
+Punctuation keeps the input's spacing (`“ bɔ̃ʒˈuʁ ”` vs `“sivilizasjˈɔ̃”`),
+and a few fixed phrases read as one unit (`tout le monde` → `tulmˈɔ̃d`).
+
+Nasal vowels are base + U+0303. `KokoroAneVocab` encodes by Unicode scalar,
+like the Python reference, so the tilde reaches the model as its own token.
+
+### Accuracy
+
+Phoneme error rate against espeak-ng + Misaki on the FLEURS test
+transcripts without digits:
+
+| Variant | Sentences | PER    | PER, stress ignored | Exact sentences |
+|---------|-----------|--------|---------------------|-----------------|
+| Spanish | 281       | 0.33 % | 0.2 %               | 240             |
+| French  | 262       | 1.00 % | 0.8 %               | 136             |
+
+What remains is sentence-level (liaison, phrase stress), foreign names and
+acronyms. Parakeet v3 round trip (`--language es/fr`) on 60 of those
+sentences, same PyTorch Kokoro model and voice, changing only the phonemes:
+
+| Variant | espeak-ng phonemes | This frontend |
+|---------|--------------------|---------------|
+| Spanish (`ef_dora`) | 4.25 % WER | 5.81 % WER |
+| French (`ff_siwis`) | 3.27 % WER | 3.46 % WER |
+
+Each gap is one or two sentences. In Spanish, Parakeet switches to English on
+one sentence, and NeMo expands `EE. UU.` where the reference keeps it
+abbreviated. In French, CharsiuG2P reads `pH` as a word.
+
 ## Limits
 
 - **Phonemes:** ≤ 510 IPA / Bopomofo chars per call (ALBERT context = 512
   incl. BOS/EOS). No built-in chunker — split upstream if you need longer
   inputs.
-- **Voices:** any pack in the variant's catalog (`KokoroAneVariant.knownVoices`): 54 English (converted on first use), 103 Mandarin, 5 Japanese. See "Voice packs" above.
+- **Voices:** any pack in the variant's catalog (`KokoroAneVariant.knownVoices`): 54 English (converted on first use), 103 Mandarin, 5 Japanese, 3 Spanish, 1 French. See "Voice packs" above.
 - **Custom lexicon / SSML / Markdown overrides:** not supported. The pipeline
   goes `text → G2P → phonemes → token ids` with no interception point.
 - **Acoustic frames:** `T_a ≤ 2000` (compile-time `--max-frames` baked into
@@ -323,7 +600,8 @@ The following OS/runtime constraints affect the 7-stage chain:
 | BNNS CPU segfault | `EXC_BAD_ACCESS` in `libBNNS.dylib` (`BNNSGraphContextExecute_v2` → `BnnsCpuInferenceOperation::ExecuteSync`, queue `com.apple.e5rt.concurrentExecutionQueue`) | iOS/macOS **26.4 – 26.5.x** | **Fixed in the 26.6 line.** Verified on M5/macOS 26.6: the #667 repro (repeated synthesis) passes under `cpuOnly` and `allAne`, both of which segfaulted every time on 26.5. |
 | GPU RNN JIT assert | `GPURNNOps.mm: failed assertion 'JIT not supported'` (SIGABRT) | macOS 26.5+, incl. **26.6** (M5-class) | **Still live.** Avoided by the default routing (#671/#677), which keeps RNN-bearing stages off the GPU. Do not route Prosody/Vocoder to `.cpuAndGPU`. |
 | MPSGraph abort (Metal route) | `SIGABRT` in MetalPerformanceShadersGraph while a GPU stage (noise / tail) runs under Core ML | iOS/iPadOS **27.0 through beta 8** (24A5430a), iPad17,2 and iPad16,2 | **Still live.** The default routing on OS 27 (`aneTailCpu`, #849) keeps Metal out of the chain. |
-| BNNS `vadd_fp16_sme` segfault (Metal-free route) | `SIGSEGV` in `libBNNS` `vadd_fp16_sme_internal` on the OS-27 default route (noise + tail on CPU) | iOS **27.0** (24A5418b), iPhone18,1, ~54 min into a session | **No safe Core ML route on iOS 27 is demonstrated** (#889). The model, phonemizer and voice packs are not at fault: the same Kokoro-82M v1.0 graph ran 2 h 34 min on ONNX Runtime's CPU provider on the same OS line. `initialize()` logs an advisory on the 27 line. |
+| BNNS input overread | `SIGSEGV` in `libBNNS` (`BnnsCpuInferenceOperation::ExecuteSync`) inside the Vocoder, or a full-scale (clipped) waveform when the overread does not fault | macOS **27.0**, M5 Pro, deterministic for certain lengths | **Fixed in FluidAudio.** A CPU kernel reads a few bytes past the end of the fp16 `x_source_0` input. That buffer (10,240·T bytes) fills whole 16 KB pages at T = 416, 440, … 584 (every 24 frames), so the overread hits an unmapped page, depending on heap layout. Chain inputs are now allocated with a zeroed one-page tail (`KokoroAneArrays.makeArray`), which turns the overread into a harmless read. Output is otherwise unchanged. |
+| BNNS `vadd_fp16_sme` segfault (Metal-free route) | `SIGSEGV` in `libBNNS` `vadd_fp16_sme_internal` on the OS-27 default route (noise + tail on CPU) | iOS **27.0** (24A5418b), iPhone18,1, ~54 min into a session | **Probably the input overread above; unverified on iOS** (#889). Same shape on macOS 27: an fp16 binary-op kernel under `dispatch_apply`, faulting on a page-aligned address. The rare trigger (a bad frame count plus an unmapped next page) explains the long, variable time to crash. The model, phonemizer and voice packs are not at fault: the same Kokoro-82M v1.0 graph ran 2 h 34 min on ONNX Runtime's CPU provider on the same OS line. `initialize()` keeps the iOS 27 advisory until a device soak confirms the fix. |
 
 The BNNS segfault cannot be avoided by compute-unit routing — CoreML places
 segments on the BNNS CPU path even under `.cpuOnly` (#587), and on affected
@@ -339,6 +617,15 @@ History: #328 (26.4 beta), #587 (iOS 26.4.2), #661 (cross-manager E5RT),
 #667 (M5/macOS 26.5), #817 (time/environment-gated evidence), #843/#849
 (OS 27 Metal abort, CPU-tail default), #844 (iOS 26.6), #889 (iOS 27 BNNS
 segfault on the CPU-tail route).
+
+Separately, [#979](https://github.com/FluidInference/FluidAudio/issues/979)
+reports a `___chkstk_darwin` stack-guard fault in libBNNS during Noise synthesis
+on the legacy iPhone XR / iOS 18.7.10 configuration described
+[above](#legacy-hardware-compatibility). The maintainer's diagnosis is worker-stack
+exhaustion, distinct from the input-overread and segfault entries above; their
+fixes do not establish a fix for this report. The proposed CPU-only Vocoder with
+CPU+GPU Noise/Tail configuration remains an unverified experiment, pending the
+crash report and physical A14+ iOS 18 comparison runs.
 
 ## Source
 

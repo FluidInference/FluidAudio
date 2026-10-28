@@ -7,6 +7,8 @@ let package = Package(
     platforms: [
         .macOS(.v14),
         .iOS(.v17),
+        .visionOS(.v2),
+        .tvOS(.v17),
     ],
     products: [
         .library(
@@ -25,24 +27,36 @@ let package = Package(
             dependencies: [
                 "FastClusterWrapper",
                 "MachTaskSelfWrapper",
-                "NemoTextProcessing",
+                // The prebuilt xcframework has no visionOS or tvOS slice.
+                .target(name: "NemoTextProcessing", condition: .when(platforms: [.macOS, .iOS, .macCatalyst])),
+                "LuxTtsG2pResources",
             ],
             path: "Sources/FluidAudio",
             exclude: ["ASR/Parakeet/Unified/benchmark.md"],
+            swiftSettings: [
+                // Package@swift-6.2.swift exposes these as opt-out traits (#990).
+                .define("TTS"),
+                .define("Diarizer"),
+            ]
+        ),
+        .target(
+            name: "LuxTtsG2pResources",
+            path: "Sources/LuxTtsG2pResources",
             resources: [
                 // Keep .process: .copy of a Resources-named directory breaks Apple code signing on iOS.
-                .process("TTS/LuxTts/G2p/Resources")
+                .process("Resources")
             ]
         ),
         // Byte-exact NeMo text normalization (FST engine, all 7 languages).
-        // Prebuilt xcframework from FluidInference/text-processing-rs v0.3.0.
+        // Prebuilt xcframework from FluidInference/text-processing-rs v0.3.1
+        // (macOS, iOS, iOS Simulator and Mac Catalyst slices).
         // Always linked on tools < 6.2; Package@swift-6.2.swift exposes it as
         // the opt-out `NemoTextProcessing` trait (#880, #888).
         .binaryTarget(
             name: "NemoTextProcessing",
             url:
-                "https://github.com/FluidInference/text-processing-rs/releases/download/v0.3.0/NemoTextProcessing.xcframework.zip",
-            checksum: "76d0ee9a32b1ee2193231299180ca9bc4fc7e98794e771b3d55d66498352d85f"
+                "https://github.com/FluidInference/text-processing-rs/releases/download/v0.3.1/NemoTextProcessing.xcframework.zip",
+            checksum: "5fa8c10d4ec26c1bb2413125f351a7222a4c68a23b74476680fbada7e26fc6aa"
         ),
         .target(
             name: "FastClusterWrapper",
@@ -71,6 +85,7 @@ let package = Package(
             ],
             resources: [
                 .process("TTS/LuxTts/Resources"),
+                .process("TTS/PocketTTS/Fixtures"),
                 // Real recordings (cleared for public release by the speaker) for the
                 // streaming final-window regression, issue #855.
                 .copy("ASR/Parakeet/SlidingWindow/Fixtures"),

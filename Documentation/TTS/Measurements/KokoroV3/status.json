@@ -1,0 +1,74 @@
+[
+  {
+    "language": "en",
+    "policy": "hybrid",
+    "exitCode": 0,
+    "elapsedSeconds": 18.455811833
+  },
+  {
+    "language": "en",
+    "policy": "cpuAndNeuralEngine",
+    "exitCode": 0,
+    "elapsedSeconds": 23.919849584
+  },
+  {
+    "language": "en",
+    "policy": "all",
+    "exitCode": -6,
+    "elapsedSeconds": 12.775751
+  },
+  {
+    "language": "en",
+    "policy": "cpuAndGPU",
+    "exitCode": -6,
+    "elapsedSeconds": 3.9040888749999993
+  },
+  {
+    "language": "ja",
+    "policy": "cpuAndNeuralEngine",
+    "exitCode": 0,
+    "elapsedSeconds": 37.63165875
+  },
+  {
+    "language": "ja",
+    "policy": "all",
+    "exitCode": -6,
+    "elapsedSeconds": 12.419991332999999
+  },
+  {
+    "language": "ja",
+    "policy": "cpuAndGPU",
+    "exitCode": -6,
+    "elapsedSeconds": 2.4310372080000064
+  },
+  {
+    "language": "ja",
+    "policy": "hybrid",
+    "exitCode": 0,
+    "elapsedSeconds": 1.5749986250000063
+  },
+  {
+    "language": "zh",
+    "policy": "all",
+    "exitCode": -6,
+    "elapsedSeconds": 11.817329125
+  },
+  {
+    "language": "zh",
+    "policy": "cpuAndGPU",
+    "exitCode": -6,
+    "elapsedSeconds": 3.205860042000012
+  },
+  {
+    "language": "zh",
+    "policy": "hybrid",
+    "exitCode": 0,
+    "elapsedSeconds": 14.703979167
+  },
+  {
+    "language": "zh",
+    "policy": "cpuAndNeuralEngine",
+    "exitCode": 0,
+    "elapsedSeconds": 22.87929062500001
+  }
+]

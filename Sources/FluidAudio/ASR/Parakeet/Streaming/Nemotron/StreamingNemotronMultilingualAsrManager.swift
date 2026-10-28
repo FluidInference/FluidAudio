@@ -2,9 +2,12 @@ import AVFoundation
 @preconcurrency import CoreML
 import Foundation
 
-/// Callback invoked when new tokens are decoded (for live transcription updates).
-/// Fires with the running transcript text only — the language tag, if any,
-/// is surfaced via `detectedLanguage()`.
+/// Callback delivering cumulative transcript text; language tags use `detectedLanguage()`.
+/// With blank rescue enabled, text is settled, only extends the previous text,
+/// and is delivered only when it changes. An unresolved blank
+/// span can hold back later text for the 15 s span cap (15.04 s at window granularity)
+/// plus the rest of that chunk in audio time; processing time is additional.
+/// `getPartialTranscript()` may already include that text; `finish()` flushes the rest.
 public typealias NemotronMultilingualPartialCallback = @Sendable (String) -> Void
 
 /// High-level manager for the Nemotron Speech Streaming Multilingual 0.6B pipeline.
@@ -265,6 +268,8 @@ public actor StreamingNemotronMultilingualAsrManager {
 
     // Callbacks
     internal var partialCallback: NemotronMultilingualPartialCallback?
+    internal var partialPublicationSuppressionDepth: Int = 0
+    internal var lastDeliveredPartialText: String?
 
     // Stats
     internal var processedChunks: Int = 0
@@ -388,7 +393,7 @@ public actor StreamingNemotronMultilingualAsrManager {
         )
         // Detect stateful encoder (cache_channel/cache_time as MLState rather
         // than I/O tensors). makeState() returns a fresh zero-initialized state.
-        if #available(macOS 15, iOS 18, *) {
+        if #available(macOS 15, iOS 18, tvOS 18, *) {
             if let enc = self.encoder, !enc.modelDescription.stateDescriptionsByName.isEmpty {
                 self.encoderState = enc.makeState()
                 logger.info("Loaded stateful encoder (MLState cache) — using ANE-resident cache path")
@@ -809,6 +814,7 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// Reset all states for a new transcription session.
     /// Preserves the currently selected prompt id and ml configuration.
     public func reset() async {
+        lastDeliveredPartialText = nil
         StreamingAsrUtils.resetSharedState(
             audioBuffer: &audioBuffer,
             accumulatedTokenIds: &accumulatedTokenIds,
@@ -899,6 +905,7 @@ public actor StreamingNemotronMultilingualAsrManager {
     }
 
     internal func resetStates() throws {
+        lastDeliveredPartialText = nil
         let cacheConfig = EncoderCacheManager.CacheConfig(
             channelShape: config.cacheChannelShape,
             timeShape: config.cacheTimeShape,
@@ -910,7 +917,7 @@ public actor StreamingNemotronMultilingualAsrManager {
         cacheLen = caches.len
         // Stateful encoder: a fresh state has zero-initialized buffers, which
         // matches what createInitialCaches produces. Recreate it on reset.
-        if #available(macOS 15, iOS 18, *) {
+        if #available(macOS 15, iOS 18, tvOS 18, *) {
             if let enc = encoder, !enc.modelDescription.stateDescriptionsByName.isEmpty {
                 encoderState = enc.makeState()
             }
@@ -1053,6 +1060,7 @@ public actor StreamingNemotronMultilingualAsrManager {
         lastFinishTokenTimings = accumulatedTokenTimings
         accumulatedTokenIds.removeAll()
         accumulatedTokenTimings.removeAll()
+        lastDeliveredPartialText = nil
         // The emitted-token tail must follow the accumulated ids it mirrors.
         vocabularyBias?.resetMatchState()
 

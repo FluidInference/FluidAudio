@@ -45,16 +45,20 @@ enum CohereBenchmark {
         var maxFiles: Int?
         var fleursDir: String?
         var outputFile = "cohere_benchmark_results.json"
-        var maxTokens = 108
+        var maxTokens: Int?
         var repetitionPenalty: Float = 1.1
         var noRepeatNgram = 3
-        var computeUnits: MLComputeUnits = .all
+        var computeUnits = CohereComputeUnitsOption()
         var autoDownload = false
         var checkpointEvery = 100
 
         var i = 0
         while i < arguments.count {
             let arg = arguments[i]
+            if computeUnits.consume(arguments, at: &i, logger: logger) {
+                i += 1
+                continue
+            }
             switch arg {
             case "--encoder-dir":
                 if i + 1 < arguments.count {
@@ -123,10 +127,6 @@ enum CohereBenchmark {
                     subset = arguments[i + 1]
                     i += 1
                 }
-            case "--cpu-only":
-                computeUnits = .cpuOnly
-            case "--cpu-gpu":
-                computeUnits = .cpuAndGPU
             case "--auto-download":
                 autoDownload = true
             case "--checkpoint-every":
@@ -168,7 +168,7 @@ enum CohereBenchmark {
         logger.info("  Decoder dir:      \(decDir)")
         logger.info("  Vocab dir:        \(vocDir)")
         logger.info("  Max files:        \(maxFiles?.description ?? "all")")
-        logger.info("  Max tokens:       \(maxTokens)")
+        logger.info("  Max tokens:       \(maxTokens.map(String.init) ?? "cache capacity")")
         logger.info("  Rep penalty:      \(repetitionPenalty)")
         logger.info("  No-repeat-ngram:  \(noRepeatNgram)")
         logger.info("  Auto-download:    \(autoDownload)")
@@ -181,10 +181,16 @@ enum CohereBenchmark {
                 encoderDir: URL(fileURLWithPath: encDir),
                 decoderDir: URL(fileURLWithPath: decDir),
                 vocabDir: URL(fileURLWithPath: vocDir),
-                computeUnits: computeUnits
+                computeUnits: computeUnits.shared,
+                encoderComputeUnits: computeUnits.encoder,
+                decoderComputeUnits: computeUnits.decoder
             )
             logger.info(
                 "Models loaded in \(String(format: "%.2f", CFAbsoluteTimeGetCurrent() - loadStart))s")
+            logger.info(
+                "  Encoder compute:  \(CoherePipeline.describe(models.encoderComputeUnits))")
+            logger.info(
+                "  Decoder compute:  \(CoherePipeline.describe(models.decoderComputeUnits))")
 
             let pipeline = CoherePipeline()
 
@@ -245,7 +251,7 @@ enum CohereBenchmark {
         maxFiles: Int?,
         fleursDir: String?,
         autoDownload: Bool,
-        maxTokens: Int,
+        maxTokens: Int?,
         repetitionPenalty: Float,
         noRepeatNgram: Int,
         outputFile: String,
@@ -351,7 +357,7 @@ enum CohereBenchmark {
         subset: String,
         maxFiles: Int?,
         autoDownload: Bool,
-        maxTokens: Int,
+        maxTokens: Int?,
         repetitionPenalty: Float,
         noRepeatNgram: Int,
         outputFile: String,
@@ -432,7 +438,7 @@ enum CohereBenchmark {
         languageLabel: String,
         models: CoherePipeline.LoadedModels,
         pipeline: CoherePipeline,
-        maxTokens: Int,
+        maxTokens: Int?,
         repetitionPenalty: Float,
         noRepeatNgram: Int,
         checkpointEvery: Int = Int.max,
@@ -702,14 +708,12 @@ enum CohereBenchmark {
                 --auto-download                 Fetch missing dataset splits
 
             Decode:
-                --max-tokens <n>                Max decoded tokens (default: 108)
+                --max-tokens <n>                Max decoded tokens per 35 s window
+                                                (default: all the cache holds — 99 v2, 247 v3)
                 --repetition-penalty <f>        CTRL-style penalty, 1.0 disables (default: 1.1)
                 --no-repeat-ngram <n>           Forbid repeating n-grams, 0 disables (default: 3)
 
-            Compute units:
-                --cpu-only                      Force CPU
-                --cpu-gpu                       CPU + GPU (skip ANE)
-                (default: all, includes ANE)
+            \(CohereComputeUnitsOption.usage)
 
             Output:
                 --output <file>                 JSON report path

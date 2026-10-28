@@ -1,9 +1,10 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
 /// NeuTTS-2E synthesis: prefill → stateful autoregressive decode (top-k
 /// sampling over speech tokens) → NeuCodec vocoding.
-@available(macOS 15.0, iOS 18.0, *)
+@available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
 struct NeuTtsSynthesizer {
 
     private static let logger = AppLogger(category: "NeuTtsSynthesizer")
@@ -259,3 +260,4 @@ struct SplitMix64 {
         Double(next() >> 11) * (1.0 / 9_007_199_254_740_992.0)
     }
 }
+#endif

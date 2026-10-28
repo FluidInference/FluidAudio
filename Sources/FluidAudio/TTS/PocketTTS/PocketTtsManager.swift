@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 import OSLog
 
@@ -443,3 +444,4 @@ public actor PocketTtsManager {
         try PocketTtsVoiceCloner.loadVoice(from: url)
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -73,12 +74,13 @@ public actor InflectManager {
         self.synthesizer = InflectSynthesizer(store: store, variant: variant)
 
         // Reuse the shared English frontend (same espeak-approximation used by
-        // StyleTTS2). The lexicon cache + BART G2P assets live in the kokoro
-        // cache dir and are shared across backends.
+        // StyleTTS2). The lexicon cache + BART G2P assets live under
+        // `<directory>/kokoro/` and are shared across backends on that root.
         do {
             try await StyleTTS2ResourceDownloader.ensureG2PAssets(directory: directory)
-            let kokoroDir = try await StyleTTS2ResourceDownloader.ensureLexiconCache()
-            try await G2PModel.shared.ensureModelsAvailable()
+            let kokoroDir = try await StyleTTS2ResourceDownloader.ensureLexiconCache(directory: directory)
+            let g2p = G2PModel.shared(directory: directory)
+            try await g2p.ensureModelsAvailable()
 
             let allowedTokens = Set(InflectSymbols.symbols.map { String($0) })
             let lexiconCache = LexiconAssetCache()
@@ -87,7 +89,8 @@ public actor InflectManager {
             let lexicons = await lexiconCache.lexicons()
             self.phonemizer = StyleTTS2Phonemizer(
                 wordToPhonemes: lexicons.word,
-                caseSensitiveWordToPhonemes: lexicons.caseSensitive)
+                caseSensitiveWordToPhonemes: lexicons.caseSensitive,
+                g2p: g2p)
             logger.info(
                 "Inflect \(variant.rawValue) ready — lexicon \(lexicons.word.count) entries, "
                     + "compute \(computeUnits.inflectDescription)")
@@ -193,3 +196,4 @@ extension MLComputeUnits {
         }
     }
 }
+#endif

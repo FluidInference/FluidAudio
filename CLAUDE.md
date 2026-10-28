@@ -26,6 +26,12 @@ FluidAudio is a Swift framework for local, low-latency audio processing on Apple
 - Uploading models, datasets, and files to HuggingFace is allowed
 - Creating HuggingFace repos is allowed
 - Confirm the target repo with the user before uploading
+- **Traceability** (issue ↔ code ↔ HF): every model fix/upload must be linkable both ways
+  - Ship fixed models under a new name (`Foo_v2.mlmodelc`) next to the original; never overwrite in place
+  - HF commit message names the issue: `... (FluidAudio #NNN)`; pass `--commit-description` with the mobius/FluidAudio PR links
+  - mobius and FluidAudio PR bodies link the issue, each other, and the full HF commit URL
+  - Add a row to the HF model card's `## Changelog` table (date, files, change, issue, mobius PR, FluidAudio PR, HF commit); create the section if missing
+  - The Swift `ModelNames` comment for a renamed file cites the issue number
 
 ### MODEL OPERATIONS - CONSULT BEFORE IMPLEMENTING
 
@@ -172,13 +178,13 @@ FluidAudio/
 - **Stateless ASR**: Each chunk transcribed independently (~14.96s chunks, 2.0s overlap)
 - **Auto-recovery**: Corrupt CoreML model detection and re-download from HuggingFace
 - **Model management**: Models auto-download from HuggingFace on first use. Can be pre-fetched via `swift run fluidaudiocli download`.
-- **Cross-platform**: macOS 14.0+, iOS 17.0+ (library), CLI macOS-only
+- **Cross-platform**: macOS 14.0+, iOS 17.0+, tvOS 17.0+, visionOS 2.0+ (library), CLI macOS-only
 
 ## Platform Requirements
 
 - **Swift**: 5.10+ (Swift 6+ for swift-format)
 - **C++17**: Required for `FastClusterWrapper` (set via `cxxLanguageStandard: .cxx17` in Package.swift)
-- **Platforms**: macOS 14.0+, iOS 17.0+
+- **Platforms**: macOS 14.0+, iOS 17.0+, tvOS 17.0+, visionOS 2.0+
 - **Hardware**: Apple Silicon recommended
 
 ## CI/CD

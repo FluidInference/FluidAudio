@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 import Foundation
 
@@ -506,3 +507,4 @@ struct OfflineReconstruction {
         }
     }
 }
+#endif

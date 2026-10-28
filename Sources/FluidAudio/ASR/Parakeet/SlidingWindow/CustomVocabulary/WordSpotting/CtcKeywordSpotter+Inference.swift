@@ -234,8 +234,6 @@ extension CtcKeywordSpotter {
     // MARK: - Audio Preparation
 
     private func prepareAudioArray(_ audioSamples: [Float]) throws -> (MLMultiArray, Int) {
-        let clampedCount = min(audioSamples.count, maxModelSamples)
-
         // Detect expected input rank from the MelSpectrogram model's 'audio' feature description.
         // Canary-1b-v2 expects rank 1 [samples], parakeet-ctc-0.6b expects rank 2 [1, samples].
         let melModel = models.melSpectrogram
@@ -246,19 +244,12 @@ extension CtcKeywordSpotter {
         let dataType: MLMultiArrayDataType =
             audioDesc?.multiArrayConstraint?.dataType == .float16 ? .float16 : .float32
 
-        let array: MLMultiArray
-        if expectedRank == 2 {
-            // Rank 2: [1, maxSamples]
-            array = try MLMultiArray(shape: [1, NSNumber(value: maxModelSamples)], dataType: dataType)
-        } else {
-            // Rank 1: [maxSamples]
-            array = try MLMultiArray(shape: [NSNumber(value: maxModelSamples)], dataType: dataType)
-        }
-
-        // Copy actual samples (MLMultiArray is zero-initialized, so padding is implicit).
-        for i in 0..<clampedCount {
-            array[i] = NSNumber(value: audioSamples[i])
-        }
+        let (array, clampedCount) = try Self.makePaddedAudioArray(
+            audioSamples,
+            maxSamples: maxModelSamples,
+            rank: expectedRank,
+            dataType: dataType
+        )
 
         if debugMode {
             let midpoint = clampedCount / 2
@@ -273,6 +264,36 @@ extension CtcKeywordSpotter {
                 clampedCount, maxModelSamples, absMax, mean)
             logger.debug("\(statsText)")
             logger.debug("  mid_5=[\(sampleVals.joined(separator: ", "))]")
+        }
+
+        return (array, clampedCount)
+    }
+
+    /// Pad `audioSamples` to `maxSamples` and zero the unused tail.
+    ///
+    /// `MLMultiArray(shape:dataType:)` does not zero storage. The mel model reads
+    /// the whole window, so the tail is cleared before the clip is copied.
+    static func makePaddedAudioArray(
+        _ audioSamples: [Float],
+        maxSamples: Int,
+        rank: Int,
+        dataType: MLMultiArrayDataType
+    ) throws -> (MLMultiArray, Int) {
+        let clampedCount = min(audioSamples.count, maxSamples)
+
+        let array: MLMultiArray
+        if rank == 2 {
+            // Rank 2: [1, maxSamples]
+            array = try MLMultiArray(shape: [1, NSNumber(value: maxSamples)], dataType: dataType)
+        } else {
+            // Rank 1: [maxSamples]
+            array = try MLMultiArray(shape: [NSNumber(value: maxSamples)], dataType: dataType)
+        }
+
+        // The shape initializer leaves storage uninitialized. Clear it, then copy the clip.
+        array.reset(to: 0)
+        for i in 0..<clampedCount {
+            array[i] = NSNumber(value: audioSamples[i])
         }
 
         return (array, clampedCount)

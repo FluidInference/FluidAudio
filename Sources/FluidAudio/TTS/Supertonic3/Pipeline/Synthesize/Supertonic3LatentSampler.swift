@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Helper that mirrors `sampleNoisyLatent()` / `getLatentMask()` from the
@@ -82,3 +83,4 @@ enum Supertonic3LatentSampler {
         return out
     }
 }
+#endif

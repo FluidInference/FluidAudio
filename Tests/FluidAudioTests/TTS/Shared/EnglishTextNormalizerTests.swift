@@ -90,6 +90,76 @@ final class EnglishTextNormalizerTests: XCTestCase {
             "At one forty nine p m on the thirteenth I scored three point one four in twenty six tries.")
     }
 
+    // MARK: - Roman-numeral list markers (issue #972)
+
+    func testRomanParenthesizedEnumerators() {
+        XCTAssertEqual(
+            normalize("(i) pay rent; (ii) keep the peace; (iii) insure; (iv) vacate."),
+            "(one) pay rent; (two) keep the peace; (three) insure; (four) vacate.")
+        XCTAssertEqual(normalize("(ix) and (xiv) and (xxxix)"), "(nine) and (fourteen) and (thirty nine)")
+        XCTAssertEqual(normalize("see (IV) and (XII)"), "see (four) and (twelve)")
+        // Fires mid-sentence and in nested legal citations.
+        XCTAssertEqual(normalize("under 2(a)(ii) above"), "under two(a)(two) above")
+    }
+
+    func testRomanHalfParenEnumerators() {
+        XCTAssertEqual(
+            normalize("as follows: i) rent; ii) noise; iii) pets"), "as follows: one) rent; two) noise; three) pets")
+        XCTAssertEqual(normalize("i) first\nii) second\n  iv) fourth"), "one) first\ntwo) second\n  four) fourth")
+        XCTAssertEqual(normalize("I) first; II) second"), "one) first; two) second")
+    }
+
+    func testRomanDotEnumerators() {
+        XCTAssertEqual(
+            normalize("i. Introduction\nii. Methods\niv. Results"), "one. Introduction\ntwo. Methods\nfour. Results")
+        // An uppercase outline converts as a whole, `I.` included.
+        XCTAssertEqual(normalize("I. Intro\nII. Body\nIII. End"), "one. Intro\ntwo. Body\nthree. End")
+    }
+
+    func testRomanEnumeratorCombinesWithNumbers() {
+        XCTAssertEqual(normalize("(ii) costs 26 dollars"), "(two) costs twenty six dollars")
+    }
+
+    func testRomanSingleLowercaseMarkerIsEnough() {
+        // A chunk holding one lowercase marker still converts (`(i)` alone, `(iv)` alone).
+        XCTAssertEqual(normalize("(i) pay rent"), "(one) pay rent")
+        XCTAssertEqual(normalize("(iv) vacate on notice"), "(four) vacate on notice")
+        XCTAssertEqual(normalize("vi. Appendix"), "six. Appendix")
+    }
+
+    func testRomanAmbiguousMarkersNeedListContext() {
+        // Alone these are abbreviations, variables or sign-offs, not list items.
+        XCTAssertEqual(normalize("morphine (IV) fluids"), "morphine (IV) fluids")
+        XCTAssertEqual(normalize("Mark (x) here"), "Mark (x) here")
+        XCTAssertEqual(normalize("(v) to run"), "(v) to run")
+        XCTAssertEqual(normalize("(I) think"), "(I) think")
+        XCTAssertEqual(normalize("Thanks. xx. Jane"), "Thanks. xx. Jane")
+        XCTAssertEqual(normalize("Marbury\nv. Madison"), "Marbury\nv. Madison")
+        XCTAssertEqual(normalize("Solve for the variable, x. Then"), "Solve for the variable, x. Then")
+        // With a sibling marker they are list items.
+        XCTAssertEqual(normalize("(IV) fluids; (V) rest"), "(four) fluids; (five) rest")
+        XCTAssertEqual(normalize("(ix) foo; (x) bar"), "(nine) foo; (ten) bar")
+    }
+
+    func testRomanLettersInProseUnchanged() {
+        // Words made of roman letters and the pronoun `I` are not enumerators.
+        XCTAssertEqual(normalize("mix it, did I? civil and mild"), "mix it, did I? civil and mild")
+        XCTAssertEqual(normalize("(and so did I)"), "(and so did I)")
+        XCTAssertEqual(normalize("I. M. Pei designed it"), "I. M. Pei designed it")
+        XCTAssertEqual(normalize("I use vi. It rocks"), "I use vi. It rocks")
+        XCTAssertEqual(normalize("i.e. the rest"), "i.e. the rest")
+        XCTAssertEqual(normalize("the variable x) is free"), "the variable x) is free")
+    }
+
+    func testRomanNonEnumeratorFormsUnchanged() {
+        XCTAssertEqual(normalize("f(x) and g(i)"), "f(x) and g(i)")
+        XCTAssertEqual(normalize("café(i) test"), "café(i) test")
+        XCTAssertEqual(normalize("(xl) size"), "(xl) size")
+        XCTAssertEqual(normalize("(mix) (cd) (mm)"), "(mix) (cd) (mm)")
+        // Invalid or mixed-case forms are not roman numerals.
+        XCTAssertEqual(normalize("(iiii) (vv) (Iv) (ivi)"), "(iiii) (vv) (Iv) (ivi)")
+    }
+
     // MARK: - Ambiguous / structured forms left unchanged
 
     func testVersionStringUnchanged() {

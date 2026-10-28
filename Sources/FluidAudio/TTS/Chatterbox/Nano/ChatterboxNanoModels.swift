@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -6,7 +7,7 @@ import Foundation
 /// the repo root, plus `tables/*.safetensors` and `tokenizer/*`).
 ///
 /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
-@available(macOS 15.0, iOS 18.0, *)
+@available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
 struct ChatterboxNanoModels: Sendable {
 
     private static let logger = AppLogger(category: "ChatterboxNanoModels")
@@ -137,3 +138,4 @@ struct ChatterboxNanoModels: Sendable {
         return root
     }
 }
+#endif

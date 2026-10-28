@@ -55,14 +55,14 @@ public enum TtsBenchmarkCommand {
     fileprivate enum AsrChoice {
         case skip
         case parakeet
-        case cohere(modelDir: URL, language: CohereAsrConfig.Language, computeUnits: MLComputeUnits)
+        case cohere(modelDir: URL, language: CohereAsrConfig.Language, computeUnits: MLComputeUnits?)
 
         var label: String {
             switch self {
             case .skip: return "skip"
             case .parakeet: return "parakeet-tdt"
             case .cohere(_, let lang, let cu):
-                return "cohere-transcribe-\(lang.rawValue)/\(Self.computeLabel(cu))"
+                return "cohere-transcribe-\(lang.rawValue)/\(cu.map(Self.computeLabel) ?? "default")"
             }
         }
 
@@ -339,6 +339,12 @@ public enum TtsBenchmarkCommand {
             case .chatterboxNano:
                 try await runChatterboxNano(
                     phrases: phrases, corpusLabel: corpusLabel,
+                    preset: preset, outputJson: outputJson, audioDir: audioDir,
+                    asrChoice: asrChoice)
+            case .paradee:
+                try await runParadee(
+                    phrases: phrases, corpusLabel: corpusLabel,
+                    variant: ParadeeVariant(rawValue: variantArg?.lowercased() ?? "") ?? .int8,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
                     asrChoice: asrChoice)
             }
@@ -837,6 +843,60 @@ public enum TtsBenchmarkCommand {
         }
     }
 
+    private static func runParadee(
+        phrases: [(category: String, text: String)],
+        corpusLabel: String,
+        variant: ParadeeVariant,
+        preset: TtsComputeUnitPreset,
+        outputJson: String?,
+        audioDir: String?,
+        asrChoice: AsrChoice
+    ) async throws {
+        // The LSTMs abort on the GPU, so only CPU and ANE routings exist.
+        let appliedPreset: TtsComputeUnitPreset = preset == .allAne ? .allAne : .cpuOnly
+        if appliedPreset != preset, preset != .default {
+            logger.warning("Paradee runs .cpuOnly or .cpuAndNeuralEngine; --compute-units \(preset.cliValue) ignored.")
+        }
+        let manager = ParadeeManager(
+            variant: variant, computeUnits: appliedPreset == .allAne ? .cpuAndNeuralEngine : .cpuOnly)
+        let coldStart = Date()
+        try await manager.initialize()
+        let coldStartS = Date().timeIntervalSince(coldStart)
+        logger.info(String(format: "Cold start (initialize): %.2fs", coldStartS))
+
+        let firstStart = Date()
+        _ = try await manager.synthesize(text: "Initialization warm-up.")
+        let firstSynthMs = Date().timeIntervalSince(firstStart) * 1000
+        logger.info(String(format: "First synth: %.0f ms", firstSynthMs))
+
+        try await runPhraseLoop(
+            backendId: "paradee-\(variant.rawValue)",
+            voiceLabel: "af_heart",
+            corpusLabel: corpusLabel,
+            phrases: phrases,
+            preset: appliedPreset,
+            coldStartS: coldStartS,
+            firstSynthMs: firstSynthMs,
+            outputJson: outputJson,
+            audioDir: audioDir,
+            asrChoice: asrChoice,
+            normalizeWavs: false,
+            extraSummary: ["language": "en", "seed": 0]
+        ) { text in
+            let t0 = Date()
+            let samples = try await manager.synthesize(text: text)
+            let synthMs = Date().timeIntervalSince(t0) * 1000
+            return BackendPhraseSample(
+                synthMs: synthMs,
+                ttftMs: synthMs,
+                samples: samples,
+                sampleRate: ParadeeConstants.sampleRate,
+                stageMs: [:],
+                extraFields: [:]
+            )
+        }
+    }
+
     /// Map `--language` or a `minimax-<lang>` corpus name onto a Chatterbox
     /// language code. Falls back to English.
     private static func resolveChatterboxLanguage(explicit: String?, corpus: String) -> String {
@@ -1121,6 +1181,7 @@ public enum TtsBenchmarkCommand {
         case supertonic3
         case chatterbox
         case chatterboxNano
+        case paradee
 
         var defaultCorpus: String {
             return "minimax-english"
@@ -1141,6 +1202,8 @@ public enum TtsBenchmarkCommand {
             return .chatterbox
         case "chatterbox-nano", "chatterboxnano":
             return .chatterboxNano
+        case "paradee", "paradee-8m":
+            return .paradee
         default:
             logger.warning("Unknown backend '\(name)' — defaulting to kokoro-ane")
             return .kokoroAne
@@ -1211,6 +1274,10 @@ public enum TtsBenchmarkCommand {
             return .mandarin
         case "japanese", "ja", "jp":
             return .japanese
+        case "spanish", "es":
+            return .spanish
+        case "french", "fr":
+            return .french
         case "english", "en", "en-us", nil, "":
             return .english
         default:
@@ -1301,11 +1368,7 @@ public enum TtsBenchmarkCommand {
         // pass the Models base dir and let it land the bundle at `target`.
         let modelsBase = appSupport.appendingPathComponent("FluidAudio/Models")
         let target = modelsBase.appendingPathComponent("cohere-transcribe/q8")
-        let needed = [
-            ModelNames.CohereTranscribe.encoderCompiledFile,
-            ModelNames.CohereTranscribe.decoderCacheExternalV2CompiledFile,
-            "vocab.json",
-        ]
+        let needed = Array(ModelNames.CohereTranscribe.requiredModels)
         func missingFiles() -> [String] {
             needed.filter { name in
                 !FileManager.default.fileExists(
@@ -1359,20 +1422,23 @@ public enum TtsBenchmarkCommand {
         return .english
     }
 
-    /// Parse `--cohere-compute-units` into `MLComputeUnits`. Defaults to
-    /// `.all` (CoreML decides). Use `cpu-and-gpu` to skip the ANE compile
-    /// attempt when the q8 encoder fails ANE compilation (observed:
-    /// `MILCompilerForANE error: failed to compile ANE model using ANEF`,
-    /// CoreML falls back to CPU+GPU but pays a multi-minute compile cost
-    /// on the first call).
+    /// Parse `--cohere-compute-units` into `MLComputeUnits`. Unset (or
+    /// `default`) returns `nil` so `CoherePipeline.loadModels` applies its
+    /// per-model defaults (encoder and decoder on the ANE; `.all` can put
+    /// the INT8 encoder on the GPU at a ~10 GB memory cost, #1045). Use
+    /// `cpu-and-gpu` to skip the ANE compile attempt when the q8 encoder
+    /// fails ANE compilation (observed: `MILCompilerForANE error: failed to
+    /// compile ANE model using ANEF`, CoreML falls back to CPU+GPU but pays
+    /// a multi-minute compile cost on the first call).
     private static func resolveCohereComputeUnits(
         _ flag: String?
     ) throws
-        -> MLComputeUnits
+        -> MLComputeUnits?
     {
-        guard let raw = flag?.lowercased(), !raw.isEmpty else { return .all }
+        guard let raw = flag?.lowercased(), !raw.isEmpty else { return nil }
         switch raw {
-        case "all", "default": return .all
+        case "default": return nil
+        case "all": return .all
         case "all-ane", "ane", "neural-engine", "cpu-and-ane":
             return .cpuAndNeuralEngine
         case "cpu-and-gpu", "cpuandgpu", "gpu": return .cpuAndGPU
@@ -1430,13 +1496,16 @@ public enum TtsBenchmarkCommand {
             }
             logger.info(
                 "Loading Cohere Transcribe (lang=\(language.englishName), "
-                    + "compute=\(describeComputeUnits(computeUnits))) from \(modelDir.path)")
+                    + "compute=\(computeUnits.map(describeComputeUnits) ?? "default")) from \(modelDir.path)")
             let models = try await CoherePipeline.loadModels(
                 encoderDir: modelDir,
                 decoderDir: modelDir,
                 vocabDir: modelDir,
-                decoderVariant: .v2,
+                decoderVariant: .v3,
                 computeUnits: computeUnits)
+            logger.info(
+                "Cohere compute: encoder=\(CoherePipeline.describe(models.encoderComputeUnits)), "
+                    + "decoder=\(CoherePipeline.describe(models.decoderComputeUnits))")
             let pipeline = CoherePipeline()
             let converter = AudioConverter()
             return AsrLoop(
@@ -1447,7 +1516,6 @@ public enum TtsBenchmarkCommand {
                         audio: samples,
                         models: models,
                         language: language,
-                        maxNewTokens: 108,
                         repetitionPenalty: 1.1,
                         noRepeatNgram: 3)
                     return r.text
@@ -1503,8 +1571,10 @@ public enum TtsBenchmarkCommand {
                                         en, zh, ja, ko, vi, fr, de, es, it, pt,
                                         nl, pl, el, ar
               --cohere-compute-units <p>  Cohere ASR compute mapping:
-                                        all (default; CoreML decides) |
-                                        cpu-and-gpu | cpu-only | all-ane.
+                                        default (encoder + decoder on ANE) |
+                                        all | cpu-and-gpu | cpu-only | all-ane.
+                                        `all` may put the INT8 encoder on the
+                                        GPU (+~10 GB memory, #1045).
                                         Use cpu-and-gpu when q8 ANE compile
                                         fails (`MILCompilerForANE error: …`)
                                         — avoids the multi-minute fallback
