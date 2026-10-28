@@ -15,15 +15,15 @@ public enum ParadeeVariant: String, Sendable, CaseIterable {
     public var subdirectory: String { rawValue }
 
     /// HuggingFace repo case for this variant of v1.0.
-    public var repo: Repo { repo(for: .v1_0) }
+    public var repo: Repo { repo(for: .v10) }
 
     /// HuggingFace repo case for this variant of `version`.
     public func repo(for version: ParadeeVersion) -> Repo {
         switch (version, self) {
-        case (.v1_0, .int8): return .paradeeInt8
-        case (.v1_0, .fp32): return .paradeeFp32
-        case (.v1_2, .int8): return .paradeeV12Int8
-        case (.v1_2, .fp32): return .paradeeV12Fp32
+        case (.v10, .int8): return .paradeeInt8
+        case (.v10, .fp32): return .paradeeFp32
+        case (.v12, .int8): return .paradeeV12Int8
+        case (.v12, .fp32): return .paradeeV12Fp32
         }
     }
 }

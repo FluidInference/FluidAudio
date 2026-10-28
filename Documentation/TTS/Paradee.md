@@ -6,8 +6,8 @@ Paper: [arXiv 2610.06817](https://arxiv.org/abs/2610.06817) (v1.0).
 
 | `ParadeeVersion` | Voices | Decoder |
 |---|---|---|
-| `.v1_2` (default) | `af_heart`, `bf_isabella`, `am_puck`, `bm_fable` | v1.1's frame-rate source-filter head |
-| `.v1_0` | `af_heart` | Kokoro's iSTFTNet generator + phase-lock filter |
+| `.v12` (default) | `af_heart`, `bf_isabella`, `am_puck`, `bm_fable` | v1.1's frame-rate source-filter head |
+| `.v10` | `af_heart` | Kokoro's iSTFTNet generator + phase-lock filter |
 
 `bf_isabella` and `bm_fable` are British and are read with British phonemes (below).
 
@@ -26,7 +26,7 @@ let samples = try await manager.synthesize(text: "Hello from FluidAudio.", voice
 let phonemes = try await manager.phonemes(for: "Hello from FluidAudio.", voice: .bmFable)
 let fromPhonemes = try await manager.synthesize(phonemes: phonemes, voice: .bmFable)
 
-let v10 = ParadeeManager(version: .v1_0)       // the previous release, af_heart only
+let v10 = ParadeeManager(version: .v10)       // the previous release, af_heart only
 ```
 
 ```bash

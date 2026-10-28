@@ -7,20 +7,20 @@ import Foundation
 /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 public enum ParadeeVersion: String, Sendable, CaseIterable {
     /// Paradee-8M v1.0: `af_heart` only, upsampling iSTFTNet vocoder plus phase-lock filter.
-    case v1_0 = "1.0"
+    case v10 = "1.0"
     /// Paradee-8M v1.2 (default): four voices, frame-rate source-filter head.
-    case v1_2 = "1.2"
+    case v12 = "1.2"
 
     /// Voices the release was trained on, in the order of the model's voice table.
     public var voices: [ParadeeVoice] {
         switch self {
-        case .v1_0: return [.afHeart]
-        case .v1_2: return [.afHeart, .bfIsabella, .amPuck, .bmFable]
+        case .v10: return [.afHeart]
+        case .v12: return [.afHeart, .bfIsabella, .amPuck, .bmFable]
         }
     }
 
     /// Whether the graphs take a `voice` input (v1.0 has a single fixed voice).
-    var hasVoiceInput: Bool { self != .v1_0 }
+    var hasVoiceInput: Bool { self != .v10 }
 }
 
 /// Paradee voice. The British voices (`bf_`, `bm_`) were trained on misaki's

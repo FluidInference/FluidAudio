@@ -3,9 +3,10 @@ import Foundation
 
 /// Shared Misaki lexicon JSON cache loader.
 ///
-/// Reads the preprocessed `us_lexicon_cache.json` payload (word →
-/// phoneme tokens) shipped under the kokoro HF repo root and exposes the
-/// resulting maps to callers (currently `StyleTTS2Manager`). The on-disk
+/// Reads a preprocessed Misaki lexicon payload (word → phoneme tokens)
+/// shipped under the kokoro HF repo root — `us_lexicon_cache.json`, or
+/// `gb_lexicon_cache.json` for British English — and exposes the resulting
+/// maps to callers (StyleTTS2, KokoroAne, Inflect, Paradee). The on-disk
 /// schema is `{ lower: [String: [String]], caseSensitive: [String:
 /// [String]] }`; consumers pass an `allowedTokens` set so phonemes outside
 /// the target backend's character vocab are filtered out at load time.

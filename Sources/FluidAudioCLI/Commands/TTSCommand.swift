@@ -69,7 +69,7 @@ public struct TTS {
         var inflectVariant: InflectVariant = .micro
         // Paradee weight precision and release — only consulted when backend == .paradee.
         var paradeeVariant: ParadeeVariant = .int8
-        var paradeeVersion: ParadeeVersion = .v1_2
+        var paradeeVersion: ParadeeVersion = .v12
         var paradeeSpeed: Float = ParadeeConstants.defaultSpeed
         var paradeeSeed: UInt64 = 0
         var lexiconPath: String? = nil

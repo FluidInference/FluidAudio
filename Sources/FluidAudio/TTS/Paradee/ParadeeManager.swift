@@ -43,7 +43,7 @@ public actor ParadeeManager {
     public nonisolated var voices: [ParadeeVoice] { version.voices }
 
     public init(
-        version: ParadeeVersion = .v1_2,
+        version: ParadeeVersion = .v12,
         variant: ParadeeVariant = .int8,
         directory: URL? = nil,
         computeUnits: MLComputeUnits = .cpuOnly

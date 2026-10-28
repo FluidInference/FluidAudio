@@ -28,10 +28,10 @@ final class ParadeeTests: XCTestCase {
     func testVariantMapsToRepo() {
         XCTAssertEqual(ParadeeVariant.int8.repo, .paradeeInt8)
         XCTAssertEqual(ParadeeVariant.fp32.repo, .paradeeFp32)
-        XCTAssertEqual(ParadeeVariant.int8.repo(for: .v1_0), .paradeeInt8)
-        XCTAssertEqual(ParadeeVariant.fp32.repo(for: .v1_0), .paradeeFp32)
-        XCTAssertEqual(ParadeeVariant.int8.repo(for: .v1_2), .paradeeV12Int8)
-        XCTAssertEqual(ParadeeVariant.fp32.repo(for: .v1_2), .paradeeV12Fp32)
+        XCTAssertEqual(ParadeeVariant.int8.repo(for: .v10), .paradeeInt8)
+        XCTAssertEqual(ParadeeVariant.fp32.repo(for: .v10), .paradeeFp32)
+        XCTAssertEqual(ParadeeVariant.int8.repo(for: .v12), .paradeeV12Int8)
+        XCTAssertEqual(ParadeeVariant.fp32.repo(for: .v12), .paradeeV12Fp32)
     }
 
     func testRequiredModels() {
@@ -45,17 +45,17 @@ final class ParadeeTests: XCTestCase {
     // MARK: - Voices
 
     func testVoicesPerVersion() {
-        XCTAssertEqual(ParadeeVersion.v1_0.voices, [.afHeart])
-        XCTAssertFalse(ParadeeVersion.v1_0.hasVoiceInput)
+        XCTAssertEqual(ParadeeVersion.v10.voices, [.afHeart])
+        XCTAssertFalse(ParadeeVersion.v10.hasVoiceInput)
         // The v1.2 voice tables are ordered like config.json `voices`.
-        XCTAssertEqual(ParadeeVersion.v1_2.voices.map(\.rawValue), ["af_heart", "bf_isabella", "am_puck", "bm_fable"])
-        XCTAssertEqual(ParadeeVersion.v1_2.voices.map(\.modelIndex), [0, 1, 2, 3])
-        XCTAssertTrue(ParadeeVersion.v1_2.hasVoiceInput)
+        XCTAssertEqual(ParadeeVersion.v12.voices.map(\.rawValue), ["af_heart", "bf_isabella", "am_puck", "bm_fable"])
+        XCTAssertEqual(ParadeeVersion.v12.voices.map(\.modelIndex), [0, 1, 2, 3])
+        XCTAssertTrue(ParadeeVersion.v12.hasVoiceInput)
         XCTAssertEqual(ParadeeVoice.allCases.filter(\.isBritish), [.bfIsabella, .bmFable])
     }
 
     func testV10RejectsOtherVoices() async {
-        let manager = ParadeeManager(version: .v1_0)
+        let manager = ParadeeManager(version: .v10)
         do {
             _ = try await manager.synthesize(phonemes: "həlˈO", voice: .bmFable)
             XCTFail("expected unsupportedVoice")
