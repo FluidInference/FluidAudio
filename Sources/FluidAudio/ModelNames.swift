@@ -32,6 +32,10 @@ public enum Repo: String, CaseIterable, Sendable {
     /// 3-stage: fp32 CPU preprocessor (waveform→560-d LFR feats) + fp16 ANE
     /// encoder+CTC (+ fp32 fallback) + host greedy-CTC decode. See ASR/SenseVoice.
     case senseVoiceSmall = "FluidInference/sensevoice-small-coreml"
+    /// Nemotron 3.5 Transcribe Lite — the ASR encoder + CTC timestamp head of NVIDIA's
+    /// Nemotron 3.5 Transcribe without its LLM: words with 40 ms start times.
+    /// See ASR/NemotronTranscribeLite.
+    case nemotron35TranscribeLite = "FluidInference/nemotron-3.5-transcribe-lite-coreml"
     /// CAM++ speaker-embedding model (fbank80 -> 192-d) for speaker verification /
     /// diarization clustering. See Speaker/CampPlusEmbedder.
     case campPlus = "FluidInference/campplus-coreml"
@@ -174,6 +178,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-ctc-0.6b-coreml"
         case .senseVoiceSmall:
             return "sensevoice-small-coreml"
+        case .nemotron35TranscribeLite:
+            return "nemotron-3.5-transcribe-lite-coreml"
         case .campPlus:
             return "campplus-coreml"
         case .fsmnVad:
@@ -587,6 +593,24 @@ public enum ModelNames {
     ///   SenseVoiceSmall (fp16, ANE): features + lang/textnorm → CTC logits
     ///   SenseVoiceSmall_fp32 (fp32): encoder fallback for non-ANE hardware
     /// Plus `vocab.json` (25055 SentencePiece tokens, auto-fetched as a root file).
+    /// Nemotron 3.5 Transcribe Lite (`FluidInference/nemotron-3.5-transcribe-lite-coreml`).
+    /// Only the two models the windowed pipeline uses are fetched; the repo also holds
+    /// single-model `lite_ctc_*` packages and a Core AI export for other runtimes.
+    public enum NemotronTranscribeLite {
+        public static let encoder = "lite_encoder_w48"  // 48 s window: mel (1,128,4800) -> states (1,1280,600)
+        public static let ctcHead = "lite_ctc_head_w48"  // states (1,1280,600) -> token ids per 40 ms
+
+        public static let encoderFile = "coreml/" + encoder + ".mlmodelc"
+        public static let ctcHeadFile = "coreml/" + ctcHead + ".mlmodelc"
+        public static let vocabularyFile = "assets/vocab.json"
+        public static let melWindowFile = "assets/mel_window.bin"  // 400 f32le, from the checkpoint
+        public static let melFilterbankFile = "assets/mel_filterbank.bin"  // 128 x 257 f32le, from the checkpoint
+
+        public static let requiredModels: Set<String> = [
+            encoderFile, ctcHeadFile, vocabularyFile, melWindowFile, melFilterbankFile,
+        ]
+    }
+
     public enum SenseVoice {
         public static let preprocessor = "SenseVoicePreprocessor"
         public static let encoder = "SenseVoiceSmall"  // fp16, runs on ANE (default)
@@ -1852,6 +1876,8 @@ public enum ModelNames {
             return ModelNames.CTC.requiredModels
         case .senseVoiceSmall:
             return ModelNames.SenseVoice.requiredModels(precision: variant)
+        case .nemotron35TranscribeLite:
+            return ModelNames.NemotronTranscribeLite.requiredModels
         case .campPlus:
             return ModelNames.CampPlus.requiredModels
         case .cuaS1Forms:
