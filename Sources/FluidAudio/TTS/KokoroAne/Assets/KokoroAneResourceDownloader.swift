@@ -402,9 +402,9 @@ public enum KokoroAneResourceDownloader {
     }
 
     /// Best-effort fetch of Kokoro's preprocessed Misaki lexicon cache
-    /// (`us_lexicon_cache.json`) into the shared kokoro cache directory
-    /// (next to the G2P CoreML assets — same file StyleTTS2 consumes via
-    /// `LexiconAssetCache`).
+    /// (`us_lexicon_cache.json`, or `gb_lexicon_cache.json` with `british`)
+    /// into the shared kokoro cache directory (next to the G2P CoreML
+    /// assets — same file StyleTTS2 consumes via `LexiconAssetCache`).
     ///
     /// Returns the kokoro cache directory when the file is resident
     /// (pre-cached or freshly downloaded), or `nil` when it is missing
@@ -413,9 +413,10 @@ public enum KokoroAneResourceDownloader {
     /// quality booster (Misaki weak forms for function words, issue
     /// #691), not a hard dependency.
     public static func ensureEnglishLexicon(
-        directory: URL? = nil
+        directory: URL? = nil,
+        british: Bool = false
     ) async -> URL? {
-        let filename = "us_lexicon_cache.json"
+        let filename = LexiconAssetCache.englishFileName(british: british)
         do {
             let modelsDirectory = try directory ?? defaultModelsDirectory()
             let kokoroDir = modelsDirectory.appendingPathComponent(Repo.kokoro.folderName)

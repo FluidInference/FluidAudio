@@ -24,18 +24,25 @@ public actor LexiconAssetCache {
 
     public init() {}
 
-    /// Load `us_lexicon_cache.json` from `kokoroDirectory`, filtering each
-    /// entry's phoneme list to `allowedTokens`. Throws if the file is
-    /// missing or unparseable.
+    /// Misaki's American (`us_`) or British (`gb_`) lexicon cache, built the
+    /// same way from that dialect's `_gold` + `_silver` dictionaries.
+    public static func englishFileName(british: Bool) -> String {
+        british ? "gb_lexicon_cache.json" : "us_lexicon_cache.json"
+    }
+
+    /// Load `fileName` (default `us_lexicon_cache.json`) from
+    /// `kokoroDirectory`, filtering each entry's phoneme list to
+    /// `allowedTokens`. Throws if the file is missing or unparseable.
     public func ensureLoaded(
-        kokoroDirectory: URL, allowedTokens: Set<String>
+        kokoroDirectory: URL, allowedTokens: Set<String>,
+        fileName: String = LexiconAssetCache.englishFileName(british: false)
     ) async throws {
         if isLoaded && !caseSensitiveWordToPhonemes.isEmpty { return }
 
-        let cacheURL = kokoroDirectory.appendingPathComponent("us_lexicon_cache.json")
+        let cacheURL = kokoroDirectory.appendingPathComponent(fileName)
         guard FileManager.default.fileExists(atPath: cacheURL.path) else {
             throw TTSError.processingFailed(
-                "Missing lexicon cache (expected us_lexicon_cache.json)")
+                "Missing lexicon cache (expected \(fileName))")
         }
 
         do {
@@ -50,7 +57,7 @@ public actor LexiconAssetCache {
 
             guard !filteredLower.isEmpty else {
                 throw TTSError.processingFailed(
-                    "us_lexicon_cache.json had no entries within the allowed token set")
+                    "\(fileName) had no entries within the allowed token set")
             }
 
             wordToPhonemes = filteredLower

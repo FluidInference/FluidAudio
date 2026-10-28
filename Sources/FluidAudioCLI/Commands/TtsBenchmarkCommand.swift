@@ -106,6 +106,7 @@ public enum TtsBenchmarkCommand {
         var cohereComputeUnitsArg: String?
         var referencePath: String?
         var variantArg: String?
+        var paradeeVersionArg: String?
         var phonemesMode = false
         var voiceStylePath: String?
         var totalStepsArg: Int?
@@ -133,6 +134,11 @@ public enum TtsBenchmarkCommand {
             case "--voice":
                 if i + 1 < arguments.count {
                     voice = arguments[i + 1]
+                    i += 1
+                }
+            case "--paradee-version":
+                if i + 1 < arguments.count {
+                    paradeeVersionArg = arguments[i + 1]
                     i += 1
                 }
             case "--language":
@@ -342,9 +348,20 @@ public enum TtsBenchmarkCommand {
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
                     asrChoice: asrChoice)
             case .paradee:
+                let versionRaw = paradeeVersionArg?.lowercased() ?? ""
+                let version =
+                    ParadeeVersion(rawValue: versionRaw.hasPrefix("v") ? String(versionRaw.dropFirst()) : versionRaw)
+                    ?? .v1_2
+                let voiceName = voice ?? ParadeeVoice.afHeart.rawValue
+                guard let paradeeVoice = ParadeeVoice(rawValue: voiceName), version.voices.contains(paradeeVoice)
+                else {
+                    throw ParadeeError.unsupportedVoice(voice: voiceName, version: version.rawValue)
+                }
                 try await runParadee(
                     phrases: phrases, corpusLabel: corpusLabel,
+                    version: version,
                     variant: ParadeeVariant(rawValue: variantArg?.lowercased() ?? "") ?? .int8,
+                    voice: paradeeVoice,
                     preset: preset, outputJson: outputJson, audioDir: audioDir,
                     asrChoice: asrChoice)
             }
@@ -846,7 +863,9 @@ public enum TtsBenchmarkCommand {
     private static func runParadee(
         phrases: [(category: String, text: String)],
         corpusLabel: String,
+        version: ParadeeVersion,
         variant: ParadeeVariant,
+        voice: ParadeeVoice,
         preset: TtsComputeUnitPreset,
         outputJson: String?,
         audioDir: String?,
@@ -858,20 +877,21 @@ public enum TtsBenchmarkCommand {
             logger.warning("Paradee runs .cpuOnly or .cpuAndNeuralEngine; --compute-units \(preset.cliValue) ignored.")
         }
         let manager = ParadeeManager(
-            variant: variant, computeUnits: appliedPreset == .allAne ? .cpuAndNeuralEngine : .cpuOnly)
+            version: version, variant: variant,
+            computeUnits: appliedPreset == .allAne ? .cpuAndNeuralEngine : .cpuOnly)
         let coldStart = Date()
         try await manager.initialize()
         let coldStartS = Date().timeIntervalSince(coldStart)
         logger.info(String(format: "Cold start (initialize): %.2fs", coldStartS))
 
         let firstStart = Date()
-        _ = try await manager.synthesize(text: "Initialization warm-up.")
+        _ = try await manager.synthesize(text: "Initialization warm-up.", voice: voice)
         let firstSynthMs = Date().timeIntervalSince(firstStart) * 1000
         logger.info(String(format: "First synth: %.0f ms", firstSynthMs))
 
         try await runPhraseLoop(
-            backendId: "paradee-\(variant.rawValue)",
-            voiceLabel: "af_heart",
+            backendId: "paradee-\(version.rawValue)-\(variant.rawValue)",
+            voiceLabel: voice.rawValue,
             corpusLabel: corpusLabel,
             phrases: phrases,
             preset: appliedPreset,
@@ -884,7 +904,7 @@ public enum TtsBenchmarkCommand {
             extraSummary: ["language": "en", "seed": 0]
         ) { text in
             let t0 = Date()
-            let samples = try await manager.synthesize(text: text)
+            let samples = try await manager.synthesize(text: text, voice: voice)
             let synthMs = Date().timeIntervalSince(t0) * 1000
             return BackendPhraseSample(
                 synthMs: synthMs,
