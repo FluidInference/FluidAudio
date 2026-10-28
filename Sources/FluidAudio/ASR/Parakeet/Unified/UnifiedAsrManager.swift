@@ -58,6 +58,8 @@ public actor UnifiedAsrManager {
     // Log-mel features are computed natively in Swift (`AudioMelSpectrogram` +
     // NeMo per_feature normalization); the model ships no CoreML preprocessor.
     private var swiftMel: UnifiedMelExtractor?
+    /// Encoder `prompt_id` (multilingual Nemotron checkpoint only).
+    private var promptIdArray: MLMultiArray?
 
     private let audioConverter = AudioConverter()
     public let config: UnifiedConfig
@@ -90,9 +92,9 @@ public actor UnifiedAsrManager {
 
     /// Load models from a directory containing the parakeet_unified_* bundles and vocab.json.
     public func loadModels(from directory: URL) async throws {
-        logger.info("Loading Parakeet Unified offline CoreML models from \(directory.path)...")
+        logger.info("Loading \(config.family.displayName) offline CoreML models from \(directory.path)...")
 
-        let names = ModelNames.ParakeetUnified.self
+        let names = config.family
         // See StreamingUnifiedAsrManager: per-token decoder/joint stay on CPU;
         // only the encoder uses ANE/GPU. Mel is computed in Swift.
         let cpuConfig = MLModelConfiguration()
@@ -135,12 +137,17 @@ public actor UnifiedAsrManager {
             configuration: cpuConfig
         )
         self.tokenizer = try Tokenizer(vocabPath: directory.appendingPathComponent(names.vocab))
+        self.promptIdArray = try config.family.promptId.map { id in
+            let array = try MLMultiArray(shape: [1], dataType: .int32)
+            array[0] = NSNumber(value: Int32(id))
+            return array
+        }
         self.rnntDecoder = try UnifiedRnntDecoder(
             decoderModel: decoder!, jointDecisionModel: jointDecision!, config: config
         )
         self.swiftMel = UnifiedMelExtractor(windowSamples: layout.windowSamples, nMels: config.melFeatures)
 
-        logger.info("Parakeet Unified offline models loaded (15 s window, 2 s overlap).")
+        logger.info("\(config.family.displayName) offline models loaded (15 s window, 2 s overlap).")
     }
 
     /// Download models from HuggingFace (if needed) and load them.
@@ -155,7 +162,7 @@ public actor UnifiedAsrManager {
             self.mlConfiguration = configuration
         }
 
-        let repo = Repo.parakeetUnified
+        let repo = config.family.repo
         let modelsBaseDir =
             directory
             ?? FileManager.default.urls(
@@ -172,10 +179,10 @@ public actor UnifiedAsrManager {
         try await ModelHub.loadWithRecovery(
             repo, directory: modelsBaseDir,
             requiredFiles: [
-                ModelNames.ParakeetUnified.offlineEncoderFile(precision: encoderPrecision),
-                ModelNames.ParakeetUnified.decoderFile,
-                ModelNames.ParakeetUnified.jointDecisionFile,
-                ModelNames.ParakeetUnified.vocab,
+                config.family.offlineEncoderFile(precision: encoderPrecision),
+                config.family.decoderFile,
+                config.family.jointDecisionFile,
+                config.family.vocab,
             ],
             variant: encoderPrecision == .fp16 ? "offline-fp16" : "offline",
             progressHandler: progressHandler
@@ -489,7 +496,7 @@ public actor UnifiedAsrManager {
         let (mel, melLength) = try swiftMel.features(window: buffer, validCount: validCount)
 
         let encoderOutput = try await encoder.prediction(
-            from: UnifiedEncoderFeatureProvider(mel: mel, melLength: melLength)
+            from: UnifiedEncoderFeatureProvider(mel: mel, melLength: melLength, promptId: promptIdArray)
         )
         guard let encoded = encoderOutput.featureValue(for: "encoder")?.multiArrayValue,
             let encodedLength = encoderOutput.featureValue(for: "encoder_length")?.multiArrayValue
@@ -537,7 +544,7 @@ public actor UnifiedAsrManager {
 /// batch at `finish()` — there are no incremental partial results.
 extension UnifiedAsrManager: StreamingAsrManager {
     public var displayName: String {
-        "Parakeet Unified 0.6B (offline 15s batch)"
+        "\(config.family.displayName) (offline 15s batch)"
     }
 
     public func loadModels() async throws {

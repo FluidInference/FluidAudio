@@ -59,6 +59,9 @@ public enum Repo: String, CaseIterable, Sendable {
     /// chunked-attention encoder re-run over a [left|chunk|right] window
     /// (stateless — no encoder caches). See ASR/Parakeet/Unified.
     case parakeetUnified = "FluidInference/parakeet-unified-en-0.6b-coreml"
+    /// nvidia/nemotron-labs-unified-asr-0.6b: multilingual (25 European languages) Unified FastConformer-RNNT with a
+    /// language-ID prompt. Bundles live in the repo's `coreml/` folder. See ASR/Parakeet/Unified.
+    case nemotronUnified = "FluidInference/nemotron-labs-unified-asr-0.6b-coreml/coreml"
     /// Multilingual streaming model. The HF repo is organized as
     /// `<lang>/<tier>ms/` subfolders (9 languages x 4 chunk tiers); the
     /// specific variant subdirectory is supplied dynamically at download
@@ -232,6 +235,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-tdt-ctc-110m-coreml"
         case .cohereTranscribeCoreml:
             return "cohere-transcribe-03-2026-coreml/q8"
+        case .nemotronUnified:
+            return "nemotron-labs-unified-asr-0.6b-coreml/coreml"
         case .canary1bV2:
             return "canary-1b-v2-coreml"
         case .styletts2:
@@ -274,6 +279,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/parakeet-tdt-ctc-110m-coreml"
         case .cohereTranscribeCoreml:
             return "FluidInference/cohere-transcribe-03-2026-coreml"
+        case .nemotronUnified:
+            return "FluidInference/nemotron-labs-unified-asr-0.6b-coreml"
         case .styletts2:
             return "FluidInference/StyleTTS-2-coreml"
         case .inflectMicro, .inflectNano:
@@ -331,6 +338,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "optimized/dih3"
         case .cohereTranscribeCoreml:
             return "q8"
+        case .nemotronUnified:
+            return "coreml"
         case .styletts2:
             return "iteration_3/compiled"
         case .inflectMicro:
@@ -416,6 +425,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "ls-eend/dih3"
         case .cohereTranscribeCoreml:
             return "cohere-transcribe/q8"
+        case .nemotronUnified:
+            return "nemotron-labs-unified-asr/coreml"
         case .styletts2:
             return "styletts2"
         case .supertonic3:
@@ -868,6 +879,20 @@ public enum ModelNames {
     /// One checkpoint, two encoder exports: chunked-attention streaming
     /// (default download) and full-attention offline 15 s window
     /// (variant "offline" — used for overlapping-batch long-form transcription).
+    /// nvidia/nemotron-labs-unified-asr-0.6b bundles (`coreml/` in the HF repo); names come from
+    /// `UnifiedModelFamily.nemotronMultilingual`.
+    public enum NemotronUnified {
+        public static func requiredModels(variant: String?) -> Set<String> {
+            let family = UnifiedModelFamily.nemotronMultilingual(.auto)
+            let precision: UnifiedEncoderPrecision = variant?.hasSuffix("fp16") == true ? .fp16 : .int8
+            var models: Set<String> = [family.decoderFile, family.jointDecisionFile, family.vocab, family.metadata]
+            if variant?.hasPrefix("offline") == true {
+                models.insert(family.offlineEncoderFile(precision: precision))
+            }
+            return models
+        }
+    }
+
     public enum ParakeetUnified {
         // Mel features are computed natively in Swift (`UnifiedMelExtractor` /
         // `AudioMelSpectrogram` + NeMo per_feature normalization), so the CoreML
@@ -1895,6 +1920,9 @@ public enum ModelNames {
         case .parakeetUnified:
             // Variants: nil/"fp16" (streaming), "offline"/"offline-fp16" (batch).
             return ModelNames.ParakeetUnified.requiredModels(variant: variant)
+        case .nemotronUnified:
+            // Same variants as .parakeetUnified; the streaming encoder comes via additionalModelNames.
+            return ModelNames.NemotronUnified.requiredModels(variant: variant)
         case .diarizer:
             if variant == "offline" {
                 return ModelNames.OfflineDiarizer.requiredModels
