@@ -89,7 +89,8 @@ public final class AudioMelSpectrogram {
         // librosa/STFT paths use a periodic window. A model that ships its own
         // window (e.g. the checkpoint's bf16 table) passes it in instead.
         let numFreqBins = nFFT / 2 + 1
-        if let window, window.count == winLength {
+        if let window {
+            precondition(window.count == winLength, "window has \(window.count) samples, expected \(winLength)")
             self.hannWindow = window
         } else {
             self.hannWindow = Self.createHannWindow(length: winLength, periodic: windowPeriodic)
@@ -97,7 +98,10 @@ public final class AudioMelSpectrogram {
 
         // 2. Create mel filterbank with Slaney normalization, or take the shipped
         // [nMels, numFreqBins] row-major table.
-        if let filterbank, filterbank.count == nMels * numFreqBins {
+        if let filterbank {
+            precondition(
+                filterbank.count == nMels * numFreqBins,
+                "filterbank has \(filterbank.count) values, expected \(nMels * numFreqBins) (\(nMels) x \(numFreqBins))")
             self.melFilterbank = (0..<nMels).map {
                 Array(filterbank[($0 * numFreqBins)..<(($0 + 1) * numFreqBins)])
             }

@@ -36,6 +36,11 @@ public struct NemotronTranscribeLiteModels: Sendable {
         computeUnits: MLComputeUnits = .cpuAndGPU,
         progressHandler: ProgressHandler? = nil
     ) async throws -> NemotronTranscribeLiteModels {
+        // Check before downloading: ModelHub.loadWithRecovery treats a load() error as a corrupt cache, so on an
+        // unsupported OS it would delete the ~1.3 GB download and fetch it again before failing.
+        guard #available(macOS 15, iOS 18, tvOS 18, visionOS 2, *) else {
+            throw ASRError.unsupportedPlatform("Nemotron 3.5 Transcribe Lite needs macOS 15 / iOS 18 or newer")
+        }
         let modelsRoot = modelsRootDirectory()
         let targetDir = modelsRoot.appendingPathComponent(
             Repo.nemotron35TranscribeLite.folderName, isDirectory: true)
