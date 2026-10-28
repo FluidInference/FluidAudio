@@ -342,6 +342,7 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
   - `FluidInference/parakeet-redux-coreml` (multilingual, smallest download at ~220 MB; iOS 18+ / macOS 15+ only, see [Parakeet Redux](Documentation/ASR/ParakeetRedux.md))
   - `FluidInference/parakeet-tdt-0.6b-v2-coreml` (English-only, highest recall)
   - `FluidInference/phonon-2-coreml` (English-only; Fermion Research's five-value re-training of v3, iOS 18+ / macOS 15+, see [Phonon-2](Documentation/ASR/Phonon2.md))
+  - `FluidInference/bark-3.0-coreml` (English-only; Underdog Bark 3.0 (verbatim) and Bark 3.0 Clean (dictation, drops fillers), iOS 18+ / macOS 15+, see [Bark 3.0](Documentation/ASR/Bark3.md))
 - **Processing Mode**: Batch transcription for complete audio files
 - **Real-time Factor**: ~190x on M4 Pro (processes 1 hour of audio in ~19 seconds)
 - **Streaming Support**: Real-time streaming via `SlidingWindowAsrManager` with sliding window processing and cancellation support
