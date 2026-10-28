@@ -101,7 +101,8 @@ public final class AudioMelSpectrogram {
         if let filterbank {
             precondition(
                 filterbank.count == nMels * numFreqBins,
-                "filterbank has \(filterbank.count) values, expected \(nMels * numFreqBins) (\(nMels) x \(numFreqBins))")
+                "filterbank has \(filterbank.count) values, expected \(nMels * numFreqBins) (\(nMels) x \(numFreqBins))"
+            )
             self.melFilterbank = (0..<nMels).map {
                 Array(filterbank[($0 * numFreqBins)..<(($0 + 1) * numFreqBins)])
             }
