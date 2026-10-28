@@ -208,6 +208,12 @@ enum TranscribeCommand {
         /// `--model-version unified`: Parakeet Unified 0.6B (English, punctuation and capitalization) through
         /// `UnifiedAsrManager`, which is not an `AsrModelVersion`.
         var unified = false
+        /// `--model-version nemotron-unified`: nemotron-labs-unified-asr-0.6b (25 European languages) through the
+        /// same `UnifiedAsrManager`, with the language prompt from `--unified-language` (default `auto`).
+        var nemotronUnifiedLanguage: NemotronUnifiedLanguage?
+        /// `--unified-precision`: Unified encoder precision. nemotron-unified defaults to fp16 (int8 lost accuracy on
+        /// French in the conversion's FLEURS check); English unified keeps its int8 default.
+        var unifiedPrecision: UnifiedEncoderPrecision?
         var modelDir: String?
         var localModelDir: String?
         var customVocabPath: String?
@@ -305,15 +311,34 @@ enum TranscribeCommand {
                         parsed.modelVersion = .tdtJa
                     case "unified":
                         parsed.unified = true
+                    case "nemotron-unified":
+                        parsed.unified = true
+                        if parsed.nemotronUnifiedLanguage == nil { parsed.nemotronUnifiedLanguage = .auto }
                     default:
                         fputs(
-                            "ERROR: Invalid model version: \(args[i + 1]). Use 'v2', 'v3', 'redux', 'ultra', 'phonon2', 'tdt-ctc-110m', 'tdt-ja', or 'unified'\n",
+                            "ERROR: Invalid model version: \(args[i + 1]). Use 'v2', 'v3', 'redux', 'ultra', 'phonon2', 'tdt-ctc-110m', 'tdt-ja', 'unified' or 'nemotron-unified'\n",
                             stderr)
                         fflush(stderr)
                         return nil
                     }
                     i += 1
                 }
+            case "--unified-language":
+                guard i + 1 < args.count, let lang = NemotronUnifiedLanguage(rawValue: args[i + 1].lowercased()) else {
+                    let valid = NemotronUnifiedLanguage.allCases.map(\.rawValue).joined(separator: ", ")
+                    fputs("ERROR: --unified-language must be one of: \(valid)\n", stderr)
+                    return nil
+                }
+                parsed.nemotronUnifiedLanguage = lang
+                i += 1
+            case "--unified-precision":
+                guard i + 1 < args.count, let precision = UnifiedEncoderPrecision(rawValue: args[i + 1].lowercased())
+                else {
+                    fputs("ERROR: --unified-precision must be int8 or fp16\n", stderr)
+                    return nil
+                }
+                parsed.unifiedPrecision = precision
+                i += 1
             case "--local-model-dir":
                 guard i + 1 < args.count else {
                     fputs("ERROR: --local-model-dir requires a directory\n", stderr)
@@ -510,7 +535,7 @@ enum TranscribeCommand {
         if args.customVocabPath != nil { ignored.append("--custom-vocab") }
         if args.parakeetVariant != nil { ignored.append("--parakeet-variant") }
         if args.language != nil { ignored.append("--language") }
-        if args.encoderPrecision != .int8 { ignored.append("--encoder-precision") }
+        if args.encoderPrecision != .int8 { ignored.append("--encoder-precision (use --unified-precision)") }
         if args.encoderComputeUnits != nil { ignored.append("--encoder-compute-units") }
         if args.streamingMode { ignored.append("--streaming") }
         if !ignored.isEmpty {
@@ -520,7 +545,14 @@ enum TranscribeCommand {
         do {
             let samples = try AudioConverter().resampleAudioFile(path: audioFile)
             let duration = Double(samples.count) / 16000.0
-            let manager = UnifiedAsrManager()
+            let manager: UnifiedAsrManager
+            if let language = args.nemotronUnifiedLanguage {
+                manager = UnifiedAsrManager(
+                    config: UnifiedConfig(family: .nemotronMultilingual(language)),
+                    encoderPrecision: args.unifiedPrecision ?? .fp16)
+            } else {
+                manager = UnifiedAsrManager(encoderPrecision: args.unifiedPrecision ?? .int8)
+            }
             try await manager.loadModels()
             let start = Date()
             let result = try await manager.transcribeWithTimings(samples)
@@ -1174,7 +1206,9 @@ enum TranscribeCommand {
                 --word-timestamps              Show word-level timestamps in results
                 --encoder-compute-units <u>    Encoder placement: ane (default), gpu, cpu, all
                 --output-json <file>           Save full transcription to JSON
-                --model-version <name>         v2, v3, redux, ultra, phonon2, tdt-ctc-110m, tdt-ja, unified (default: v3)
+                --model-version <name>         v2, v3, redux, ultra, phonon2, tdt-ctc-110m, tdt-ja, unified, nemotron-unified (default: v3)
+                --unified-language <code>      nemotron-unified language prompt: auto (default), en, de, fr, es, it, pl, ...
+                --unified-precision <p>        unified encoder precision: int8 or fp16 (nemotron-unified default fp16)
                 --model-dir <path>             Repository model cache directory
                 --local-model-dir <path>       Exact compiled model directory; never downloads
                 --encoder-precision <int8|int8-v2|int4> Encoder quantization (default: int8;
