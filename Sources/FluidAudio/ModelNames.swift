@@ -705,10 +705,13 @@ public enum ModelNames {
         ]
         public static let requiredModels = recognitionModels.union(speechModels)
 
-        /// Core AI repo (`FluidInference/lfm3-audio-2b-coreai`): the LM as a Core AI bundle in `coreai/`.
-        public static let coreAILanguageModel = "lfm3-audio-2b"
+        /// Core AI repo (`FluidInference/lfm3-audio-2b-coreai`): the LM as a Core AI bundle in `coreai/`
+        /// (`inputs_embeds`; entrypoints prefill / main / hidden; uint8 block 32, decoder layers 20-23 fp16).
+        public static let coreAILanguageModel = "LFM3-Audio-u8b32-f16L20-23"
         public static func coreAIBundleFile(_ name: String) -> String { "coreai/" + name + ".aimodel" }
-        public static let coreAIRequiredModels: Set<String> = [coreAIBundleFile(coreAILanguageModel)]
+        /// The bundle's files (listed so a partial download is never taken for a complete bundle).
+        public static let coreAIRequiredModels: Set<String> = Set(
+            ["main.mlirb", "main.hash", "metadata.json"].map { coreAIBundleFile(coreAILanguageModel) + "/" + $0 })
     }
 
     public enum SenseVoice {

@@ -162,6 +162,12 @@ final class LFM3AudioTests: XCTestCase {
         let samples = try AudioConverter().resampleAudioFile(try fixture("01-validation-request-21.4s.wav"))
         let offline = try await manager.transcribe(samples)
         XCTAssertTrue(offline.text.lowercased().contains("help them out"), offline.text)
+        // Concurrent calls share one LM context; the manager serializes them.
+        async let first = manager.transcribe(samples)
+        async let second = manager.transcribe(samples)
+        let (a, b) = try await (first, second)
+        XCTAssertEqual(a.text, offline.text)
+        XCTAssertEqual(b.text, offline.text)
 
         try await manager.startLiveTranscription()
         for start in stride(from: 0, to: samples.count, by: 2560) {

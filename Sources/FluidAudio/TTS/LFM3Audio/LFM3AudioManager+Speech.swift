@@ -64,6 +64,8 @@ extension LFM3AudioManager {
     ) async throws -> LFM3AudioSynthesis {
         guard live == nil else { throw LFM3AudioError.liveSessionActive }
         guard let speech else { throw LFM3AudioError.speechNotLoaded }
+        await acquire()
+        defer { release() }
         typealias T = LFM3AudioConfig.Token
         let start = Date()
         let prompt = tokenizer.encode(LFM3AudioConfig.ttsPrompt(text: text, language: language, voice: voice.rawValue))

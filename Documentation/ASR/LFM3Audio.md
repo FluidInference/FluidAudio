@@ -22,7 +22,14 @@ Requested in [#49](https://github.com/FluidInference/FluidAudio/issues/49#issuec
 | Host tables, tokenizer | `assets/*` | fp16 / fp32 | CPU |
 
 ASR downloads ~2.5 GB; TTS adds ~0.4 GB (`includeSpeech: false` skips it). The Core AI backend downloads the Core AI
-LM bundle instead of the Core ML LM files and keeps the encoder, depth decoder and codec on Core ML.
+LM bundle (`coreai/LFM3-Audio-u8b32-f16L20-23.aimodel`, 2.16 GB: uint8 block 32, decoder layers 20-23 fp16) instead
+of the Core ML LM files and keeps the encoder, depth decoder and codec on Core ML (the Neural Engine is not
+available to Core AI on macOS 27.0). Plain int8 Core AI bundles pass ASR but flip too many TTS speech codes.
+
+The Core AI LM loads one `AIModel` per entrypoint (`prefill`, `main`, `hidden`), all bound to the same states: with
+one shared `AIModel`, macOS 27.0 aborts in `GPUMemrefOps` ("Failed to resolve dynamic dimensions for memref.alloc")
+when one function runs twice at consecutive positions with the same row count and another function then takes the
+next shape — the first `main` after speech frames in TTS.
 
 ## Architecture
 
@@ -67,8 +74,9 @@ let speech = try await manager.synthesize(
     onAudio: { samples in /* play as it arrives */ })
 ```
 
-One manager owns one LM context, so `transcribe` and `synthesize` throw `LFM3AudioError.liveSessionActive` while a
-live session is open. `LFM3AudioComputeUnits` overrides the per-component compute units.
+One manager owns one LM context: concurrent calls run one at a time in arrival order, and `transcribe` /
+`synthesize` throw `LFM3AudioError.liveSessionActive` while a live session is open. `LFM3AudioComputeUnits` overrides
+the per-component compute units.
 
 ### CLI
 
@@ -82,16 +90,17 @@ swift run -c release fluidaudiocli lfm3-audio benchmark [--live] --max-files 100
 
 ## Benchmarks
 
-Apple M5 Pro (24 GB), macOS 27.0, release build, Core ML backend; wall time includes warm-up after load.
+Apple M5 Pro (24 GB), macOS 27.0, release build; wall time includes warm-up after load.
 
-| Task | Data | Result |
-|---|---|---|
-| Offline ASR | LibriSpeech test-clean, first 100 utterances (901 s) | WER 1.32%, RTFx 18.4; 100/100 transcripts identical to the original model (HF fp32, greedy) |
-| LiveASR (160 ms pieces) | LibriSpeech test-clean, first 20 utterances | WER 1.46%, RTFx 10.4 |
-| TTS | 20 phrases, 72 s of speech | RTFx 4.48, first audio 37 ms (median), Parakeet round-trip WER 2.5% |
+| Task | Data | Core ML | Core AI LM |
+|---|---|---|---|
+| Offline ASR | LibriSpeech test-clean, first 100 utterances (901 s) | WER 1.32%, RTFx 18.4; 100/100 transcripts identical to the original model (HF fp32, greedy) | WER 1.32%, RTFx 24.6; 98/100 identical |
+| LiveASR (160 ms pieces) | LibriSpeech test-clean, first 20 utterances | WER 1.46%, RTFx 10.4 | WER 1.46%, RTFx 13.3 |
+| TTS | 20 phrases, ~72 s of speech | RTFx 4.48, first audio 37 ms (median), Parakeet round-trip WER 2.5% | RTFx 4.28, first audio 37 ms, round-trip WER 2.5% |
 
-Per speech frame: LM 9.4 ms + depth decoder 4.9 ms (GPU), codec in parallel on the ANE. ASR peak memory footprint:
-1.9 GB.
+Core ML per speech frame: LM 9.4 ms + depth decoder 4.9 ms (GPU), codec in parallel on the ANE. ASR peak memory
+footprint: 1.9 GB on both backends. The first Core AI load specializes the graph and caches it (~3.3 GB under
+`~/Library/Caches/coreai-cache`).
 
 ## License
 

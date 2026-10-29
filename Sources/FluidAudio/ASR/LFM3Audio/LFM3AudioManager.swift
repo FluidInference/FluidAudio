@@ -50,6 +50,9 @@ public actor LFM3AudioManager {
     let mel = LFM3AudioLogMel()
     let livePrompt: [Int32]
     var live: LiveState?
+    /// FIFO gate over the LM context: the actor is reentrant at every `await`, so two calls must not interleave.
+    private var busy = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
     #if TTS
     let speech: LFM3AudioSpeechRuntime?
     #endif
@@ -95,6 +98,8 @@ public actor LFM3AudioManager {
     ///   the model infer it.
     public func transcribe(_ samples: [Float], language: String? = "English") async throws -> LFM3AudioTranscription {
         guard live == nil else { throw LFM3AudioError.liveSessionActive }
+        await acquire()
+        defer { release() }
         let start = Date()
         var parts: [String] = []
         var tokens = 0
@@ -151,6 +156,8 @@ public actor LFM3AudioManager {
     /// Append 16 kHz mono samples to the live session; returns the transcript so far.
     @discardableResult
     public func appendLiveAudio(_ samples: [Float]) async throws -> String {
+        await acquire()
+        defer { release() }
         guard var state = live else { throw LFM3AudioError.noLiveSession }
         state.melBuffer.append(state.melStream.push(samples))
         while state.melBuffer.frames >= LFM3AudioConfig.liveChunkFrames {
@@ -164,6 +171,8 @@ public actor LFM3AudioManager {
 
     /// Flush the remaining audio, end the session and return the final transcript.
     public func finishLiveTranscription() async throws -> String {
+        await acquire()
+        defer { release() }
         guard var state = live else { throw LFM3AudioError.noLiveSession }
         live = nil
         state.melBuffer.append(state.melStream.push([], isFinal: true))
@@ -217,6 +226,24 @@ public actor LFM3AudioManager {
             if step == budget - 1 { break }
         }
         if !isFinal { state.pendingIds = [T.textEnd] }
+    }
+
+    // MARK: - Serialization
+
+    func acquire() async {
+        guard busy else {
+            busy = true
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }  // resumed with the gate handed over
+    }
+
+    func release() {
+        if waiters.isEmpty {
+            busy = false
+        } else {
+            waiters.removeFirst().resume()
+        }
     }
 
     // MARK: - Backends

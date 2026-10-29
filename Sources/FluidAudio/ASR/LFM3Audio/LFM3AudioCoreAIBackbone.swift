@@ -7,11 +7,16 @@ import Foundation
 /// (logits of the last row) and `hidden` (final-norm hidden of the last row), specialized for the GPU with
 /// frequent reshapes (as `llm-runner`). Rows `0 ..< n-1` of a feed go through `prefill` in chunks, the last row
 /// through `main` or `hidden`.
+///
+/// Each entrypoint is loaded from its own `AIModel` (all bound to the same host-owned states). With one shared
+/// `AIModel`, macOS 27.0 aborts in `GPUMemrefOps` (`Failed to resolve dynamic dimensions for memref.alloc`) when a
+/// function runs twice at consecutive positions with the same row count and another function is then called with
+/// exactly the next shape — e.g. the first `main` after a run of `hidden` speech frames in TTS.
 @available(macOS 27, iOS 27, tvOS 27, visionOS 27, *)
 actor LFM3AudioCoreAIBackbone: LFM3AudioLanguageModel {
     private static let stateNames = ["keyCache", "valueCache", "convStates"]
 
-    private let model: AIModel
+    private let models: [AIModel]
     private let prefill: InferenceFunction
     private let main: InferenceFunction
     private let hiddenFunction: InferenceFunction
@@ -38,6 +43,8 @@ actor LFM3AudioCoreAIBackbone: LFM3AudioLanguageModel {
         var options = SpecializationOptions(preferredComputeUnitKind: .gpu)
         options.expectFrequentReshapes = true
         let model = try await AIModel(contentsOf: bundle, options: options)
+        let prefillModel = try await AIModel(contentsOf: bundle, options: options)
+        let hiddenModel = try await AIModel(contentsOf: bundle, options: options)
         guard let descriptor = model.functionDescriptor(for: "main"), descriptor.inputNames.count >= 2,
             descriptor.inputNames[0] == "inputs_embeds",
             case .ndArray(let embeds) = descriptor.inputDescriptor(of: descriptor.inputNames[0]),
@@ -49,13 +56,13 @@ actor LFM3AudioCoreAIBackbone: LFM3AudioLanguageModel {
         else {
             throw LFM3AudioError.invalidModel("unexpected Core AI LM bundle contract")
         }
-        let prefill = try Self.function(model, "prefill")
+        let prefill = try Self.function(prefillModel, "prefill")
         let main = try Self.function(model, "main")
-        let hiddenFunction = try Self.function(model, "hidden")
+        let hiddenFunction = try Self.function(hiddenModel, "hidden")
         let keyCache = try Self.state(descriptor, "keyCache", cacheLength: cacheLength)
         let valueCache = try Self.state(descriptor, "valueCache", cacheLength: cacheLength)
         let convStates = try Self.state(descriptor, "convStates", cacheLength: cacheLength)
-        self.model = model
+        models = [model, prefillModel, hiddenModel]
         self.prefill = prefill
         self.main = main
         self.hiddenFunction = hiddenFunction
@@ -205,14 +212,17 @@ actor LFM3AudioCoreAIBackbone: LFM3AudioLanguageModel {
         return array
     }
 
+    /// Zero the whole buffer, row padding included (NDArray rows are padded to 64 bytes).
     private static func zero(_ array: inout NDArray) {
         let width: Int
         switch array.scalarType {
         case .float32, .int32: width = 4
         default: width = 2
         }
-        let bytes = array.shape.reduce(1, *) * width
-        array.mutableRawView().withUnsafeMutableBytes { pointer, _, _ in _ = memset(pointer, 0, bytes) }
+        array.mutableRawView().withUnsafeMutableBytes { pointer, shape, strides in
+            let elements = shape.count > 0 && strides.count > 0 ? shape[0] * strides[0] : 0
+            _ = memset(pointer, 0, max(elements, 1) * width)
+        }
     }
 }
 #endif
