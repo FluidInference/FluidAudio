@@ -112,7 +112,7 @@ final class LFM3AudioDepthDecoder {
     private let tables: Data
     private let sampling: LFM3AudioSpeechSampling
     private var row: [Float]
-    private var sorted: [Float]
+    private var selection: [Float]
 
     init(depthIn: MLModel, depthPass: MLModel, tables: Data, sampling: LFM3AudioSpeechSampling) throws {
         self.depthIn = depthIn
@@ -137,7 +137,7 @@ final class LFM3AudioDepthDecoder {
             throw LFM3AudioError.invalidModel("unexpected depth decoder shapes")
         }
         row = [Float](repeating: 0, count: C.audioVocab)
-        sorted = [Float](repeating: 0, count: C.audioVocab)
+        selection = [Float](repeating: 0, count: C.audioVocab)
     }
 
     /// Sample one frame's 12 codes from the LM final-norm hidden `[2048]`.
@@ -185,10 +185,12 @@ final class LFM3AudioDepthDecoder {
 
     static func isEndOfSpeech(_ codes: [Int32]) -> Bool { codes.contains(C.eosCode) }
 
-    /// The k-th largest of `values[0 ..< count]` (k is 1-based) by quickselect, reordering `values`. Exactly the
-    /// value a descending sort puts at index k - 1, without sorting all 2017 logits for the top-k threshold.
+    /// The k-th largest of `values[0 ..< count]` (k is 1-based, clamped to 1 ... count) by quickselect, reordering
+    /// `values` (no NaNs). Exactly the value a descending sort puts at index k - 1, without sorting all 2017 logits
+    /// for the top-k threshold.
     static func kthLargest(_ values: UnsafeMutablePointer<Float>, count: Int, k: Int) -> Float {
-        let target = k - 1
+        guard count > 0 else { return -.infinity }
+        let target = min(max(k, 1), count) - 1
         var lo = 0
         var hi = count - 1
         while lo < hi {
@@ -246,9 +248,10 @@ final class LFM3AudioDepthDecoder {
             }
             var threshold = -Float.infinity
             if topK > 0 && topK < v {
-                sorted.withUnsafeMutableBufferPointer { tmp in
+                selection.withUnsafeMutableBufferPointer { tmp in
                     guard let t = tmp.baseAddress else { return }
-                    t.update(from: s, count: v)
+                    // NaN logits rank below every number (they are skipped below), as in a descending sort
+                    for c in 0..<v { t[c] = s[c].isNaN ? -.infinity : s[c] }
                     threshold = Self.kthLargest(t, count: v, k: topK)
                 }
             }

@@ -40,9 +40,105 @@ actor LFM3AudioFrameQueue {
     }
 }
 
+/// Streaming overlap-add of LiquidCodec synthesis frames == HF `decode(streaming_cache)`: hop 320 over windowed
+/// 1280-sample frames, divided by the overlapped window² envelope; the first call drops 480 samples, every call
+/// holds back a 960-sample tail for the next one, and `finalize` drops the last 480. Buffers are allocated once.
+final class LFM3AudioOverlapAdd {
+    static let hop = 320
+    static let trim = 480
+    static let tail = 960
+    let maxRows: Int
+    private let n: Int
+    private let windowSquared: UnsafeMutablePointer<Float>
+    private let audio: UnsafeMutablePointer<Float>
+    private let envelope: UnsafeMutablePointer<Float>
+    private let audioTail: UnsafeMutablePointer<Float>
+    private let envelopeTail: UnsafeMutablePointer<Float>
+    private var started = false
+    private var hasTail = false
+
+    init(window: [Float], maxRows: Int) {
+        n = window.count
+        self.maxRows = maxRows
+        let length = max((maxRows - 1) * Self.hop + window.count, Self.tail)
+        func buffer(_ count: Int) -> UnsafeMutablePointer<Float> {
+            let p = UnsafeMutablePointer<Float>.allocate(capacity: count)
+            p.initialize(repeating: 0, count: count)
+            return p
+        }
+        let squared = buffer(window.count)
+        for (j, w) in window.enumerated() { squared[j] = w * w }
+        windowSquared = squared
+        audio = buffer(length)
+        envelope = buffer(length)
+        audioTail = buffer(Self.tail)
+        envelopeTail = buffer(Self.tail)
+    }
+
+    deinit {
+        for p in [windowSquared, audio, envelope, audioTail, envelopeTail] { p.deallocate() }
+    }
+
+    func reset() {
+        started = false
+        hasTail = false
+    }
+
+    /// Adds `rows` frames (`[rows, window.count]` fp32) and returns the samples that are complete. With `rows` 0 and
+    /// `finalize`, flushes the held-back tail; after the stream is finalized it returns no samples.
+    func add(_ frames: UnsafePointer<Float>, rows: Int, finalize: Bool) throws -> [Float] {
+        guard rows <= maxRows else {
+            throw LFM3AudioError.processingFailed("overlap-add of \(rows) rows (max \(maxRows))")
+        }
+        let hop = Self.hop
+        let tail = Self.tail
+        let length: Int
+        if rows > 0 {
+            length = (rows - 1) * hop + n
+            audio.update(repeating: 0, count: length)
+            envelope.update(repeating: 0, count: length)
+            for t in 0..<rows {  // frame by frame, as the scalar overlap-add
+                vDSP_vadd(audio + t * hop, 1, frames + t * n, 1, audio + t * hop, 1, vDSP_Length(n))
+                vDSP_vadd(envelope + t * hop, 1, windowSquared, 1, envelope + t * hop, 1, vDSP_Length(n))
+            }
+        } else {
+            guard finalize && started && hasTail else { return [] }
+            length = tail
+            audio.update(repeating: 0, count: tail)
+            envelope.update(repeating: 0, count: tail)
+        }
+        if hasTail {
+            for i in 0..<tail {
+                audio[i] += audioTail[i]
+                envelope[i] += envelopeTail[i]
+            }
+        }
+        var lo = 0
+        var hi = length
+        if !started {
+            lo = Self.trim
+            started = true
+        }
+        if finalize {
+            hi -= Self.trim
+            hasTail = false
+        } else {
+            audioTail.update(from: audio + hi - tail, count: tail)
+            envelopeTail.update(from: envelope + hi - tail, count: tail)
+            hasTail = true
+            hi -= tail
+        }
+        guard hi > lo else { return [] }
+        var out = [Float](repeating: 0, count: hi - lo)
+        vDSP_vdiv(envelope + lo, 1, audio + lo, 1, &out, 1, vDSP_Length(hi - lo))
+        return out
+    }
+}
+
 /// Streaming LiquidCodec decoder: `CodecDecoder-fp16` (functions f1 / f4 / f25 with explicit conv / K / V state)
-/// + the host fp32 synthesis head and hop-320 overlap-add with HF streaming trims. Speech frames (12.5 Hz) in,
-/// 24 kHz samples out. Runs in its own actor so audio is decoded (on the ANE) while the LM generates.
+/// + the host fp32 synthesis head and the streaming overlap-add. Speech frames (12.5 Hz) in, 24 kHz samples out.
+/// Runs in its own actor so audio is decoded (on the ANE) while the LM generates; one worker serves every utterance
+/// of a manager (`reset()` between them), so its buffers are allocated once.
 @available(macOS 15, iOS 18, tvOS 18, visionOS 2, *)
 actor LFM3AudioCodecWorker {
     private final class Function {
@@ -51,6 +147,8 @@ actor LFM3AudioCodecWorker {
         let outputs: [[String: MLMultiArray]]
         let providers: [LFM3AudioInputs]
         let options: [MLPredictionOptions]
+        /// The fifo mask stops changing once 29 rows are decoded; set when that steady mask is in `inputs`.
+        var steadyMask = false
 
         init(model: MLModel) throws {
             self.model = model
@@ -70,25 +168,8 @@ actor LFM3AudioCodecWorker {
         }
     }
 
-    fileprivate static let hop = 320
-    private static let trim = 480
-    fileprivate static let tail = 960
-
-    private let functions: [Int: Function]
-    private let head: LFM3AudioCodecHead
-    private let fsq: [Float]  // [2016, 4] FSQ latents per code
-    private var conv: MLMultiArray
-    private var k: MLMultiArray
-    private var v: MLMultiArray
-    private var flip = 0
-    private var decodedRows = 0
-    private var started = false
-    /// Host buffers of the synthesis head and the overlap-add, allocated once per worker (sized for the largest
-    /// call, F = 25 -> 150 rows) so a call allocates only its output.
+    /// Synthesis-head buffers, sized for the largest loaded function.
     private final class Scratch {
-        static let maxRows = 6 * 25
-        static let length = (maxRows - 1) * LFM3AudioCodecWorker.hop + LFM3AudioCodecHead.nFFT
-        let windowSquared: UnsafeMutablePointer<Float>
         let latents: UnsafeMutablePointer<Float>
         let projected: UnsafeMutablePointer<Float>
         let spectrum: UnsafeMutablePointer<Float>
@@ -96,22 +177,14 @@ actor LFM3AudioCodecWorker {
         let sine: UnsafeMutablePointer<Float>
         let cosine: UnsafeMutablePointer<Float>
         let frames: UnsafeMutablePointer<Float>
-        let audio: UnsafeMutablePointer<Float>
-        let envelope: UnsafeMutablePointer<Float>
-        let audioTail: UnsafeMutablePointer<Float>
-        let envelopeTail: UnsafeMutablePointer<Float>
 
-        init(window: [Float]) {
+        init(rows: Int) {
             func buffer(_ count: Int) -> UnsafeMutablePointer<Float> {
                 let p = UnsafeMutablePointer<Float>.allocate(capacity: count)
                 p.initialize(repeating: 0, count: count)
                 return p
             }
-            let rows = Self.maxRows
             let bins = LFM3AudioCodecHead.projection / 2
-            let squared = buffer(LFM3AudioCodecHead.nFFT)
-            for (j, w) in window.enumerated() { squared[j] = w * w }
-            windowSquared = squared
             latents = buffer(rows * LFM3AudioCodecHead.latent)
             projected = buffer(rows * LFM3AudioCodecHead.projection)
             spectrum = buffer(rows * LFM3AudioCodecHead.projection)
@@ -119,33 +192,42 @@ actor LFM3AudioCodecWorker {
             sine = buffer(bins)
             cosine = buffer(bins)
             frames = buffer(rows * LFM3AudioCodecHead.nFFT)
-            audio = buffer(Self.length)
-            envelope = buffer(Self.length)
-            audioTail = buffer(LFM3AudioCodecWorker.tail)
-            envelopeTail = buffer(LFM3AudioCodecWorker.tail)
         }
 
         deinit {
-            for p in [
-                windowSquared, latents, projected, spectrum, magnitude, sine, cosine, frames, audio, envelope,
-                audioTail, envelopeTail,
-            ] {
-                p.deallocate()
-            }
+            for p in [latents, projected, spectrum, magnitude, sine, cosine, frames] { p.deallocate() }
         }
     }
 
+    private static let maskFifo = 29
+
+    private let functions: [Int: Function]
+    private let head: LFM3AudioCodecHead
+    private let fsq: [Float]  // [2016, 4] FSQ latents per code
     private let scratch: Scratch
-    private var hasTail = false
+    private let overlapAdd: LFM3AudioOverlapAdd
+    private let zeroConv: MLMultiArray
+    private let zeroK: MLMultiArray
+    private let zeroV: MLMultiArray
+    private var conv: MLMultiArray
+    private var k: MLMultiArray
+    private var v: MLMultiArray
+    private var flip = 0
+    private var decodedRows = 0
 
     init(models: [Int: MLModel], head: LFM3AudioCodecHead) throws {
         let functions = try models.mapValues { try Function(model: $0) }
-        guard let any = functions[1] else { throw LFM3AudioError.modelNotFound("CodecDecoder function f1") }
+        guard let any = functions[1], let largest = functions.keys.max() else {
+            throw LFM3AudioError.modelNotFound("CodecDecoder function f1")
+        }
         self.functions = functions
         self.head = head
-        conv = try LFM3AudioArrays.float16(try LFM3AudioArrays.require(any.inputs, "conv").shape.map(\.intValue))
-        k = try LFM3AudioArrays.float16(try LFM3AudioArrays.require(any.inputs, "k").shape.map(\.intValue))
-        v = try LFM3AudioArrays.float16(try LFM3AudioArrays.require(any.inputs, "v").shape.map(\.intValue))
+        zeroConv = try LFM3AudioArrays.float16(try LFM3AudioArrays.require(any.inputs, "conv").shape.map(\.intValue))
+        zeroK = try LFM3AudioArrays.float16(try LFM3AudioArrays.require(any.inputs, "k").shape.map(\.intValue))
+        zeroV = try LFM3AudioArrays.float16(try LFM3AudioArrays.require(any.inputs, "v").shape.map(\.intValue))
+        conv = zeroConv
+        k = zeroK
+        v = zeroV
         // FSQ levels [8, 7, 6, 6]: digit d of code c = (c / basis[d]) % levels[d]; latent = (digit - L/2) / (L/2)
         let levels = [8, 7, 6, 6]
         let basis = [1, 8, 56, 336]
@@ -157,7 +239,20 @@ actor LFM3AudioCodecWorker {
             }
         }
         fsq = table
-        scratch = Scratch(window: head.window)
+        scratch = Scratch(rows: 6 * largest)
+        overlapAdd = LFM3AudioOverlapAdd(window: head.window, maxRows: 6 * largest)
+    }
+
+    /// Start a new utterance: zero codec state, rows decoded and the overlap-add.
+    func reset() {
+        for array in [zeroConv, zeroK, zeroV] { array.lfm3Float16.update(repeating: 0, count: array.count) }
+        conv = zeroConv
+        k = zeroK
+        v = zeroV
+        flip = 0
+        decodedRows = 0
+        for fn in functions.values { fn.steadyMask = false }
+        overlapAdd.reset()
     }
 
     /// Decode `frames` (12 codes each, no EOS frame) into new samples; `finalize` flushes the overlap tail.
@@ -170,7 +265,7 @@ actor LFM3AudioCodecWorker {
             out += try decode(Array(frames[t..<(t + size)]), finalize: finalize && t + size >= frames.count)
             t += size
         }
-        if finalize && frames.isEmpty { out += overlapAdd(rows: 0, finalize: true) }
+        if finalize && frames.isEmpty { out += try overlapAdd.add(scratch.frames, rows: 0, finalize: true) }
         return out
     }
 
@@ -185,9 +280,15 @@ actor LFM3AudioCodecWorker {
                 for d in 0..<4 { latents[i * 48 + q * 4 + d] = Float16(fsq[code * 4 + d]) }
             }
         }
-        let mask = LFM3AudioEncoderPlanner.fifoMask(previous: decodedRows, q: 6 * count, window: 30, fifo: 29)
-        let maskPointer = try LFM3AudioArrays.require(fn.inputs, "mask").lfm3Float16
-        for i in 0..<mask.count { maskPointer[i] = Float16(mask[i]) }
+        // fifoMask(previous:) only depends on min(previous, 29): write it until it reaches its steady value.
+        let steady = decodedRows >= Self.maskFifo
+        if !(steady && fn.steadyMask) {
+            let mask = LFM3AudioEncoderPlanner.fifoMask(
+                previous: decodedRows, q: 6 * count, window: 30, fifo: Self.maskFifo)
+            let maskPointer = try LFM3AudioArrays.require(fn.inputs, "mask").lfm3Float16
+            for i in 0..<mask.count { maskPointer[i] = Float16(mask[i]) }
+            fn.steadyMask = steady
+        }
         let provider = fn.providers[flip]
         provider.set(conv, for: "conv")
         provider.set(k, for: "k")
@@ -201,7 +302,7 @@ actor LFM3AudioCodecWorker {
         decodedRows += 6 * count
         let hidden = try LFM3AudioArrays.require(out, "hidden")
         synthesisFrames(hidden.lfm3Float16, rows: 6 * count)
-        return overlapAdd(rows: 6 * count, finalize: finalize)
+        return try overlapAdd.add(scratch.frames, rows: 6 * count, finalize: finalize)
     }
 
     /// hidden `[rows, 512]` fp16 -> windowed irfft frames `[rows, 1280]` fp32 in `scratch.frames`.
@@ -234,54 +335,6 @@ actor LFM3AudioCodecWorker {
         cblas_sgemm(
             CblasRowMajor, CblasNoTrans, CblasNoTrans, Int32(rows), Int32(n), Int32(projection), 1, b.spectrum,
             Int32(projection), head.basis, Int32(n), 0, b.frames, Int32(n))
-    }
-
-    /// Streaming overlap-add of the first `rows` synthesis frames == HF `decode(streaming_cache)`.
-    private func overlapAdd(rows: Int, finalize: Bool) -> [Float] {
-        let n = LFM3AudioCodecHead.nFFT
-        let hop = Self.hop
-        let tail = Self.tail
-        let b = scratch
-        let length: Int
-        if rows > 0 {
-            length = (rows - 1) * hop + n
-            b.audio.update(repeating: 0, count: length)
-            b.envelope.update(repeating: 0, count: length)
-            for t in 0..<rows {  // frame by frame, as the scalar overlap-add
-                vDSP_vadd(b.audio + t * hop, 1, b.frames + t * n, 1, b.audio + t * hop, 1, vDSP_Length(n))
-                vDSP_vadd(b.envelope + t * hop, 1, b.windowSquared, 1, b.envelope + t * hop, 1, vDSP_Length(n))
-            }
-        } else {
-            guard finalize && started else { return [] }
-            length = tail
-            b.audio.update(repeating: 0, count: tail)
-            b.envelope.update(repeating: 0, count: tail)
-        }
-        if hasTail {
-            for i in 0..<tail {
-                b.audio[i] += b.audioTail[i]
-                b.envelope[i] += b.envelopeTail[i]
-            }
-        }
-        var lo = 0
-        var hi = length
-        if !started {
-            lo = Self.trim
-            started = true
-        }
-        if finalize {
-            hi -= Self.trim
-            hasTail = false
-        } else {
-            b.audioTail.update(from: b.audio + hi - tail, count: tail)
-            b.envelopeTail.update(from: b.envelope + hi - tail, count: tail)
-            hasTail = true
-            hi -= tail
-        }
-        guard hi > lo else { return [] }
-        var out = [Float](repeating: 0, count: hi - lo)
-        vDSP_vdiv(b.envelope + lo, 1, b.audio + lo, 1, &out, 1, vDSP_Length(hi - lo))
-        return out
     }
 }
 #endif

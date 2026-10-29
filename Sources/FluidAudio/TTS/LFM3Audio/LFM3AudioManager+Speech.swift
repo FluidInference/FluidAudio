@@ -35,6 +35,8 @@ final class LFM3AudioSpeechRuntime {
     let coreMLDepth: LFM3AudioDepthDecoder?
     let coreAIDepth: (any LFM3AudioDepthModel)?
     let codebook: LFM3AudioCodebookEmbedding
+    /// One codec worker for every utterance (reset before each), so its buffers are allocated once.
+    let codecWorker: LFM3AudioCodecWorker
     var history: LFM3AudioPresenceHistory
     /// Reused per-frame scratch for the Gumbel uniforms.
     var uniforms: [Float] = []
@@ -53,6 +55,7 @@ final class LFM3AudioSpeechRuntime {
         }
         self.coreAIDepth = coreAIDepth
         codebook = LFM3AudioCodebookEmbedding(table: models.codebook)
+        codecWorker = try LFM3AudioCodecWorker(models: models.codec, head: models.codecHead)
         history = LFM3AudioPresenceHistory(window: sampling.window)
     }
 
@@ -88,7 +91,8 @@ extension LFM3AudioManager {
         typealias T = LFM3AudioConfig.Token
         let start = Date()
         let prompt = tokenizer.encode(LFM3AudioConfig.ttsPrompt(text: text, language: language, voice: voice.rawValue))
-        let worker = try LFM3AudioCodecWorker(models: speech.models.codec, head: speech.models.codecHead)
+        let worker = speech.codecWorker
+        await worker.reset()
         let queue = LFM3AudioFrameQueue()
         let decoder = Task.detached { () async throws -> (samples: [Float], firstAudio: Date?) in
             var samples: [Float] = []
@@ -163,7 +167,7 @@ extension LFM3AudioManager {
             }
         } catch {
             await queue.finish()
-            decoder.cancel()
+            _ = try? await decoder.value  // drained before the worker serves the next utterance
             throw error
         }
         await queue.finish()
