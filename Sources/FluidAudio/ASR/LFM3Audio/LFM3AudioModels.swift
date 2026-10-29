@@ -2,6 +2,10 @@
 @preconcurrency import CoreML
 import Foundation
 
+#if canImport(CoreAI)
+import CoreAI
+#endif
+
 /// Compute units per LFM3-Audio component. The defaults are the fastest measured on Apple silicon (M5 Pro):
 /// the LM, offline encoder and depth decoder on the GPU, the LiveASR encoder chunk and the codec on the ANE.
 public struct LFM3AudioComputeUnits: Sendable {
@@ -78,8 +82,10 @@ public struct LFM3AudioModels: Sendable {
         let variant = downloadVariant(backend: backend, speech: wantsSpeech)
         let files = names.requiredModels(variant: variant)
         if backend == .coreAI {
+            let coreAIVariant: String? = wantsSpeech ? nil : "recognition"
             _ = try await ModelHub.loadWithRecovery(
-                .lfm3AudioCoreAI, directory: root, requiredFiles: ModelNames.LFM3Audio.coreAIRequiredModels,
+                .lfm3AudioCoreAI, directory: root,
+                requiredFiles: names.coreAIRequiredModels(variant: coreAIVariant), variant: coreAIVariant,
                 progressHandler: progressHandler
             ) { () }
         }
@@ -114,6 +120,7 @@ public struct LFM3AudioModels: Sendable {
         }
 
         let languageModel: LanguageModel
+        var coreAIDepth: URL?
         switch backend {
         case .coreML:
             var stages: [String: MLModel] = [:]
@@ -137,6 +144,13 @@ public struct LFM3AudioModels: Sendable {
                 throw LFM3AudioError.modelNotFound(names.coreAIBundleFile(names.coreAILanguageModel))
             }
             languageModel = .coreAI(bundle: bundle)
+            let depth = base.appendingPathComponent(names.coreAIBundleFile(names.coreAIDepthDecoder))
+            if includeSpeech && speechAvailable {
+                guard FileManager.default.fileExists(atPath: depth.path) else {
+                    throw LFM3AudioError.modelNotFound(names.coreAIBundleFile(names.coreAIDepthDecoder))
+                }
+                coreAIDepth = depth
+            }
         }
 
         var encoder: [Int: MLModel] = [:]
@@ -150,7 +164,9 @@ public struct LFM3AudioModels: Sendable {
 
         #if TTS
         let speech =
-            includeSpeech ? try LFM3AudioSpeechModels.load(from: directory, computeUnits: computeUnits) : nil
+            includeSpeech
+            ? try LFM3AudioSpeechModels.load(from: directory, coreAIDepth: coreAIDepth, computeUnits: computeUnits)
+            : nil
         logger.info("Loaded LFM3-Audio-2B (\(backend.rawValue), speech: \(speech != nil))")
         return LFM3AudioModels(
             backend: backend, includesSpeech: speech != nil, config: config, embedding: embedding,
@@ -160,6 +176,25 @@ public struct LFM3AudioModels: Sendable {
         return LFM3AudioModels(
             backend: backend, includesSpeech: false, config: config, embedding: embedding,
             tokenizerURL: tokenizerURL, languageModel: languageModel, encoder: encoder)
+        #endif
+    }
+
+    /// Delete the Core AI specializations of the LFM3-Audio bundles. The first Core AI load specializes the LM for
+    /// the GPU and caches it (~3.3 GB); the system also purges these entries under storage pressure or when the
+    /// bundles change. The next Core AI load specializes again.
+    public static func clearCoreAICache(coreAIDirectory: URL? = nil) throws {
+        #if canImport(CoreAI)
+        if #available(macOS 27, iOS 27, tvOS 27, visionOS 27, *) {
+            let names = ModelNames.LFM3Audio.self
+            let base =
+                coreAIDirectory
+                ?? modelsRootDirectory().appendingPathComponent(Repo.lfm3AudioCoreAI.folderName, isDirectory: true)
+            for name in [names.coreAILanguageModel, names.coreAIDepthDecoder] {
+                let bundle = base.appendingPathComponent(names.coreAIBundleFile(name))
+                guard FileManager.default.fileExists(atPath: bundle.path) else { continue }
+                try AIModelCache.default.deleteEntries(for: bundle)
+            }
+        }
         #endif
     }
 

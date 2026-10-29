@@ -26,18 +26,35 @@ public struct LFM3AudioSynthesis: Sendable {
     public var rtfx: Double { processingTime > 0 ? duration / processingTime : 0 }
 }
 
-/// Speech components owned by the manager (one depth decoder; a codec worker per utterance).
+/// Speech components owned by the manager: one depth decoder (Core ML per-pass, or the Core AI fused frame), the
+/// presence history, and the codebook table; a codec worker is made per utterance.
 @available(macOS 15, iOS 18, tvOS 18, visionOS 2, *)
 final class LFM3AudioSpeechRuntime {
     let models: LFM3AudioSpeechModels
-    let depth: LFM3AudioDepthDecoder
+    let sampling = LFM3AudioSpeechSampling()
+    let coreMLDepth: LFM3AudioDepthDecoder?
+    let coreAIDepth: (any LFM3AudioDepthModel)?
     let codebook: LFM3AudioCodebookEmbedding
+    var history: LFM3AudioPresenceHistory
 
-    init(models: LFM3AudioSpeechModels) throws {
+    init(models: LFM3AudioSpeechModels, coreAIDepth: (any LFM3AudioDepthModel)?) throws {
         self.models = models
-        depth = try LFM3AudioDepthDecoder(models: models, sampling: LFM3AudioSpeechSampling())
+        switch models.depth {
+        case .coreML(let depthIn, let depthPass, let tables):
+            coreMLDepth = try LFM3AudioDepthDecoder(
+                depthIn: depthIn, depthPass: depthPass, tables: tables, sampling: sampling)
+        case .coreAI:
+            coreMLDepth = nil
+        }
+        guard coreMLDepth != nil || coreAIDepth != nil else {
+            throw LFM3AudioError.invalidModel("no depth decoder loaded")
+        }
+        self.coreAIDepth = coreAIDepth
         codebook = LFM3AudioCodebookEmbedding(table: models.codebook)
+        history = LFM3AudioPresenceHistory(window: sampling.window)
     }
+
+    func reset() { history = LFM3AudioPresenceHistory(window: sampling.window) }
 }
 
 @available(macOS 15, iOS 18, tvOS 18, visionOS 2, *)
@@ -97,7 +114,7 @@ extension LFM3AudioManager {
         var depthSeconds = 0.0
         do {
             try await languageModel.reset()
-            speech.depth.reset()
+            speech.reset()
             var speaking = true  // the prompt ends with <|audio_start|>
             var result = try await languageModel.feed(.ids(prompt), want: .hidden)
             // HF mode machine for batch 1: audio frames until the EOS frame, then text until an end token.
@@ -105,14 +122,23 @@ extension LFM3AudioManager {
                 let next: LFM3AudioRows
                 if speaking {
                     let depthStart = Date()
-                    var codes = try speech.depth.frame(result.hidden, random: &random)
+                    let draw = LFM3AudioDepthFrame.draw(&random)
+                    var codes: [Int32]
+                    if let coreAIDepth = speech.coreAIDepth {
+                        codes = try await coreAIDepth.frame(
+                            hidden: result.hidden, frame: draw, present: speech.history.mask())
+                    } else if let coreMLDepth = speech.coreMLDepth {
+                        codes = try coreMLDepth.frame(result.hidden, frame: draw, history: speech.history)
+                    } else {
+                        throw LFM3AudioError.speechNotLoaded
+                    }
                     depthSeconds += Date().timeIntervalSince(depthStart)
                     if LFM3AudioDepthDecoder.isEndOfSpeech(codes) {
                         codes = [Int32](
                             repeating: LFM3AudioSpeechConfig.eosCode, count: LFM3AudioSpeechConfig.codebooks)
                         speaking = false
                     } else {
-                        speech.depth.record(codes)
+                        speech.history.push(codes)
                         frames += 1
                         await queue.push(codes)
                     }

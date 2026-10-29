@@ -39,11 +39,62 @@ struct LFM3AudioPresenceHistory {
         }
         for k in 0..<LFM3AudioSpeechConfig.codebooks { counts[k * v + Int(codes[k])] += 1 }
     }
+
+    /// `[12, 2017]` presence mask (1 = code seen in the window) for the fused `depth_frame` graph.
+    func mask() -> [Float16] { counts.map { $0 > 0 ? 1 : 0 } }
 }
 
-/// MaskGIT depth decoder, per-pass: `depth_in` once per frame, then 3 x `depth_pass` (fp16) revealing 4 codebooks
-/// each in a random order, with host fp32 sampling (presence penalty -> temperature -> top-k -> Gumbel-max).
-/// 99.6% of codes identical to HF on 319 golden frames.
+/// One frame's randomness, drawn the same way for every depth backend: the MaskGIT reveal order (a random
+/// permutation of the 12 codebooks, 4 per pass) and Gumbel(0, 1) noise for all 12 x 2017 logits.
+struct LFM3AudioDepthFrame: Sendable {
+    let order: [Int]
+    /// fp32 Gumbel noise rounded to fp16 (as the graph input).
+    let noise: [Float16]
+
+    static func draw(_ random: inout LFM3AudioRandom) -> LFM3AudioDepthFrame {
+        let c = LFM3AudioSpeechConfig.self
+        var order = Array(0..<c.codebooks)
+        for i in stride(from: c.codebooks - 1, to: 0, by: -1) {
+            order.swapAt(i, Int(random.next() % UInt64(i + 1)))
+        }
+        // Gumbel(0, 1) = -log(-log(u)), u with 24-bit resolution (two draws per UInt64)
+        let n = c.codebooks * c.audioVocab
+        var u = [Float](repeating: 0, count: n)
+        var count = Int32(n)
+        u.withUnsafeMutableBufferPointer { buffer in
+            guard let p = buffer.baseAddress else { return }
+            var i = 0
+            while i < n {
+                let r = random.next()
+                p[i] = (Float(r >> 40) + 0.5) * (1.0 / 16_777_216.0)
+                if i + 1 < n { p[i + 1] = (Float((r >> 16) & 0xFF_FFFF) + 0.5) * (1.0 / 16_777_216.0) }
+                i += 2
+            }
+            var minusOne: Float = -1
+            vvlogf(p, p, &count)
+            vDSP_vsmul(p, 1, &minusOne, p, 1, vDSP_Length(n))
+            vvlogf(p, p, &count)
+            vDSP_vsmul(p, 1, &minusOne, p, 1, vDSP_Length(n))
+        }
+        return LFM3AudioDepthFrame(order: order, noise: u.map { Float16($0) })
+    }
+
+    /// `[3, 12]` one-hot: pass p reveals codebooks `order[4p ..< 4p + 4]`.
+    var schedule: [Float16] {
+        var s = [Float16](repeating: 0, count: 3 * LFM3AudioSpeechConfig.codebooks)
+        for (i, k) in order.enumerated() { s[(i / 4) * LFM3AudioSpeechConfig.codebooks + k] = 1 }
+        return s
+    }
+}
+
+/// A depth decoder backend: one speech frame's 12 codes from the LM final-norm hidden.
+protocol LFM3AudioDepthModel: Actor {
+    func frame(hidden: [Float16], frame: LFM3AudioDepthFrame, present: [Float16]) async throws -> [Int32]
+}
+
+/// MaskGIT depth decoder on Core ML, per-pass: `depth_in` once per frame, then 3 x `depth_pass` (fp16) revealing
+/// 4 codebooks each in the frame's order, with host fp32 sampling (presence penalty -> temperature -> top-k ->
+/// Gumbel-max). 99.6% of codes identical to HF on 319 golden frames.
 @available(macOS 15, iOS 18, tvOS 18, visionOS 2, *)
 final class LFM3AudioDepthDecoder {
     private typealias C = LFM3AudioSpeechConfig
@@ -59,17 +110,14 @@ final class LFM3AudioDepthDecoder {
     private let logits: MLMultiArray  // [1, 12, 2017] depth_pass output
     private let tables: Data
     private let sampling: LFM3AudioSpeechSampling
-    private(set) var history: LFM3AudioPresenceHistory
-    private var noise: [Float]
     private var row: [Float]
     private var sorted: [Float]
 
-    init(models: LFM3AudioSpeechModels, sampling: LFM3AudioSpeechSampling) throws {
-        depthIn = models.depthIn
-        depthPass = models.depthPass
-        tables = models.depthTables
+    init(depthIn: MLModel, depthPass: MLModel, tables: Data, sampling: LFM3AudioSpeechSampling) throws {
+        self.depthIn = depthIn
+        self.depthPass = depthPass
+        self.tables = tables
         self.sampling = sampling
-        history = LFM3AudioPresenceHistory(window: sampling.window)
         let inArrays = try LFM3AudioArrays.zeroInputs(depthIn.modelDescription)
         hidden = try LFM3AudioArrays.require(inArrays, "h")
         inInputs = LFM3AudioInputs(inArrays)
@@ -87,25 +135,19 @@ final class LFM3AudioDepthDecoder {
         else {
             throw LFM3AudioError.invalidModel("unexpected depth decoder shapes")
         }
-        noise = [Float](repeating: 0, count: C.codebooks * C.audioVocab)
         row = [Float](repeating: 0, count: C.audioVocab)
         sorted = [Float](repeating: 0, count: C.audioVocab)
     }
 
-    func reset() { history = LFM3AudioPresenceHistory(window: sampling.window) }
-
-    func record(_ codes: [Int32]) { history.push(codes) }
-
     /// Sample one frame's 12 codes from the LM final-norm hidden `[2048]`.
-    func frame(_ lmHidden: [Float16], random: inout LFM3AudioRandom) throws -> [Int32] {
+    func frame(
+        _ lmHidden: [Float16], frame: LFM3AudioDepthFrame, history: LFM3AudioPresenceHistory
+    ) throws
+        -> [Int32]
+    {
         guard lmHidden.count == LFM3AudioConfig.hiddenSize else {
             throw LFM3AudioError.processingFailed("depth decoder hidden size \(lmHidden.count)")
         }
-        var order = Array(0..<C.codebooks)
-        for i in stride(from: C.codebooks - 1, to: 0, by: -1) {
-            order.swapAt(i, Int(random.next() % UInt64(i + 1)))
-        }
-        fillGumbel(&random)
         lmHidden.withUnsafeBufferPointer { src in
             guard let base = src.baseAddress else { return }
             hidden.lfm3Float16.update(from: base, count: src.count)
@@ -131,8 +173,9 @@ final class LFM3AudioDepthDecoder {
             }
             _ = try depthPass.prediction(from: passInputs, options: passOptions)
             for i in (4 * pass)..<(4 * pass + 4) {
-                let k = order[i]
-                codes[k] = sample(logitPointer + k * C.audioVocab, codebook: k)
+                let k = frame.order[i]
+                codes[k] = sample(
+                    logitPointer + k * C.audioVocab, codebook: k, noise: frame.noise, counts: history.counts)
                 revealed[k] = true
             }
         }
@@ -143,35 +186,15 @@ final class LFM3AudioDepthDecoder {
 
     // MARK: - Private
 
-    /// Gumbel(0, 1) = -log(-log(u)) for all 12 x 2017 logits, u with 24-bit resolution (two draws per UInt64).
-    private func fillGumbel(_ random: inout LFM3AudioRandom) {
-        let n = noise.count
-        var count = Int32(n)
-        noise.withUnsafeMutableBufferPointer { buffer in
-            guard let p = buffer.baseAddress else { return }
-            var i = 0
-            while i < n {
-                let r = random.next()
-                p[i] = (Float(r >> 40) + 0.5) * (1.0 / 16_777_216.0)
-                if i + 1 < n { p[i + 1] = (Float((r >> 16) & 0xFF_FFFF) + 0.5) * (1.0 / 16_777_216.0) }
-                i += 2
-            }
-            var minusOne: Float = -1
-            vvlogf(p, p, &count)
-            vDSP_vsmul(p, 1, &minusOne, p, 1, vDSP_Length(n))
-            vvlogf(p, p, &count)
-            vDSP_vsmul(p, 1, &minusOne, p, 1, vDSP_Length(n))
-        }
-    }
-
     /// HF order: presence penalty -> temperature -> top-k -> Gumbel-max (fp32 on the host).
-    private func sample(_ logits: UnsafePointer<Float16>, codebook k: Int) -> Int32 {
+    private func sample(
+        _ logits: UnsafePointer<Float16>, codebook k: Int, noise: [Float16], counts: [Int32]
+    ) -> Int32 {
         let v = C.audioVocab
         let penalty = sampling.penalty
         let greedy = sampling.temperature == 0
         let inverseTemperature = greedy ? 1 : 1 / sampling.temperature
         let topK = sampling.topK
-        let counts = history.counts
         return row.withUnsafeMutableBufferPointer { rowBuffer -> Int32 in
             guard let s = rowBuffer.baseAddress else { return 0 }
             counts.withUnsafeBufferPointer { countBuffer in
@@ -202,7 +225,7 @@ final class LFM3AudioDepthDecoder {
                 var best = -Float.infinity
                 var index = 0
                 for c in 0..<v where s[c] >= threshold {
-                    let value = s[c] + Float(Float16(nz[c]))
+                    let value = s[c] + Float(nz[c])
                     if value > best {
                         best = value
                         index = c

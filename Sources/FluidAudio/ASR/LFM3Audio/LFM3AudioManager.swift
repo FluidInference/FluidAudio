@@ -72,7 +72,15 @@ public actor LFM3AudioManager {
         encoder = try LFM3AudioCoreMLEncoder(models: models.encoder)
         livePrompt = tokenizer.encode(LFM3AudioConfig.livePrompt)
         #if TTS
-        speech = try models.speech.map { try LFM3AudioSpeechRuntime(models: $0) }
+        if let speechModels = models.speech {
+            var coreAIDepth: (any LFM3AudioDepthModel)?
+            if case .coreAI(let bundle) = speechModels.depth {
+                coreAIDepth = try await Self.makeCoreAIDepth(bundle: bundle)
+            }
+            speech = try LFM3AudioSpeechRuntime(models: speechModels, coreAIDepth: coreAIDepth)
+        } else {
+            speech = nil
+        }
         #endif
     }
 
@@ -247,6 +255,18 @@ public actor LFM3AudioManager {
     }
 
     // MARK: - Backends
+
+    #if TTS
+    private static func makeCoreAIDepth(bundle: URL) async throws -> any LFM3AudioDepthModel {
+        #if canImport(CoreAI)
+        if #available(macOS 27, iOS 27, tvOS 27, visionOS 27, *) {
+            return try await LFM3AudioCoreAIDepthDecoder(bundle: bundle, sampling: LFM3AudioSpeechSampling())
+        }
+        #endif
+        throw LFM3AudioError.unsupportedPlatform(
+            "The LFM3-Audio Core AI backend needs macOS 27 / iOS 27 (Core AI); use .coreML")
+    }
+    #endif
 
     private static func makeCoreAIBackbone(
         bundle: URL, embedding: LFM3AudioEmbeddingTable

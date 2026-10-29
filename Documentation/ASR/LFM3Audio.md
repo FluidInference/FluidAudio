@@ -22,9 +22,11 @@ Requested in [#49](https://github.com/FluidInference/FluidAudio/issues/49#issuec
 | Host tables, tokenizer | `assets/*` | fp16 / fp32 | CPU |
 
 ASR downloads ~2.5 GB; TTS adds ~0.4 GB (`includeSpeech: false` skips it). The Core AI backend downloads the Core AI
-LM bundle (`coreai/LFM3-Audio-u8b32-f16L20-23.aimodel`, 2.16 GB: uint8 block 32, decoder layers 20-23 fp16) instead
-of the Core ML LM files and keeps the encoder, depth decoder and codec on Core ML (the Neural Engine is not
-available to Core AI on macOS 27.0). Plain int8 Core AI bundles pass ASR but flip too many TTS speech codes.
+LM bundle (`coreai/LFM3-Audio-u8b32-f16L20-23.aimodel`, 2.16 GB: uint8 block 32, decoder layers 20-23 fp16) and,
+for TTS, the fused depth decoder (`coreai/DepthDecoder-fp16-gpu.aimodel`: 3 MaskGIT passes + sampling in one
+`depth_frame` call per frame) instead of the Core ML LM and depth files. The encoder and codec stay on Core ML (the
+Neural Engine is not available to Core AI on macOS 27.0). Plain int8 Core AI bundles pass ASR but flip too many TTS
+speech codes.
 
 The Core AI LM loads one `AIModel` per entrypoint (`prefill`, `main`, `hidden`), all bound to the same states: with
 one shared `AIModel`, macOS 27.0 aborts in `GPUMemrefOps` ("Failed to resolve dynamic dimensions for memref.alloc")
@@ -96,11 +98,12 @@ Apple M5 Pro (24 GB), macOS 27.0, release build; wall time includes warm-up afte
 |---|---|---|---|
 | Offline ASR | LibriSpeech test-clean, first 100 utterances (901 s) | WER 1.32%, RTFx 18.4; 100/100 transcripts identical to the original model (HF fp32, greedy) | WER 1.32%, RTFx 24.6; 98/100 identical |
 | LiveASR (160 ms pieces) | LibriSpeech test-clean, first 20 utterances | WER 1.46%, RTFx 10.4 | WER 1.46%, RTFx 13.3 |
-| TTS | 20 phrases, ~72 s of speech | RTFx 4.48, first audio 37 ms (median), Parakeet round-trip WER 2.5% | RTFx 4.28, first audio 37 ms, round-trip WER 2.5% |
+| TTS | 20 phrases, ~72 s of speech | RTFx 4.3-4.5 (across runs), first audio 37 ms (median), Parakeet round-trip WER 2.5% | RTFx 5.07 (Core AI depth decoder), first audio 37 ms, round-trip WER 2.5% |
 
 Core ML per speech frame: LM 9.4 ms + depth decoder 4.9 ms (GPU), codec in parallel on the ANE. ASR peak memory
 footprint: 1.9 GB on both backends. The first Core AI load specializes the graph and caches it (~3.3 GB under
-`~/Library/Caches/coreai-cache`).
+`~/Library/Caches/coreai-cache`); the system purges it under storage pressure or when the bundle changes, and
+`LFM3AudioModels.clearCoreAICache()` deletes it on demand.
 
 ## License
 

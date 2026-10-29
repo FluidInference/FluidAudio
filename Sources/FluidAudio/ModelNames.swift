@@ -699,30 +699,40 @@ public enum ModelNames {
         ]
         /// ASR and LiveASR.
         public static let recognitionModels = languageModels.union(sharedRecognitionModels)
-        /// TTS on top of recognition.
-        public static let speechModels: Set<String> = [
-            compiledModelFile(depthDecoder), compiledModelFile(codec), codebookFile, depthTablesFile, codecHeadFile,
-        ]
+        /// Codec + speech-frame tables (both backends).
+        public static let speechCodecModels: Set<String> = [compiledModelFile(codec), codebookFile, codecHeadFile]
+        /// TTS on top of recognition (Core ML depth decoder).
+        public static let speechModels = speechCodecModels.union([compiledModelFile(depthDecoder), depthTablesFile])
         public static let requiredModels = recognitionModels.union(speechModels)
 
         /// Download set per variant (`ModelHub` fetches exactly this set): `nil` = everything, `"recognition"` =
-        /// Core ML ASR / LiveASR, `"coreai"` = shared files + speech for the Core AI LM, `"coreai-recognition"`.
+        /// Core ML ASR / LiveASR, `"coreai"` = encoder, tables and codec for the Core AI backend (its LM and depth
+        /// decoder come from the Core AI repo), `"coreai-recognition"`.
         public static func requiredModels(variant: String?) -> Set<String> {
             switch variant {
             case "recognition": return recognitionModels
-            case "coreai": return sharedRecognitionModels.union(speechModels)
+            case "coreai": return sharedRecognitionModels.union(speechCodecModels)
             case "coreai-recognition": return sharedRecognitionModels
             default: return requiredModels
             }
         }
 
         /// Core AI repo (`FluidInference/lfm3-audio-2b-coreai`): the LM as a Core AI bundle in `coreai/`
-        /// (`inputs_embeds`; entrypoints prefill / main / hidden; uint8 block 32, decoder layers 20-23 fp16).
+        /// (`inputs_embeds`; entrypoints prefill / main / hidden; uint8 block 32, decoder layers 20-23 fp16) and the
+        /// depth decoder (fused `depth_frame`: 3 MaskGIT passes + sampling in the graph).
         public static let coreAILanguageModel = "LFM3-Audio-u8b32-f16L20-23"
+        public static let coreAIDepthDecoder = "DepthDecoder-fp16-gpu"
         public static func coreAIBundleFile(_ name: String) -> String { "coreai/" + name + ".aimodel" }
-        /// The bundle's files (listed so a partial download is never taken for a complete bundle).
-        public static let coreAIRequiredModels: Set<String> = Set(
-            ["main.mlirb", "main.hash", "metadata.json"].map { coreAIBundleFile(coreAILanguageModel) + "/" + $0 })
+        /// A bundle's files (listed so a partial download is never taken for a complete bundle).
+        public static func coreAIBundleFiles(_ name: String) -> Set<String> {
+            Set(["main.mlirb", "main.hash", "metadata.json"].map { coreAIBundleFile(name) + "/" + $0 })
+        }
+        public static let coreAIRequiredModels = coreAIBundleFiles(coreAILanguageModel).union(
+            coreAIBundleFiles(coreAIDepthDecoder))
+        /// Core AI repo download set: `"recognition"` = the LM only, otherwise LM + depth decoder.
+        public static func coreAIRequiredModels(variant: String?) -> Set<String> {
+            variant == "recognition" ? coreAIBundleFiles(coreAILanguageModel) : coreAIRequiredModels
+        }
     }
 
     public enum SenseVoice {
@@ -2010,7 +2020,7 @@ public enum ModelNames {
         case .lfm3Audio:
             return ModelNames.LFM3Audio.requiredModels(variant: variant)
         case .lfm3AudioCoreAI:
-            return ModelNames.LFM3Audio.coreAIRequiredModels
+            return ModelNames.LFM3Audio.coreAIRequiredModels(variant: variant)
         case .campPlus:
             return ModelNames.CampPlus.requiredModels
         case .cuaS1Forms:

@@ -30,12 +30,18 @@ final class LFM3AudioTests: XCTestCase {
         }
         XCTAssertEqual(files(.coreML, true), names.requiredModels)
         XCTAssertEqual(files(.coreML, false), names.recognitionModels)
-        // The Core AI backend never downloads the Core ML LM.
+        // The Core AI backend never downloads the Core ML LM or the Core ML depth decoder.
         XCTAssertTrue(files(.coreAI, true).isDisjoint(with: names.languageModels))
+        XCTAssertEqual(files(.coreAI, true), names.sharedRecognitionModels.union(names.speechCodecModels))
+        XCTAssertFalse(files(.coreAI, true).contains(names.compiledModelFile(names.depthDecoder)))
         XCTAssertEqual(files(.coreAI, false), names.sharedRecognitionModels)
-        XCTAssertTrue(files(.coreAI, true).isSuperset(of: names.speechModels))
-        XCTAssertTrue(
-            names.coreAIRequiredModels.allSatisfy { $0.hasPrefix("coreai/LFM3-Audio-u8b32-f16L20-23.aimodel/") })
+        // Core AI repo: LM only for recognition, LM + fused depth decoder with speech.
+        let lm = names.coreAIBundleFiles(names.coreAILanguageModel)
+        XCTAssertEqual(ModelNames.getRequiredModelNames(for: .lfm3AudioCoreAI, variant: "recognition"), lm)
+        XCTAssertEqual(
+            ModelNames.getRequiredModelNames(for: .lfm3AudioCoreAI, variant: nil),
+            lm.union(names.coreAIBundleFiles(names.coreAIDepthDecoder)))
+        XCTAssertTrue(lm.allSatisfy { $0.hasPrefix("coreai/LFM3-Audio-u8b32-f16L20-23.aimodel/") })
     }
 
     // MARK: - Prompts

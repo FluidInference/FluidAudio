@@ -60,16 +60,23 @@ struct LFM3AudioCodecHead: Sendable {
 /// Loaded TTS components.
 @available(macOS 15, iOS 18, tvOS 18, visionOS 2, *)
 struct LFM3AudioSpeechModels: Sendable {
-    let depthIn: MLModel
-    let depthPass: MLModel
+    enum Depth: Sendable {
+        /// Core ML per-pass functions + the `[12, 2017, 1024]` code embeddings and `[1024]` mask embedding (fp16).
+        case coreML(depthIn: MLModel, depthPass: MLModel, tables: Data)
+        /// Core AI bundle with the fused `depth_frame` function, loaded by the manager (macOS 27 / iOS 27).
+        case coreAI(bundle: URL)
+    }
+
+    let depth: Depth
     let codec: [Int: MLModel]
-    /// `[12, 2017, 1024]` per-codebook code embeddings + the `[1024]` mask embedding (fp16).
-    let depthTables: Data
     /// `[24204, 2048]` fp16: LM input embedding of each (codebook, code).
     let codebook: Data
     let codecHead: LFM3AudioCodecHead
 
-    static func load(from directory: URL, computeUnits: LFM3AudioComputeUnits) throws -> LFM3AudioSpeechModels {
+    /// - Parameter coreAIDepth: Core AI depth bundle; when set the Core ML depth decoder is not loaded.
+    static func load(
+        from directory: URL, coreAIDepth: URL?, computeUnits: LFM3AudioComputeUnits
+    ) throws -> LFM3AudioSpeechModels {
         let names = ModelNames.LFM3Audio.self
         let c = LFM3AudioSpeechConfig.self
         var codec: [Int: MLModel] = [:]
@@ -77,15 +84,21 @@ struct LFM3AudioSpeechModels: Sendable {
             codec[frames] = try LFM3AudioModels.loadModel(
                 names.codec, from: directory, function: "f\(frames)", units: computeUnits.codec)
         }
+        let depth: Depth
+        if let coreAIDepth {
+            depth = .coreAI(bundle: coreAIDepth)
+        } else {
+            depth = .coreML(
+                depthIn: try LFM3AudioModels.loadModel(
+                    names.depthDecoder, from: directory, function: "depth_in", units: computeUnits.depthDecoder),
+                depthPass: try LFM3AudioModels.loadModel(
+                    names.depthDecoder, from: directory, function: "depth_pass", units: computeUnits.depthDecoder),
+                tables: try LFM3AudioTables.mapped(
+                    directory.appendingPathComponent(names.depthTablesFile),
+                    expectedBytes: (c.codebookRows * c.depthHidden + c.depthHidden) * 2))
+        }
         return LFM3AudioSpeechModels(
-            depthIn: try LFM3AudioModels.loadModel(
-                names.depthDecoder, from: directory, function: "depth_in", units: computeUnits.depthDecoder),
-            depthPass: try LFM3AudioModels.loadModel(
-                names.depthDecoder, from: directory, function: "depth_pass", units: computeUnits.depthDecoder),
-            codec: codec,
-            depthTables: try LFM3AudioTables.mapped(
-                directory.appendingPathComponent(names.depthTablesFile),
-                expectedBytes: (c.codebookRows * c.depthHidden + c.depthHidden) * 2),
+            depth: depth, codec: codec,
             codebook: try LFM3AudioTables.mapped(
                 directory.appendingPathComponent(names.codebookFile),
                 expectedBytes: c.codebookRows * LFM3AudioConfig.hiddenSize * 2),
