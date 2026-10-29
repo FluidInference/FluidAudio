@@ -70,8 +70,13 @@ final class Phonon25Tests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: absent.path))
         XCTAssertThrowsError(
             try AsrModels.loadLocal(from: absent, version: .phonon25, encoderComputeUnits: .cpuAndNeuralEngine)
-        ) {
-            XCTAssertTrue($0.localizedDescription.contains("ANE encoder parity"))
+        ) { error in
+            if #available(macOS 15, iOS 18, tvOS 18, *) {
+                XCTAssertTrue(error.localizedDescription.contains("ANE encoder parity"))
+            } else {
+                // Local loading validates the platform before placement or file access.
+                XCTAssertTrue(error.localizedDescription.contains("requires iOS 18 / macOS 15"))
+            }
         }
     }
 
