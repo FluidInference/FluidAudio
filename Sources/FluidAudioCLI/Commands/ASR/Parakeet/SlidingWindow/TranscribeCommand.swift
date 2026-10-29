@@ -305,6 +305,8 @@ enum TranscribeCommand {
                         parsed.modelVersion = .ultra
                     case "phonon2", "phonon-2":
                         parsed.modelVersion = .phonon2
+                    case "phonon25", "phonon-2.5":
+                        parsed.modelVersion = .phonon25
                     case "bark3", "bark-3", "bark":
                         parsed.modelVersion = .bark3
                     case "bark3-clean", "bark-3-clean", "bark-clean":
@@ -320,7 +322,7 @@ enum TranscribeCommand {
                         if parsed.nemotronUnifiedLanguage == nil { parsed.nemotronUnifiedLanguage = .auto }
                     default:
                         fputs(
-                            "ERROR: Invalid model version: \(args[i + 1]). Use 'v2', 'v3', 'redux', 'ultra', 'phonon2', 'bark3', 'bark3-clean', 'tdt-ctc-110m', 'tdt-ja', 'unified' or 'nemotron-unified'\n",
+                            "ERROR: Invalid model version: \(args[i + 1]). Use 'v2', 'v3', 'redux', 'ultra', 'phonon2', 'phonon25', 'bark3', 'bark3-clean', 'tdt-ctc-110m', 'tdt-ja', 'unified' or 'nemotron-unified'\n",
                             stderr)
                         fflush(stderr)
                         return nil
@@ -758,6 +760,7 @@ enum TranscribeCommand {
                 case .redux: modelVersionLabel = "redux"
                 case .ultra: modelVersionLabel = "ultra"
                 case .phonon2: modelVersionLabel = "phonon2"
+                case .phonon25: modelVersionLabel = "phonon25"
                 case .bark3: modelVersionLabel = "bark3"
                 case .bark3Clean: modelVersionLabel = "bark3-clean"
                 case .tdtCtc110m: modelVersionLabel = "tdt-ctc-110m"
@@ -1021,6 +1024,7 @@ enum TranscribeCommand {
                 case .redux: modelVersionLabel = "redux"
                 case .ultra: modelVersionLabel = "ultra"
                 case .phonon2: modelVersionLabel = "phonon2"
+                case .phonon25: modelVersionLabel = "phonon25"
                 case .bark3: modelVersionLabel = "bark3"
                 case .bark3Clean: modelVersionLabel = "bark3-clean"
                 case .tdtCtc110m: modelVersionLabel = "tdt-ctc-110m"
@@ -1212,9 +1216,9 @@ enum TranscribeCommand {
                 --streaming                    Use streaming mode with chunk simulation
                 --metadata                     Show confidence, start time, and end time
                 --word-timestamps              Show word-level timestamps in results
-                --encoder-compute-units <u>    Encoder placement: ane (default), gpu, cpu, all
+                --encoder-compute-units <u>    Encoder placement: ane (default; phonon25: gpu), gpu, cpu, all
                 --output-json <file>           Save full transcription to JSON
-                --model-version <name>         v2, v3, redux, ultra, phonon2, bark3, bark3-clean, tdt-ctc-110m, tdt-ja, unified, nemotron-unified (default: v3)
+                --model-version <name>         v2, v3, redux, ultra, phonon2, phonon25, bark3, bark3-clean, tdt-ctc-110m, tdt-ja, unified, nemotron-unified (default: v3)
                 --unified-language <code>      nemotron-unified language prompt: auto (default), en, de, fr, es, it, pl, ...
                 --unified-precision <p>        unified encoder precision: int8 or fp16 (nemotron-unified default fp16)
                 --model-dir <path>             Repository model cache directory

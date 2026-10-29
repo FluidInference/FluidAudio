@@ -9,10 +9,9 @@ final class ModelNamesTests: XCTestCase {
 
     func testRepoRemotePathContainsOwner() {
         for repo in Repo.allCases {
-            XCTAssertTrue(
-                repo.remotePath.contains("FluidInference/"),
-                "\(repo) remotePath should contain 'FluidInference/'"
-            )
+            // Phonon-2.5 initially uses the validated contributor-hosted artifacts.
+            let owner = repo == .phonon25 ? "Muesli-HQ/" : "FluidInference/"
+            XCTAssertTrue(repo.remotePath.hasPrefix(owner), "\(repo) remotePath should start with '\(owner)'")
         }
     }
 
