@@ -52,8 +52,9 @@ final class ModelNamesTests: XCTestCase {
 
     func testModelFileExtensions() {
         // `.txt` covers vocab/token text files (e.g. LuxTTS `tokens.txt`),
-        // which are legitimate model artifacts.
-        let validExtensions: Set<String> = [".mlmodelc", ".json", ".bin", ".txt"]
+        // which are legitimate model artifacts. `.mlirb` / `.hash` are the files of a
+        // Core AI `.aimodel` bundle, listed individually (LFM3-Audio Core AI repo).
+        let validExtensions: Set<String> = [".mlmodelc", ".json", ".bin", ".txt", ".mlirb", ".hash"]
         let validDirectories: Set<String> = ["constants_bin"]
 
         for repo in Repo.allCases {
