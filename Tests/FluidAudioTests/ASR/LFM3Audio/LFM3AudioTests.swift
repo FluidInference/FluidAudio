@@ -21,6 +21,23 @@ final class LFM3AudioTests: XCTestCase {
         XCTAssertNotEqual(Repo.lfm3Audio.folderName, Repo.lfm3AudioCoreAI.folderName)
     }
 
+    func testDownloadSetsPerBackend() throws {
+        guard #available(macOS 15, iOS 18, *) else { throw XCTSkip("LFM3-Audio needs macOS 15 / iOS 18") }
+        let names = ModelNames.LFM3Audio.self
+        func files(_ backend: LFM3AudioBackend, _ speech: Bool) -> Set<String> {
+            ModelNames.getRequiredModelNames(
+                for: .lfm3Audio, variant: LFM3AudioModels.downloadVariant(backend: backend, speech: speech))
+        }
+        XCTAssertEqual(files(.coreML, true), names.requiredModels)
+        XCTAssertEqual(files(.coreML, false), names.recognitionModels)
+        // The Core AI backend never downloads the Core ML LM.
+        XCTAssertTrue(files(.coreAI, true).isDisjoint(with: names.languageModels))
+        XCTAssertEqual(files(.coreAI, false), names.sharedRecognitionModels)
+        XCTAssertTrue(files(.coreAI, true).isSuperset(of: names.speechModels))
+        XCTAssertTrue(
+            names.coreAIRequiredModels.allSatisfy { $0.hasPrefix("coreai/LFM3-Audio-u8b32-f16L20-23.aimodel/") })
+    }
+
     // MARK: - Prompts
 
     func testPromptsMatchTheChatTemplate() {

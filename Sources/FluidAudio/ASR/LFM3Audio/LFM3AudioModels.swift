@@ -75,8 +75,8 @@ public struct LFM3AudioModels: Sendable {
         let coreMLDirectory = root.appendingPathComponent(Repo.lfm3Audio.folderName, isDirectory: true)
         let wantsSpeech = speechAvailable && includeSpeech
         let names = ModelNames.LFM3Audio.self
-        var files = backend == .coreML ? names.recognitionModels : names.sharedRecognitionModels
-        if wantsSpeech { files.formUnion(names.speechModels) }
+        let variant = downloadVariant(backend: backend, speech: wantsSpeech)
+        let files = names.requiredModels(variant: variant)
         if backend == .coreAI {
             _ = try await ModelHub.loadWithRecovery(
                 .lfm3AudioCoreAI, directory: root, requiredFiles: ModelNames.LFM3Audio.coreAIRequiredModels,
@@ -85,7 +85,7 @@ public struct LFM3AudioModels: Sendable {
         }
         let coreAIDirectory = root.appendingPathComponent(Repo.lfm3AudioCoreAI.folderName, isDirectory: true)
         return try await ModelHub.loadWithRecovery(
-            .lfm3Audio, directory: root, requiredFiles: files, progressHandler: progressHandler
+            .lfm3Audio, directory: root, requiredFiles: files, variant: variant, progressHandler: progressHandler
         ) {
             try load(
                 from: coreMLDirectory, backend: backend, coreAIDirectory: coreAIDirectory,
@@ -164,6 +164,16 @@ public struct LFM3AudioModels: Sendable {
     }
 
     // MARK: - Internal
+
+    /// `ModelNames.LFM3Audio.requiredModels(variant:)` key: the Core AI backend never downloads the Core ML LM.
+    static func downloadVariant(backend: LFM3AudioBackend, speech: Bool) -> String? {
+        switch (backend, speech) {
+        case (.coreML, true): return nil
+        case (.coreML, false): return "recognition"
+        case (.coreAI, true): return "coreai"
+        case (.coreAI, false): return "coreai-recognition"
+        }
+    }
 
     static var speechAvailable: Bool {
         #if TTS

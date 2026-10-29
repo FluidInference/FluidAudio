@@ -705,6 +705,17 @@ public enum ModelNames {
         ]
         public static let requiredModels = recognitionModels.union(speechModels)
 
+        /// Download set per variant (`ModelHub` fetches exactly this set): `nil` = everything, `"recognition"` =
+        /// Core ML ASR / LiveASR, `"coreai"` = shared files + speech for the Core AI LM, `"coreai-recognition"`.
+        public static func requiredModels(variant: String?) -> Set<String> {
+            switch variant {
+            case "recognition": return recognitionModels
+            case "coreai": return sharedRecognitionModels.union(speechModels)
+            case "coreai-recognition": return sharedRecognitionModels
+            default: return requiredModels
+            }
+        }
+
         /// Core AI repo (`FluidInference/lfm3-audio-2b-coreai`): the LM as a Core AI bundle in `coreai/`
         /// (`inputs_embeds`; entrypoints prefill / main / hidden; uint8 block 32, decoder layers 20-23 fp16).
         public static let coreAILanguageModel = "LFM3-Audio-u8b32-f16L20-23"
@@ -1997,7 +2008,7 @@ public enum ModelNames {
         case .nemotron35TranscribeLite:
             return ModelNames.NemotronTranscribeLite.requiredModels
         case .lfm3Audio:
-            return ModelNames.LFM3Audio.requiredModels
+            return ModelNames.LFM3Audio.requiredModels(variant: variant)
         case .lfm3AudioCoreAI:
             return ModelNames.LFM3Audio.coreAIRequiredModels
         case .campPlus:
