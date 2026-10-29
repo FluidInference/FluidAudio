@@ -174,9 +174,9 @@ final class LFM3AudioCoreMLEncoder {
             try copy(call.m2, into: LFM3AudioArrays.require(fn.inputs, "m2"))
             try copy(call.mask, into: LFM3AudioArrays.require(fn.inputs, "mask"))
             let provider = fn.providers[flip]
-            provider.arrays["conv"] = conv
-            provider.arrays["k"] = k
-            provider.arrays["v"] = v
+            provider.set(conv, for: "conv")
+            provider.set(k, for: "k")
+            provider.set(v, for: "v")
             _ = try fn.model.prediction(from: provider, options: fn.options[flip])
             let out = fn.outputs[flip]
             conv = try LFM3AudioArrays.require(out, "conv_out")

@@ -57,17 +57,28 @@ extension MLMultiArray {
     var lfm3Int32: UnsafeMutablePointer<Int32> { dataPointer.bindMemory(to: Int32.self, capacity: count) }
 }
 
-/// Mutable feature provider over preallocated arrays (inputs are swapped in place between calls).
+/// Feature provider over preallocated arrays. The `MLFeatureValue` wrappers are made once per array (Core ML reads
+/// the arrays' current contents at prediction time), so a prediction allocates no provider objects.
 final class LFM3AudioInputs: NSObject, MLFeatureProvider {
-    var arrays: [String: MLMultiArray]
+    private(set) var arrays: [String: MLMultiArray]
+    private var values: [String: MLFeatureValue]
+    let featureNames: Set<String>
+
     init(_ arrays: [String: MLMultiArray]) {
         self.arrays = arrays
+        values = arrays.mapValues { MLFeatureValue(multiArray: $0) }
+        featureNames = Set(arrays.keys)
         super.init()
     }
-    var featureNames: Set<String> { Set(arrays.keys) }
-    func featureValue(for featureName: String) -> MLFeatureValue? {
-        arrays[featureName].map { MLFeatureValue(multiArray: $0) }
+
+    /// Bind another array to an existing input (state ping-pong, stage-to-stage hidden states).
+    func set(_ array: MLMultiArray, for name: String) {
+        guard arrays[name] !== array else { return }
+        arrays[name] = array
+        values[name] = MLFeatureValue(multiArray: array)
     }
+
+    func featureValue(for featureName: String) -> MLFeatureValue? { values[featureName] }
 }
 
 /// Little-endian binary tables shipped next to the models (`assets/*.bin`).

@@ -36,6 +36,8 @@ final class LFM3AudioSpeechRuntime {
     let coreAIDepth: (any LFM3AudioDepthModel)?
     let codebook: LFM3AudioCodebookEmbedding
     var history: LFM3AudioPresenceHistory
+    /// Reused per-frame scratch for the Gumbel uniforms.
+    var uniforms: [Float] = []
 
     init(models: LFM3AudioSpeechModels, coreAIDepth: (any LFM3AudioDepthModel)?) throws {
         self.models = models
@@ -122,7 +124,7 @@ extension LFM3AudioManager {
                 let next: LFM3AudioRows
                 if speaking {
                     let depthStart = Date()
-                    let draw = LFM3AudioDepthFrame.draw(&random)
+                    let draw = LFM3AudioDepthFrame.draw(&random, scratch: &speech.uniforms)
                     var codes: [Int32]
                     if let coreAIDepth = speech.coreAIDepth {
                         codes = try await coreAIDepth.frame(

@@ -131,6 +131,7 @@ enum LFM3AudioCommand {
         var audio = 0.0
         var wall = 0.0
         var firstAudio: [Double] = []
+        let cpuStart = processCPUSeconds()
         for (index, text) in texts.enumerated() {
             let result = try await manager.synthesize(
                 text, voice: options.voice, language: options.ttsLanguage,
@@ -151,13 +152,23 @@ enum LFM3AudioCommand {
         }
         if batch {
             let sorted = firstAudio.sorted()
+            let cpu = processCPUSeconds() - cpuStart
             print(
                 String(
                     format:
-                        "LFM3-Audio TTS (%@): %d phrases, %.1f s audio in %.1f s (RTFx %.2f), first audio median %.0f ms",
+                        "LFM3-Audio TTS (%@): %d phrases, %.1f s audio in %.1f s (RTFx %.2f), first audio median %.0f ms, "
+                        + "process CPU %.2f s (%.3f s per audio s)",
                     options.backend.rawValue, texts.count, audio, wall, audio / max(wall, 1e-9),
-                    sorted.isEmpty ? 0 : sorted[sorted.count / 2]))
+                    sorted.isEmpty ? 0 : sorted[sorted.count / 2], cpu, cpu / max(audio, 1e-9)))
         }
+    }
+
+    /// User + system CPU seconds of this process (all threads).
+    private static func processCPUSeconds() -> Double {
+        var usage = rusage()
+        getrusage(RUSAGE_SELF, &usage)
+        func seconds(_ t: timeval) -> Double { Double(t.tv_sec) + Double(t.tv_usec) / 1e6 }
+        return seconds(usage.ru_utime) + seconds(usage.ru_stime)
     }
 
     /// LibriSpeech WER + RTFx (offline ASR, or LiveASR with `--live`).

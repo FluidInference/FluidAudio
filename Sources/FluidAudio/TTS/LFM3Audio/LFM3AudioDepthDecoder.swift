@@ -51,7 +51,8 @@ struct LFM3AudioDepthFrame: Sendable {
     /// fp32 Gumbel noise rounded to fp16 (as the graph input).
     let noise: [Float16]
 
-    static func draw(_ random: inout LFM3AudioRandom) -> LFM3AudioDepthFrame {
+    /// - Parameter scratch: reusable fp32 buffer for the uniforms (resized to 12 x 2017 on first use).
+    static func draw(_ random: inout LFM3AudioRandom, scratch u: inout [Float]) -> LFM3AudioDepthFrame {
         let c = LFM3AudioSpeechConfig.self
         var order = Array(0..<c.codebooks)
         for i in stride(from: c.codebooks - 1, to: 0, by: -1) {
@@ -59,7 +60,7 @@ struct LFM3AudioDepthFrame: Sendable {
         }
         // Gumbel(0, 1) = -log(-log(u)), u with 24-bit resolution (two draws per UInt64)
         let n = c.codebooks * c.audioVocab
-        var u = [Float](repeating: 0, count: n)
+        if u.count != n { u = [Float](repeating: 0, count: n) }
         var count = Int32(n)
         u.withUnsafeMutableBufferPointer { buffer in
             guard let p = buffer.baseAddress else { return }
@@ -184,6 +185,38 @@ final class LFM3AudioDepthDecoder {
 
     static func isEndOfSpeech(_ codes: [Int32]) -> Bool { codes.contains(C.eosCode) }
 
+    /// The k-th largest of `values[0 ..< count]` (k is 1-based) by quickselect, reordering `values`. Exactly the
+    /// value a descending sort puts at index k - 1, without sorting all 2017 logits for the top-k threshold.
+    static func kthLargest(_ values: UnsafeMutablePointer<Float>, count: Int, k: Int) -> Float {
+        let target = k - 1
+        var lo = 0
+        var hi = count - 1
+        while lo < hi {
+            let pivot = values[lo + (hi - lo) / 2]
+            var i = lo
+            var j = hi
+            while i <= j {  // Hoare partition, descending
+                while values[i] > pivot { i += 1 }
+                while values[j] < pivot { j -= 1 }
+                if i <= j {
+                    let swapped = values[i]
+                    values[i] = values[j]
+                    values[j] = swapped
+                    i += 1
+                    j -= 1
+                }
+            }
+            if target <= j {
+                hi = j
+            } else if target >= i {
+                lo = i
+            } else {
+                break  // values[j + 1 ..< i] all equal the pivot
+            }
+        }
+        return values[target]
+    }
+
     // MARK: - Private
 
     /// HF order: presence penalty -> temperature -> top-k -> Gumbel-max (fp32 on the host).
@@ -216,8 +249,7 @@ final class LFM3AudioDepthDecoder {
                 sorted.withUnsafeMutableBufferPointer { tmp in
                     guard let t = tmp.baseAddress else { return }
                     t.update(from: s, count: v)
-                    vDSP_vsort(t, vDSP_Length(v), -1)  // descending
-                    threshold = t[topK - 1]
+                    threshold = Self.kthLargest(t, count: v, k: topK)
                 }
             }
             return noise.withUnsafeBufferPointer { noiseBuffer -> Int32 in
@@ -244,11 +276,19 @@ struct LFM3AudioCodebookEmbedding: Sendable {
     func embed(_ codes: [Int32]) -> [Float16] {
         let h = LFM3AudioConfig.hiddenSize
         var sum = [Float](repeating: 0, count: h)
+        var row = [Float](repeating: 0, count: h)
         table.withUnsafeBytes { raw in
-            guard let src = raw.baseAddress?.assumingMemoryBound(to: Float16.self) else { return }
+            guard let src = raw.baseAddress?.assumingMemoryBound(to: UInt16.self) else { return }
             for k in 0..<LFM3AudioSpeechConfig.codebooks {
-                let row = src + (Int(codes[k]) + LFM3AudioSpeechConfig.audioVocab * k) * h
-                for j in 0..<h { sum[j] += Float(row[j]) }
+                // fp16 -> fp32 is exact; the fp32 adds keep the codebook order (bit-identical to a scalar loop)
+                Float16Conversion.toFloat32(
+                    src: src + (Int(codes[k]) + LFM3AudioSpeechConfig.audioVocab * k) * h, dst: &row, count: h)
+                sum.withUnsafeMutableBufferPointer { acc in
+                    row.withUnsafeBufferPointer { r in
+                        guard let a = acc.baseAddress, let b = r.baseAddress else { return }
+                        vDSP_vadd(a, 1, b, 1, a, 1, vDSP_Length(h))
+                    }
+                }
             }
         }
         return sum.map { Float16($0) }

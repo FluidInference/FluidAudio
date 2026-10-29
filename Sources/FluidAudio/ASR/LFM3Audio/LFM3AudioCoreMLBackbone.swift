@@ -294,7 +294,7 @@ actor LFM3AudioCoreMLBackbone: LFM3AudioLanguageModel {
             p[chunk.slotStart] = 1
         }
         for (index, stage) in fn.stages.enumerated() {
-            if index > 0 { stage.inputs.arrays["x"] = try LFM3AudioArrays.require(fn.stages[index - 1].outputs, "h") }
+            if index > 0 { stage.inputs.set(try LFM3AudioArrays.require(fn.stages[index - 1].outputs, "h"), for: "x") }
             _ = try stage.model.prediction(from: stage.inputs, using: states[index], options: stage.options)
         }
         slot = chunk.slotStart + chunk.q
