@@ -46,6 +46,11 @@ public enum Repo: String, CaseIterable, Sendable {
     /// Nemotron 3.5 Transcribe without its LLM: words with 40 ms start times.
     /// See ASR/NemotronTranscribeLite.
     case nemotron35TranscribeLite = "FluidInference/nemotron-3.5-transcribe-lite-coreml"
+    /// LFM3-Audio-2B (Liquid AI): one audio language model for ASR, live ASR and TTS.
+    /// Core ML build (int8 LM pack + fp16 encoder / depth decoder / codec). See ASR/LFM3Audio.
+    case lfm3Audio = "FluidInference/lfm3-audio-2b-coreml"
+    /// LFM3-Audio-2B Core AI build (`.aimodel`, macOS 27 / iOS 27). See ASR/LFM3Audio.
+    case lfm3AudioCoreAI = "FluidInference/lfm3-audio-2b-coreai"
     /// CAM++ speaker-embedding model (fbank80 -> 192-d) for speaker verification /
     /// diarization clustering. See Speaker/CampPlusEmbedder.
     case campPlus = "FluidInference/campplus-coreml"
@@ -200,6 +205,10 @@ public enum Repo: String, CaseIterable, Sendable {
             return "sensevoice-small-coreml"
         case .nemotron35TranscribeLite:
             return "nemotron-3.5-transcribe-lite-coreml"
+        case .lfm3Audio:
+            return "lfm3-audio-2b-coreml"
+        case .lfm3AudioCoreAI:
+            return "lfm3-audio-2b-coreai"
         case .campPlus:
             return "campplus-coreml"
         case .fsmnVad:
@@ -660,6 +669,70 @@ public enum ModelNames {
         public static let requiredModels: Set<String> = [
             encoderFile, ctcHeadFile, vocabularyFile, melWindowFile, melFilterbankFile,
         ]
+    }
+
+    /// LFM3-Audio-2B. Core ML repo layout: `coreml/` compiled models, `assets/` host tables + tokenizer.
+    public enum LFM3Audio {
+        /// Backbone pack stages (stateful multifunction: decode_q1, prefill_q256 / q64 / q16 / q13) and head.
+        public static let backboneStages = ["LFM3-A-C4160-int8b32", "LFM3-B-C4160-int8b32"]
+        public static let head = "LFM3-Head-int8b32"
+        /// Causal audio encoder (functions n12 / n96 / n375).
+        public static let encoder = "AudioEncoder-fp16"
+        /// MaskGIT depth decoder (functions depth_in, depth_pass) and LiquidCodec decoder (f1 / f4 / f25).
+        public static let depthDecoder = "DepthDecoder-fp16"
+        public static let codec = "CodecDecoder-fp16"
+
+        public static func compiledModelFile(_ name: String) -> String { "coreml/" + name + ".mlmodelc" }
+
+        public static let packConfigFile = "assets/config.json"
+        public static let tokenizerFile = "assets/tokenizer.json"
+        public static let embeddingFile = "assets/embed_tokens.f16.bin"  // [128000, 2048] fp16
+        public static let codebookFile = "assets/codebook_embedding.f16.bin"  // [24204, 2048] fp16
+        public static let depthTablesFile = "assets/depth_tables.f16.bin"  // [12, 2017, 1024] + mask row, fp16
+        public static let codecHeadFile = "assets/codec_head.f32.bin"  // lin_w, lin_b, window, fp32
+
+        /// The Core ML LM (not downloaded for the Core AI backend).
+        public static let languageModels: Set<String> = Set((backboneStages + [head]).map(compiledModelFile))
+        /// Audio encoder + host tables, used by both backends.
+        public static let sharedRecognitionModels: Set<String> = [
+            compiledModelFile(encoder), packConfigFile, tokenizerFile, embeddingFile,
+        ]
+        /// ASR and LiveASR.
+        public static let recognitionModels = languageModels.union(sharedRecognitionModels)
+        /// Codec + speech-frame tables (both backends).
+        public static let speechCodecModels: Set<String> = [compiledModelFile(codec), codebookFile, codecHeadFile]
+        /// TTS on top of recognition (Core ML depth decoder).
+        public static let speechModels = speechCodecModels.union([compiledModelFile(depthDecoder), depthTablesFile])
+        public static let requiredModels = recognitionModels.union(speechModels)
+
+        /// Download set per variant (`ModelHub` fetches exactly this set): `nil` = everything, `"recognition"` =
+        /// Core ML ASR / LiveASR, `"coreai"` = encoder, tables and codec for the Core AI backend (its LM and depth
+        /// decoder come from the Core AI repo), `"coreai-recognition"`.
+        public static func requiredModels(variant: String?) -> Set<String> {
+            switch variant {
+            case "recognition": return recognitionModels
+            case "coreai": return sharedRecognitionModels.union(speechCodecModels)
+            case "coreai-recognition": return sharedRecognitionModels
+            default: return requiredModels
+            }
+        }
+
+        /// Core AI repo (`FluidInference/lfm3-audio-2b-coreai`): the LM as a Core AI bundle in `coreai/`
+        /// (`inputs_embeds`; entrypoints prefill / main / hidden; uint8 block 32, decoder layers 20-23 fp16) and the
+        /// depth decoder (fused `depth_frame`: 3 MaskGIT passes + sampling in the graph).
+        public static let coreAILanguageModel = "LFM3-Audio-u8b32-f16L20-23"
+        public static let coreAIDepthDecoder = "DepthDecoder-fp16-gpu"
+        public static func coreAIBundleFile(_ name: String) -> String { "coreai/" + name + ".aimodel" }
+        /// A bundle's files (listed so a partial download is never taken for a complete bundle).
+        public static func coreAIBundleFiles(_ name: String) -> Set<String> {
+            Set(["main.mlirb", "main.hash", "metadata.json"].map { coreAIBundleFile(name) + "/" + $0 })
+        }
+        public static let coreAIRequiredModels = coreAIBundleFiles(coreAILanguageModel).union(
+            coreAIBundleFiles(coreAIDepthDecoder))
+        /// Core AI repo download set: `"recognition"` = the LM only, otherwise LM + depth decoder.
+        public static func coreAIRequiredModels(variant: String?) -> Set<String> {
+            variant == "recognition" ? coreAIBundleFiles(coreAILanguageModel) : coreAIRequiredModels
+        }
     }
 
     public enum SenseVoice {
@@ -1944,6 +2017,10 @@ public enum ModelNames {
             return ModelNames.SenseVoice.requiredModels(precision: variant)
         case .nemotron35TranscribeLite:
             return ModelNames.NemotronTranscribeLite.requiredModels
+        case .lfm3Audio:
+            return ModelNames.LFM3Audio.requiredModels(variant: variant)
+        case .lfm3AudioCoreAI:
+            return ModelNames.LFM3Audio.coreAIRequiredModels(variant: variant)
         case .campPlus:
             return ModelNames.CampPlus.requiredModels
         case .cuaS1Forms:

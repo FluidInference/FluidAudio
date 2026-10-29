@@ -1,0 +1,105 @@
+#if arch(arm64)
+@preconcurrency import CoreML
+import Foundation
+
+/// Preallocated Core ML buffers for the LFM3-Audio runtime: every input and output is a host-owned fp16 / int32
+/// `MLMultiArray`, outputs are bound through `MLPredictionOptions.outputBackings`, and predictions are synchronous.
+/// (On macOS 27 a Core ML-allocated GPU output can abort inside MPSGraphTensorData on a cold compile cache.)
+enum LFM3AudioArrays {
+
+    static func float16(_ shape: [Int], fill: Float16 = 0) throws -> MLMultiArray {
+        let array = try MLMultiArray(shape: shape.map { NSNumber(value: $0) }, dataType: .float16)
+        array.dataPointer.bindMemory(to: Float16.self, capacity: array.count).initialize(
+            repeating: fill, count: array.count)
+        return array
+    }
+
+    static func int32(_ shape: [Int], fill: Int32 = 0) throws -> MLMultiArray {
+        let array = try MLMultiArray(shape: shape.map { NSNumber(value: $0) }, dataType: .int32)
+        array.dataPointer.bindMemory(to: Int32.self, capacity: array.count).initialize(
+            repeating: fill, count: array.count)
+        return array
+    }
+
+    /// Zero-filled arrays for every multi-array input of a model, keyed by input name.
+    static func zeroInputs(_ description: MLModelDescription) throws -> [String: MLMultiArray] {
+        var out: [String: MLMultiArray] = [:]
+        for (name, input) in description.inputDescriptionsByName {
+            guard let constraint = input.multiArrayConstraint else { continue }
+            let shape = constraint.shape.map { $0.intValue }
+            out[name] = constraint.dataType == .int32 ? try int32(shape) : try float16(shape)
+        }
+        return out
+    }
+
+    /// Output backings for every multi-array output of a model, keyed by output name.
+    static func outputBackings(_ description: MLModelDescription) throws -> [String: MLMultiArray] {
+        var out: [String: MLMultiArray] = [:]
+        for (name, output) in description.outputDescriptionsByName {
+            guard let constraint = output.multiArrayConstraint else { continue }
+            let shape = constraint.shape.map { $0.intValue }
+            guard !shape.isEmpty else {
+                throw LFM3AudioError.invalidModel("output \(name) has no static shape")
+            }
+            out[name] = constraint.dataType == .int32 ? try int32(shape) : try float16(shape)
+        }
+        return out
+    }
+
+    static func require(_ arrays: [String: MLMultiArray], _ name: String) throws -> MLMultiArray {
+        guard let array = arrays[name] else { throw LFM3AudioError.invalidModel("missing tensor \(name)") }
+        return array
+    }
+}
+
+extension MLMultiArray {
+    var lfm3Float16: UnsafeMutablePointer<Float16> { dataPointer.bindMemory(to: Float16.self, capacity: count) }
+    var lfm3Int32: UnsafeMutablePointer<Int32> { dataPointer.bindMemory(to: Int32.self, capacity: count) }
+}
+
+/// Mutable feature provider over preallocated arrays (inputs are swapped in place between calls).
+final class LFM3AudioInputs: NSObject, MLFeatureProvider {
+    var arrays: [String: MLMultiArray]
+    init(_ arrays: [String: MLMultiArray]) {
+        self.arrays = arrays
+        super.init()
+    }
+    var featureNames: Set<String> { Set(arrays.keys) }
+    func featureValue(for featureName: String) -> MLFeatureValue? {
+        arrays[featureName].map { MLFeatureValue(multiArray: $0) }
+    }
+}
+
+/// Little-endian binary tables shipped next to the models (`assets/*.bin`).
+enum LFM3AudioTables {
+    static func mapped(_ url: URL, expectedBytes: Int) throws -> Data {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw LFM3AudioError.modelNotFound(url.lastPathComponent)
+        }
+        let data = try Data(contentsOf: url, options: .alwaysMapped)
+        guard data.count == expectedBytes else {
+            throw LFM3AudioError.invalidModel(
+                "\(url.lastPathComponent) is \(data.count) bytes, expected \(expectedBytes)")
+        }
+        return data
+    }
+
+    static func float32(_ url: URL, count: Int) throws -> [Float] {
+        let data = try mapped(url, expectedBytes: count * 4)
+        return data.withUnsafeBytes { raw in
+            (0..<count).map {
+                Float(bitPattern: UInt32(littleEndian: raw.loadUnaligned(fromByteOffset: $0 * 4, as: UInt32.self)))
+            }
+        }
+    }
+
+    static func float16(_ url: URL, count: Int) throws -> [Float16] {
+        let data = try mapped(url, expectedBytes: count * 2)
+        return data.withUnsafeBytes { raw in
+            (0..<count).map {
+                Float16(bitPattern: UInt16(littleEndian: raw.loadUnaligned(fromByteOffset: $0 * 2, as: UInt16.self)))
+            }
+        }
+    }
+}
+#endif
