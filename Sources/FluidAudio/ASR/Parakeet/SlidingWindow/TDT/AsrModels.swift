@@ -833,6 +833,8 @@ extension AsrModels {
         encoderComputeUnits: MLComputeUnits? = nil,
         progressHandler: ProgressHandler? = nil
     ) async throws -> AsrModels {
+        // Same order as loadLocal/load: platform before encoder placement.
+        try checkPlatformSupport(for: version)
         _ = try resolvedEncoderComputeUnits(
             for: version, configuration: (configuration ?? defaultConfiguration()).computeUnits,
             requested: encoderComputeUnits)

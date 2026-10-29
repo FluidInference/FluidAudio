@@ -5,6 +5,10 @@ import XCTest
 @testable import FluidAudio
 
 final class Phonon25Tests: XCTestCase {
+    private var platformSupportsPhonon25: Bool {
+        (try? AsrModels.checkPlatformSupport(for: .phonon25)) != nil
+    }
+
     func testRegistrationAndV3Contract() {
         let version = AsrModelVersion.phonon25
         XCTAssertEqual(version.repo, .phonon25)
@@ -59,29 +63,26 @@ final class Phonon25Tests: XCTestCase {
         }
     }
 
-    func testUnsupportedEncoderRequestFailsBeforeDownloadOrLocalFileAccess() async {
+    func testUnsupportedEncoderRequestFailsBeforeDownloadOrLocalFileAccess() async throws {
+        // Every loader checks the platform first; testPlatformGuard covers that path.
+        try XCTSkipUnless(platformSupportsPhonon25, "Phonon-2.5 requires iOS 18 / macOS 15 / tvOS 18")
         let absent = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         do {
             _ = try await AsrModels.downloadAndLoad(to: absent, version: .phonon25, encoderComputeUnits: .all)
             XCTFail("ANE-capable placement must not download or load Phonon-2.5")
         } catch {
-            XCTAssertTrue(error.localizedDescription.contains("ANE encoder parity"))
+            XCTAssertTrue(error.localizedDescription.contains("ANE encoder parity"), error.localizedDescription)
         }
         XCTAssertFalse(FileManager.default.fileExists(atPath: absent.path))
         XCTAssertThrowsError(
             try AsrModels.loadLocal(from: absent, version: .phonon25, encoderComputeUnits: .cpuAndNeuralEngine)
         ) { error in
-            if #available(macOS 15, iOS 18, tvOS 18, *) {
-                XCTAssertTrue(error.localizedDescription.contains("ANE encoder parity"))
-            } else {
-                // Local loading validates the platform before placement or file access.
-                XCTAssertTrue(error.localizedDescription.contains("requires iOS 18 / macOS 15"))
-            }
+            XCTAssertTrue(error.localizedDescription.contains("ANE encoder parity"), error.localizedDescription)
         }
     }
 
     /// Uses only real published weights and public recordings, never generated models/audio.
-    /// Supply a dedicated managed cache directory, not another app's active cache:
+    /// Supply a dedicated managed cache directory named `phonon-2.5`, not another app's active cache:
     /// ModelHub may repair/delete corrupt or revision-mismatched entries there.
     func testPublishedGPUModelWithPublicSpeech() async throws {
         let environment = ProcessInfo.processInfo.environment
@@ -90,7 +91,14 @@ final class Phonon25Tests: XCTestCase {
         else {
             throw XCTSkip("Set FLUIDAUDIO_PHONON25_MODELS and FLUIDAUDIO_PHONON25_FIXTURES for real-model integration")
         }
+        try XCTSkipUnless(platformSupportsPhonon25, "Phonon-2.5 requires iOS 18 / macOS 15 / tvOS 18")
         let directory = URL(fileURLWithPath: modelDirectory)
+        // downloadAndLoad(to:) resolves the repo as a sibling named after the folder, so both
+        // loaders only read the same files when the directory is already that folder.
+        guard directory.lastPathComponent == Repo.phonon25.folderName else {
+            XCTFail("FLUIDAUDIO_PHONON25_MODELS must end in \(Repo.phonon25.folderName): \(directory.path)")
+            return
+        }
         let local = try AsrModels.loadLocal(from: directory, version: .phonon25)
         XCTAssertEqual(local.encoder?.configuration.computeUnits, .cpuAndGPU)
         XCTAssertEqual(local.preprocessor.configuration.computeUnits, .cpuOnly)
