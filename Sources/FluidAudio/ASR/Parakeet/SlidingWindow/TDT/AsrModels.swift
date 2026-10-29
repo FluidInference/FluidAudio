@@ -217,14 +217,16 @@ extension AsrModels {
 
     /// Select encoder placement separately from decoder/joint configuration.
     /// Phonon-2.5's published dense encoder has passed the GPU gate, while the
-    /// sparse ANE conversion has not. Keep ANE opt-in unavailable for this model.
+    /// sparse ANE conversion has not. Keep ANE opt-in unavailable for this model:
+    /// without an explicit request its encoder runs on CPU/GPU, or on the CPU
+    /// when the configuration is CPU-only (background-safe / CI configurations).
     static func resolvedEncoderComputeUnits(
         for version: AsrModelVersion,
         configuration: MLComputeUnits,
         requested: MLComputeUnits? = nil
     ) throws -> MLComputeUnits {
         guard version == .phonon25 else { return requested ?? configuration }
-        let units = requested ?? .cpuAndGPU
+        let units = requested ?? (configuration == .cpuOnly ? .cpuOnly : .cpuAndGPU)
         guard units == .cpuAndGPU || units == .cpuOnly else {
             throw AsrModelsError.loadingFailed(
                 "Phonon-2.5 supports the GPU encoder or CPU-only diagnostics; "
@@ -257,6 +259,8 @@ extension AsrModels {
             // M-series) for ~+8% end-to-end RTFx, WER-neutral. ANE remains the default
             // because it is far more power-efficient on iOS; opt into GPU for
             // throughput-oriented / plugged-in workloads. See docs/perf/parakeet-v3-encoder.md.
+            // Phonon-2.5 is the exception: CPU/GPU by default, ANE placements rejected
+            // (see resolvedEncoderComputeUnits).
             ModelSpec(
                 fileName: fileNames.encoder,
                 computeUnits: try resolvedEncoderComputeUnits(
@@ -265,8 +269,8 @@ extension AsrModels {
         ]
     }
 
-    /// Redux's 2-bit and Phonon-2's / Bark's five-value encoders use iOS 18 Core ML ops,
-    /// so they have no iOS 17 build. Fails fast there and points at `.ultra`.
+    /// Redux's 2-bit, Phonon-2's / Bark's five-value and Phonon-2.5's LUT3 encoders use iOS 18
+    /// Core ML ops, so they have no iOS 17 build. Fails fast there and points at `.ultra`.
     static func checkPlatformSupport(for version: AsrModelVersion) throws {
         let name: String
         switch version {
@@ -295,6 +299,12 @@ extension AsrModels {
             .tdtCtc110m, .v2, .v3, .redux, .ultra, .phonon25, .phonon2, .bark3Clean, .bark3, .tdtJa,
         ]
 
+        // The model folder itself wins over a parent folder that merely contains another name
+        // (".../phonon-2.5-eval/phonon-2" is Phonon-2).
+        let folder = directory.lastPathComponent.lowercased()
+        if let exact = knownVersions.first(where: { $0.repo.folderName.lowercased() == folder }) {
+            return exact
+        }
         for version in knownVersions {
             if directoryPath.contains(version.repo.folderName.lowercased()) {
                 return version
@@ -426,8 +436,8 @@ extension AsrModels {
     /// - Parameters:
     ///   - directory: Directory containing the model files
     ///   - configuration: Optional MLModel configuration. When provided, the configuration's
-    ///                   computeUnits will be respected. When nil, platform-optimized defaults
-    ///                   are used (per-model optimization based on model type).
+    ///                   computeUnits will be respected (Phonon-2.5's encoder: see below). When
+    ///                   nil, platform-optimized defaults are used (per-model optimization).
     ///   - version: ASR model version to load (defaults to v3)
     ///   - encoderComputeUnits: Optional override for the conformer encoder's compute units.
     ///                   When `nil` (default) the encoder uses the configuration's compute
@@ -435,6 +445,8 @@ extension AsrModels {
     ///                   on the GPU (~+8% RTFx, WER-neutral on Apple Silicon) for
     ///                   throughput-oriented workloads; ANE stays the default for power
     ///                   efficiency on iOS. See docs/perf/parakeet-v3-encoder.md.
+    ///                   Phonon-2.5 only accepts `.cpuAndGPU` (its default) or `.cpuOnly`
+    ///                   (also chosen when the configuration is CPU-only); ANE placements throw.
     ///
     /// - Returns: Loaded ASR models
     ///
@@ -714,11 +726,16 @@ extension AsrModels {
 extension AsrModels {
 
     @discardableResult
+    /// Download (and compile-warm) the models for `version`.
+    ///
+    /// - Parameter encoderComputeUnits: compute units the encoder is warmed with; `nil` uses the
+    ///   version's default placement (see `load(from:configuration:version:encoderPrecision:encoderComputeUnits:)`).
     public static func download(
         to directory: URL? = nil,
         force: Bool = false,
         version: AsrModelVersion = .v3,
         encoderPrecision: ParakeetEncoderPrecision = .int8,
+        encoderComputeUnits: MLComputeUnits? = nil,
         progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         try checkPlatformSupport(for: version)
@@ -726,8 +743,14 @@ extension AsrModels {
         logger.info("Downloading ASR models to: \(targetDir.path)")
         let parentDir = targetDir.deletingLastPathComponent()
         let downloadVariant: String? = (version == .v3) ? encoderPrecision.rawValue : nil
+        // A pinned repo (Phonon-2.5) is only "present" with its revision marker; ModelHub re-checks it on load.
+        let revision = ModelRegistry.mapRevision(version.repo.remotePath, default: version.repo.revision)
+        let revisionMatches = ModelCache.matchesRevision(
+            at: repoPath(from: targetDir, version: version), revision: revision)
 
-        if !force && modelsExist(at: targetDir, version: version, encoderPrecision: encoderPrecision) {
+        if !force && revisionMatches
+            && modelsExist(at: targetDir, version: version, encoderPrecision: encoderPrecision)
+        {
             logger.info("ASR models already present at: \(targetDir.path)")
             return targetDir
         }
@@ -761,7 +784,8 @@ extension AsrModels {
                 DownloadSpec(fileName: Names.preprocessorFile, computeUnits: .cpuOnly),
                 DownloadSpec(
                     fileName: fileNames.encoder,
-                    computeUnits: try resolvedEncoderComputeUnits(for: version, configuration: defaultUnits)),
+                    computeUnits: try resolvedEncoderComputeUnits(
+                        for: version, configuration: defaultUnits, requested: encoderComputeUnits)),
                 DownloadSpec(fileName: fileNames.decoder, computeUnits: defaultUnits),
                 DownloadSpec(fileName: fileNames.joint, computeUnits: defaultUnits),
             ]
@@ -833,15 +857,16 @@ extension AsrModels {
         encoderComputeUnits: MLComputeUnits? = nil,
         progressHandler: ProgressHandler? = nil
     ) async throws -> AsrModels {
-        // Same order as loadLocal/load: platform before encoder placement.
+        // Same order as loadLocal/load: platform before encoder placement, both before any download.
         try checkPlatformSupport(for: version)
-        _ = try resolvedEncoderComputeUnits(
+        let resolvedEncoder = try resolvedEncoderComputeUnits(
             for: version, configuration: (configuration ?? defaultConfiguration()).computeUnits,
             requested: encoderComputeUnits)
         let targetDir = try await download(
             to: directory,
             version: version,
             encoderPrecision: encoderPrecision,
+            encoderComputeUnits: resolvedEncoder,
             progressHandler: progressHandler
         )
         return try await load(
@@ -849,7 +874,7 @@ extension AsrModels {
             configuration: configuration,
             version: version,
             encoderPrecision: encoderPrecision,
-            encoderComputeUnits: encoderComputeUnits,
+            encoderComputeUnits: resolvedEncoder,
             progressHandler: progressHandler)
     }
 

@@ -30,6 +30,11 @@ final class Phonon25Tests: XCTestCase {
     func testLongerPhononCacheNameDoesNotResolveToEnglishPhonon2() {
         XCTAssertEqual(AsrModels.inferredVersion(from: URL(fileURLWithPath: "/models/phonon-2.5")), .phonon25)
         XCTAssertEqual(AsrModels.inferredVersion(from: URL(fileURLWithPath: "/models/phonon-2")), .phonon2)
+        // The model folder wins over a parent folder that contains another model's name.
+        XCTAssertEqual(
+            AsrModels.inferredVersion(from: URL(fileURLWithPath: "/eval/phonon-2.5-runs/phonon-2")), .phonon2)
+        XCTAssertEqual(
+            AsrModels.inferredVersion(from: URL(fileURLWithPath: "/eval/phonon-2-runs/phonon-2.5")), .phonon25)
     }
 
     func testPlatformGuard() {
@@ -57,6 +62,9 @@ final class Phonon25Tests: XCTestCase {
         XCTAssertEqual(
             try AsrModels.resolvedEncoderComputeUnits(for: .phonon25, configuration: .all, requested: .cpuOnly),
             .cpuOnly)
+        // A CPU-only configuration (background-safe, CI) keeps the Phonon-2.5 encoder on the CPU.
+        XCTAssertEqual(try AsrModels.resolvedEncoderComputeUnits(for: .phonon25, configuration: .cpuOnly), .cpuOnly)
+        XCTAssertEqual(try AsrModels.resolvedEncoderComputeUnits(for: .phonon25, configuration: .all), .cpuAndGPU)
         for units: MLComputeUnits in [.all, .cpuAndNeuralEngine] {
             XCTAssertThrowsError(
                 try AsrModels.resolvedEncoderComputeUnits(for: .phonon25, configuration: .cpuOnly, requested: units))
@@ -66,19 +74,26 @@ final class Phonon25Tests: XCTestCase {
     func testUnsupportedEncoderRequestFailsBeforeDownloadOrLocalFileAccess() async throws {
         // Every loader checks the platform first; testPlatformGuard covers that path.
         try XCTSkipUnless(platformSupportsPhonon25, "Phonon-2.5 requires iOS 18 / macOS 15 / tvOS 18")
-        let absent = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        // Downloads go to `<parent>/phonon-2.5`, so watch a fresh parent. Offline mode turns any download attempt
+        // into a different error, so a missing pre-check can't pass on load()'s identical message.
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let target = root.appendingPathComponent(Repo.phonon25.folderName)
+        let wasOffline = ModelHub.offlineMode
+        ModelHub.offlineMode = true
+        defer { ModelHub.offlineMode = wasOffline }
         do {
-            _ = try await AsrModels.downloadAndLoad(to: absent, version: .phonon25, encoderComputeUnits: .all)
+            _ = try await AsrModels.downloadAndLoad(to: target, version: .phonon25, encoderComputeUnits: .all)
             XCTFail("ANE-capable placement must not download or load Phonon-2.5")
         } catch {
             XCTAssertTrue(error.localizedDescription.contains("ANE encoder parity"), error.localizedDescription)
         }
-        XCTAssertFalse(FileManager.default.fileExists(atPath: absent.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
         XCTAssertThrowsError(
-            try AsrModels.loadLocal(from: absent, version: .phonon25, encoderComputeUnits: .cpuAndNeuralEngine)
+            try AsrModels.loadLocal(from: target, version: .phonon25, encoderComputeUnits: .cpuAndNeuralEngine)
         ) { error in
             XCTAssertTrue(error.localizedDescription.contains("ANE encoder parity"), error.localizedDescription)
         }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
     }
 
     /// Uses only real published weights and public recordings, never generated models/audio.
