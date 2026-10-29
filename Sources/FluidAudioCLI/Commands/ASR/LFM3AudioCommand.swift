@@ -131,10 +131,13 @@ enum LFM3AudioCommand {
         var audio = 0.0
         var wall = 0.0
         var firstAudio: [Double] = []
+        var cpu = 0.0
         for (index, text) in texts.enumerated() {
+            let cpuStart = processCPUSeconds()  // synthesis only, not the WAV encoding / writes below
             let result = try await manager.synthesize(
                 text, voice: options.voice, language: options.ttsLanguage,
                 seed: options.seed.map { $0 &+ UInt64(index) } ?? (batch ? UInt64(index) : nil))
+            cpu += processCPUSeconds() - cpuStart
             let path =
                 batch
                 ? (output as NSString).appendingPathComponent(String(format: "phrase_%03d.wav", index + 1)) : output
@@ -154,10 +157,19 @@ enum LFM3AudioCommand {
             print(
                 String(
                     format:
-                        "LFM3-Audio TTS (%@): %d phrases, %.1f s audio in %.1f s (RTFx %.2f), first audio median %.0f ms",
+                        "LFM3-Audio TTS (%@): %d phrases, %.1f s audio in %.1f s (RTFx %.2f), "
+                        + "first audio median %.0f ms, process CPU %.2f s (%.3f s per audio s)",
                     options.backend.rawValue, texts.count, audio, wall, audio / max(wall, 1e-9),
-                    sorted.isEmpty ? 0 : sorted[sorted.count / 2]))
+                    sorted.isEmpty ? 0 : sorted[sorted.count / 2], cpu, cpu / max(audio, 1e-9)))
         }
+    }
+
+    /// User + system CPU seconds of this process (all threads).
+    private static func processCPUSeconds() -> Double {
+        var usage = rusage()
+        guard getrusage(RUSAGE_SELF, &usage) == 0 else { return 0 }
+        func seconds(_ t: timeval) -> Double { Double(t.tv_sec) + Double(t.tv_usec) / 1e6 }
+        return seconds(usage.ru_utime) + seconds(usage.ru_stime)
     }
 
     /// LibriSpeech WER + RTFx (offline ASR, or LiveASR with `--live`).
