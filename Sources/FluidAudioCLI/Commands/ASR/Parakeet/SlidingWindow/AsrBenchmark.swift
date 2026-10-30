@@ -730,6 +730,8 @@ extension ASRBenchmark {
                         modelVersion = .ultra
                     case "phonon2", "phonon-2":
                         modelVersion = .phonon2
+                    case "phonon25", "phonon-2.5":
+                        modelVersion = .phonon25
                     case "bark3", "bark-3", "bark":
                         modelVersion = .bark3
                     case "bark3-clean", "bark-3-clean", "bark-clean":
@@ -738,7 +740,7 @@ extension ASRBenchmark {
                         modelVersion = .tdtCtc110m
                     default:
                         logger.error(
-                            "Invalid model version: \(arguments[i + 1]). Use 'v2', 'v3', 'redux', 'ultra', 'phonon2', 'bark3', 'bark3-clean', or 'tdt-ctc-110m'"
+                            "Invalid model version: \(arguments[i + 1]). Use 'v2', 'v3', 'redux', 'ultra', 'phonon2', 'phonon25', 'bark3', 'bark3-clean', or 'tdt-ctc-110m'"
                         )
                         exit(1)
                     }
@@ -796,6 +798,7 @@ extension ASRBenchmark {
         case .redux: versionLabel = "redux"
         case .ultra: versionLabel = "ultra"
         case .phonon2: versionLabel = "phonon2"
+        case .phonon25: versionLabel = "phonon25"
         case .bark3: versionLabel = "bark3"
         case .bark3Clean: versionLabel = "bark3-clean"
         case .tdtCtc110m: versionLabel = "tdt-ctc-110m"
@@ -1102,7 +1105,8 @@ extension ASRBenchmark {
                 --max-files <number>       Maximum number of files to process (default: all)
                 --single-file <id>         Process only a specific file (e.g., 1089-134686-0011)
                 --output <file>            Output JSON file path (default: asr_benchmark_results.json)
-                --model-version <version>  ASR model version: v2, v3, or tdt-ctc-110m (default: v3)
+                --model-version <version>  ASR model version: v2, v3, redux, ultra, phonon2, phonon25, bark3,
+                                           bark3-clean, or tdt-ctc-110m (default: v3)
                 --local-model-dir <dir>    Load compiled components from <dir> as-is (no download)
                 --leading-silence <sec>    Prepend <sec> of silence to every file (default 0)
                 --debug                    Enable debug logging
@@ -1117,6 +1121,7 @@ extension ASRBenchmark {
                                            (default: disabled on v3, enabled otherwise)
                 --mel-context              Force-enable the mel-context prepend (v3 opt-in)
                 --encoder-compute-units <u> Encoder placement: ane (default), gpu (~+8% RTFx on Apple Silicon, WER-neutral), cpu, all
+                                           (phonon25: gpu (default) or cpu only)
                 --help, -h                Show this help message
 
             Description:

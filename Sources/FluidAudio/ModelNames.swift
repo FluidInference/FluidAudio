@@ -25,6 +25,9 @@ public enum Repo: String, CaseIterable, Sendable {
     /// five-value weights as a sparsity mask plus fp16 palettes (321 MB,
     /// iOS 18+). Loaded through `AsrModelVersion.phonon2`.
     case phonon2 = "FluidInference/phonon-2-coreml"
+    /// Phonon-2.5 multilingual, dense LUT3 encoder for CPU/GPU execution.
+    /// Published conversion and validation: FluidInference/mobius#113.
+    case phonon25 = "Muesli-HQ/phonon-2.5-coreml"
     /// Underdog Bark 3.0 (Conway Research): post-training of parakeet-tdt-0.6b-v3
     /// (via moondream/parakeet-ultra), English, verbatim. Same tokenizer, window and
     /// decoder/joint contract as v3; the encoder keeps the checkpoint's exact
@@ -193,6 +196,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-ultra-coreml"
         case .phonon2:
             return "phonon-2-coreml"
+        case .phonon25:
+            return "phonon-2.5-coreml"
         case .bark3, .bark3Clean:
             return "bark-3.0-coreml"
         case .parakeetV2:
@@ -319,6 +324,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/paradee-8m-coreml"
         case .bark3, .bark3Clean:
             return "FluidInference/bark-3.0-coreml"
+        case .phonon25:
+            return rawValue
         default:
             return "FluidInference/\(name)"
         }
@@ -334,6 +341,8 @@ public enum Repo: String, CaseIterable, Sendable {
         switch self {
         case .diarizer:
             return "df2625ac79a7ac6b65ad868fee6d80f320da4232"
+        case .phonon25:
+            return "a042ef89966d289df295709b58ffdabb50bd2510"
         default:
             return "main"
         }
@@ -2004,7 +2013,7 @@ public enum ModelNames {
         case .parakeetV3:
             let precision = ParakeetEncoderPrecision(rawValue: variant ?? "") ?? .int8
             return ModelNames.ASR.requiredModelsV3(precision: precision)
-        case .parakeetRedux, .parakeetUltra, .phonon2, .bark3, .bark3Clean:
+        case .parakeetRedux, .parakeetUltra, .phonon2, .phonon25, .bark3, .bark3Clean:
             // Single encoder build; no precision variants.
             return ModelNames.ASR.requiredModelsV3()
         case .parakeetV2:
