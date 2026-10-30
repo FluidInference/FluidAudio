@@ -325,7 +325,42 @@ Performs principled comparison between original transcript words and vocabulary 
 - `VocabularyRescorer.swift` — struct definition, Config, result types, word timing builder
 - `VocabularyRescorer+TokenRescoring.swift` — three-pass orchestration (`ctcTokenRescore()`)
 - `VocabularyRescorer+TokenEvaluation.swift` — per-candidate scoring and guard logic
+- `VocabularyRescorer+SpanProtection.swift` — recognized spans, acoustic search boundaries and possessive preservation
 - `VocabularyRescorer+Utilities.swift` — string similarity, normalization, token boundary helpers
+
+#### Preserving recognized words and inflections
+
+Canonical vocabulary phrases already present in the transcript are protected, including
+possessives such as `Quilter's`, `Quilter’s` and `Jones'`. Other candidates cannot consume
+part of those phrases: a correction may include a recognized phrase only if its letters survive
+in the replacement on the same side of the other words, such as `John Collar` → `John Collier`
+or `Open AI` → `OpenAI` when `John` or `AI` is also listed, but not `in Envious Labs` →
+`Envious Labs`. Corrections to misspelled names preserve a possessive in both scoring and
+replacement text, unless the apostrophe split the term's own final `s` (`Envious Lab's` →
+`Envious Labs`) or belongs to a neighbouring word in the span.
+
+A hyphenated name may occupy fewer timing words than its canonical phrase.
+Shorter spans are considered only when their hyphen-separated component count
+matches a canonical form or alias. The multi-word similarity floor still applies.
+This lets a correction retain the next ordinary word instead of consuming it to
+reach the canonical word count. Partial-word replacements remain unsupported.
+
+With disjoint timestamps (compared with a 1 ms tolerance, so rounding noise does not count as
+overlap), the CTC search margin for the term stops at other recognized occurrences of it, and at
+a recognized listed term the correction would duplicate (a listed surname after a misheard full
+name that ends with it, or a first name before one that starts with it). The original phrase is
+still scored over its full span plus margin. A weak textual match
+creating a nearby adjacent duplicate must beat the original without a positive context-bias
+bonus. One-edit name spellings and registered aliases retain their normal bonus. Coarse
+overlapping timestamps do not establish acoustic ownership and leave the normal search and
+bias intact.
+
+Candidate selection rejects a replacement whose CTC alignment lies outside its own source
+span and overlaps an alignment already applied for the same term. A candidate whose alignment
+lies inside its own words is never rejected for this; it replaces an earlier applied borrower
+of that alignment, so the result does not depend on which is considered first. Coarse source
+timings that contain the alignment remain eligible, preserving genuine repetitions. Other
+similarity thresholds and bias settings remain unchanged.
 
 #### Non-Mutating Candidate Evidence
 
@@ -375,7 +410,8 @@ path finally did after overlap arbitration:
 - `rejectedByComparison` — the legacy floating-point comparison ran and rejected the candidate.
 - `unavailableEvidence` — the comparison could not run, for example because tokenizer evidence was
   unavailable.
-- `supersededByOverlap` — comparison passed, but an overlapping candidate won final arbitration.
+- `supersededByOverlap` — comparison passed, but a selected candidate overlapped its word span, or it
+  borrowed another occurrence's CTC alignment for the same term (see "Preserving recognized words").
 
 `comparisonPassed` and `legacyOutcome` preserve the comparison FluidAudio actually performed. A
 raw score remains `nil` when the underlying scorer produced a non-finite diagnostic value, but that

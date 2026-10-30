@@ -1,0 +1,643 @@
+[
+  {
+    "id": "quilter",
+    "text": "mister Quilter is the apostle of the middle classes, and we are glad to welcome his gospel.",
+    "tokenTimings": [
+      {
+        "confidence": 0.8876953,
+        "endTime": 0.4,
+        "startTime": 0.24,
+        "token": " m",
+        "tokenId": 282
+      },
+      {
+        "confidence": 0.9980469,
+        "endTime": 0.56,
+        "startTime": 0.4,
+        "token": "ister",
+        "tokenId": 3459
+      },
+      {
+        "confidence": 0.9916992,
+        "endTime": 0.8,
+        "startTime": 0.56,
+        "token": " Qu",
+        "tokenId": 1382
+      },
+      {
+        "confidence": 0.9941406,
+        "endTime": 0.9600000000000001,
+        "startTime": 0.8,
+        "token": "il",
+        "tokenId": 305
+      },
+      {
+        "confidence": 0.99121094,
+        "endTime": 1.28,
+        "startTime": 1.12,
+        "token": "ter",
+        "tokenId": 441
+      },
+      {
+        "confidence": 1,
+        "endTime": 1.36,
+        "startTime": 1.28,
+        "token": " is",
+        "tokenId": 508
+      },
+      {
+        "confidence": 0.9980469,
+        "endTime": 1.52,
+        "startTime": 1.36,
+        "token": " the",
+        "tokenId": 506
+      },
+      {
+        "confidence": 0.73779297,
+        "endTime": 1.68,
+        "startTime": 1.52,
+        "token": " ap",
+        "tokenId": 767
+      },
+      {
+        "confidence": 0.9995117,
+        "endTime": 1.76,
+        "startTime": 1.68,
+        "token": "ost",
+        "tokenId": 487
+      },
+      {
+        "confidence": 1,
+        "endTime": 2.08,
+        "startTime": 1.92,
+        "token": "le",
+        "tokenId": 337
+      },
+      {
+        "confidence": 0.99902344,
+        "endTime": 2.16,
+        "startTime": 2.08,
+        "token": " of",
+        "tokenId": 592
+      },
+      {
+        "confidence": 0.9995117,
+        "endTime": 2.3200000000000003,
+        "startTime": 2.16,
+        "token": " the",
+        "tokenId": 506
+      },
+      {
+        "confidence": 0.8354492,
+        "endTime": 2.4,
+        "startTime": 2.32,
+        "token": " mid",
+        "tokenId": 3414
+      },
+      {
+        "confidence": 1,
+        "endTime": 2.48,
+        "startTime": 2.4,
+        "token": "d",
+        "tokenId": 7874
+      },
+      {
+        "confidence": 1,
+        "endTime": 2.56,
+        "startTime": 2.48,
+        "token": "le",
+        "tokenId": 337
+      },
+      {
+        "confidence": 0.9995117,
+        "endTime": 2.8000000000000003,
+        "startTime": 2.64,
+        "token": " clas",
+        "tokenId": 6046
+      },
+      {
+        "confidence": 1,
+        "endTime": 2.9600000000000004,
+        "startTime": 2.8000000000000003,
+        "token": "s",
+        "tokenId": 7870
+      },
+      {
+        "confidence": 1,
+        "endTime": 3.04,
+        "startTime": 2.96,
+        "token": "es",
+        "tokenId": 283
+      },
+      {
+        "confidence": 0.8051758,
+        "endTime": 3.2,
+        "startTime": 3.04,
+        "token": ",",
+        "tokenId": 7877
+      },
+      {
+        "confidence": 1,
+        "endTime": 3.3600000000000003,
+        "startTime": 3.2,
+        "token": " and",
+        "tokenId": 575
+      },
+      {
+        "confidence": 1,
+        "endTime": 3.52,
+        "startTime": 3.36,
+        "token": " we",
+        "tokenId": 750
+      },
+      {
+        "confidence": 0.97216797,
+        "endTime": 3.68,
+        "startTime": 3.52,
+        "token": " are",
+        "tokenId": 1714
+      },
+      {
+        "confidence": 0.9995117,
+        "endTime": 3.8400000000000003,
+        "startTime": 3.68,
+        "token": " gl",
+        "tokenId": 1627
+      },
+      {
+        "confidence": 1,
+        "endTime": 4,
+        "startTime": 3.84,
+        "token": "ad",
+        "tokenId": 319
+      },
+      {
+        "confidence": 1,
+        "endTime": 4.16,
+        "startTime": 4,
+        "token": " to",
+        "tokenId": 366
+      },
+      {
+        "confidence": 1,
+        "endTime": 4.32,
+        "startTime": 4.16,
+        "token": " wel",
+        "tokenId": 4446
+      },
+      {
+        "confidence": 1,
+        "endTime": 4.4,
+        "startTime": 4.32,
+        "token": "c",
+        "tokenId": 7880
+      },
+      {
+        "confidence": 1,
+        "endTime": 4.640000000000001,
+        "startTime": 4.4,
+        "token": "ome",
+        "tokenId": 1901
+      },
+      {
+        "confidence": 0.99853516,
+        "endTime": 4.88,
+        "startTime": 4.64,
+        "token": " his",
+        "tokenId": 2745
+      },
+      {
+        "confidence": 0.81347656,
+        "endTime": 5.04,
+        "startTime": 4.88,
+        "token": " gos",
+        "tokenId": 3576
+      },
+      {
+        "confidence": 1,
+        "endTime": 5.6000000000000005,
+        "startTime": 5.28,
+        "token": "pel",
+        "tokenId": 5871
+      },
+      {
+        "confidence": 0.9868164,
+        "endTime": 5.680000000000001,
+        "startTime": 5.6000000000000005,
+        "token": ".",
+        "tokenId": 7883
+      }
+    ]
+  },
+  {
+    "id": "quilter-possessive",
+    "text": "Nor is mister Quilter's manner less interesting than his matter.",
+    "tokenTimings": [
+      {
+        "confidence": 0.84814453,
+        "endTime": 0.56,
+        "startTime": 0.24,
+        "token": " Nor",
+        "tokenId": 5685
+      },
+      {
+        "confidence": 1,
+        "endTime": 0.8,
+        "startTime": 0.56,
+        "token": " is",
+        "tokenId": 508
+      },
+      {
+        "confidence": 0.9355469,
+        "endTime": 0.9600000000000001,
+        "startTime": 0.8,
+        "token": " m",
+        "tokenId": 282
+      },
+      {
+        "confidence": 0.99853516,
+        "endTime": 1.1199999999999999,
+        "startTime": 0.96,
+        "token": "ister",
+        "tokenId": 3459
+      },
+      {
+        "confidence": 0.9975586,
+        "endTime": 1.36,
+        "startTime": 1.12,
+        "token": " Qu",
+        "tokenId": 1382
+      },
+      {
+        "confidence": 0.9941406,
+        "endTime": 1.6,
+        "startTime": 1.36,
+        "token": "il",
+        "tokenId": 305
+      },
+      {
+        "confidence": 0.9975586,
+        "endTime": 1.76,
+        "startTime": 1.6,
+        "token": "ter",
+        "tokenId": 441
+      },
+      {
+        "confidence": 0.98583984,
+        "endTime": 1.84,
+        "startTime": 1.76,
+        "token": "'",
+        "tokenId": 7931
+      },
+      {
+        "confidence": 1,
+        "endTime": 1.9200000000000002,
+        "startTime": 1.84,
+        "token": "s",
+        "tokenId": 7870
+      },
+      {
+        "confidence": 0.9941406,
+        "endTime": 2.08,
+        "startTime": 1.92,
+        "token": " man",
+        "tokenId": 698
+      },
+      {
+        "confidence": 0.9897461,
+        "endTime": 2.3200000000000003,
+        "startTime": 2.08,
+        "token": "ner",
+        "tokenId": 1742
+      },
+      {
+        "confidence": 1,
+        "endTime": 2.4,
+        "startTime": 2.32,
+        "token": " l",
+        "tokenId": 293
+      },
+      {
+        "confidence": 1,
+        "endTime": 2.6399999999999997,
+        "startTime": 2.4,
+        "token": "ess",
+        "tokenId": 561
+      },
+      {
+        "confidence": 0.9995117,
+        "endTime": 2.88,
+        "startTime": 2.64,
+        "token": " inter",
+        "tokenId": 1091
+      },
+      {
+        "confidence": 1,
+        "endTime": 3.04,
+        "startTime": 2.88,
+        "token": "est",
+        "tokenId": 365
+      },
+      {
+        "confidence": 1,
+        "endTime": 3.2800000000000002,
+        "startTime": 3.04,
+        "token": "ing",
+        "tokenId": 381
+      },
+      {
+        "confidence": 1,
+        "endTime": 3.5200000000000005,
+        "startTime": 3.2800000000000002,
+        "token": " than",
+        "tokenId": 7098
+      },
+      {
+        "confidence": 0.9995117,
+        "endTime": 3.84,
+        "startTime": 3.52,
+        "token": " his",
+        "tokenId": 2745
+      },
+      {
+        "confidence": 0.9785156,
+        "endTime": 4.08,
+        "startTime": 3.84,
+        "token": " mat",
+        "tokenId": 1544
+      },
+      {
+        "confidence": 0.9707031,
+        "endTime": 4.24,
+        "startTime": 4.08,
+        "token": "ter",
+        "tokenId": 441
+      },
+      {
+        "confidence": 0.9238281,
+        "endTime": 4.88,
+        "startTime": 4.72,
+        "token": ".",
+        "tokenId": 7883
+      }
+    ]
+  },
+  {
+    "id": "solanki",
+    "text": "Police Superintendent Shanra Shankhar Solansky said the accused appeared in court with covered faces.",
+    "tokenTimings": [
+      {
+        "confidence": 0.9980469,
+        "endTime": 0.72,
+        "startTime": 0.4,
+        "token": " Pol",
+        "tokenId": 4557
+      },
+      {
+        "confidence": 1,
+        "endTime": 0.88,
+        "startTime": 0.72,
+        "token": "ice",
+        "tokenId": 1205
+      },
+      {
+        "confidence": 0.83251953,
+        "endTime": 1.04,
+        "startTime": 0.88,
+        "token": " Su",
+        "tokenId": 3168
+      },
+      {
+        "confidence": 0.9995117,
+        "endTime": 1.2,
+        "startTime": 1.04,
+        "token": "per",
+        "tokenId": 847
+      },
+      {
+        "confidence": 0.99902344,
+        "endTime": 1.3599999999999999,
+        "startTime": 1.2,
+        "token": "int",
+        "tokenId": 942
+      },
+      {
+        "confidence": 0.9980469,
+        "endTime": 1.4400000000000002,
+        "startTime": 1.36,
+        "token": "end",
+        "tokenId": 488
+      },
+      {
+        "confidence": 1,
+        "endTime": 1.68,
+        "startTime": 1.44,
+        "token": "ent",
+        "tokenId": 340
+      },
+      {
+        "confidence": 0.3623047,
+        "endTime": 1.8399999999999999,
+        "startTime": 1.68,
+        "token": " S",
+        "tokenId": 343
+      },
+      {
+        "confidence": 0.65966797,
+        "endTime": 2,
+        "startTime": 1.84,
+        "token": "han",
+        "tokenId": 3272
+      },
+      {
+        "confidence": 0.9165039,
+        "endTime": 2.3200000000000003,
+        "startTime": 2.16,
+        "token": "ra",
+        "tokenId": 314
+      },
+      {
+        "confidence": 0.9785156,
+        "endTime": 2.48,
+        "startTime": 2.32,
+        "token": " Sh",
+        "tokenId": 4194
+      },
+      {
+        "confidence": 0.9633789,
+        "endTime": 2.64,
+        "startTime": 2.48,
+        "token": "ank",
+        "tokenId": 2192
+      },
+      {
+        "confidence": 0.51708984,
+        "endTime": 2.9600000000000004,
+        "startTime": 2.8000000000000003,
+        "token": "har",
+        "tokenId": 3054
+      },
+      {
+        "confidence": 0.8989258,
+        "endTime": 3.3600000000000003,
+        "startTime": 3.2,
+        "token": " S",
+        "tokenId": 343
+      },
+      {
+        "confidence": 0.9272461,
+        "endTime": 3.52,
+        "startTime": 3.36,
+        "token": "ol",
+        "tokenId": 324
+      },
+      {
+        "confidence": 0.85839844,
+        "endTime": 3.68,
+        "startTime": 3.52,
+        "token": "an",
+        "tokenId": 284
+      },
+      {
+        "confidence": 0.9667969,
+        "endTime": 4,
+        "startTime": 3.84,
+        "token": "sk",
+        "tokenId": 583
+      },
+      {
+        "confidence": 0.9995117,
+        "endTime": 4.32,
+        "startTime": 4,
+        "token": "y",
+        "tokenId": 7893
+      },
+      {
+        "confidence": 0.9970703,
+        "endTime": 4.640000000000001,
+        "startTime": 4.32,
+        "token": " said",
+        "tokenId": 5635
+      },
+      {
+        "confidence": 0.78808594,
+        "endTime": 4.8,
+        "startTime": 4.64,
+        "token": " the",
+        "tokenId": 506
+      },
+      {
+        "confidence": 0.9970703,
+        "endTime": 5.04,
+        "startTime": 4.8,
+        "token": " acc",
+        "tokenId": 3240
+      },
+      {
+        "confidence": 0.9873047,
+        "endTime": 5.2,
+        "startTime": 5.04,
+        "token": "used",
+        "tokenId": 4751
+      },
+      {
+        "confidence": 0.9916992,
+        "endTime": 5.44,
+        "startTime": 5.36,
+        "token": " app",
+        "tokenId": 1907
+      },
+      {
+        "confidence": 1,
+        "endTime": 5.6000000000000005,
+        "startTime": 5.44,
+        "token": "e",
+        "tokenId": 7864
+      },
+      {
+        "confidence": 0.99902344,
+        "endTime": 5.680000000000001,
+        "startTime": 5.6000000000000005,
+        "token": "ar",
+        "tokenId": 287
+      },
+      {
+        "confidence": 0.90722656,
+        "endTime": 5.76,
+        "startTime": 5.68,
+        "token": "ed",
+        "tokenId": 326
+      },
+      {
+        "confidence": 0.9995117,
+        "endTime": 5.92,
+        "startTime": 5.76,
+        "token": " in",
+        "tokenId": 334
+      },
+      {
+        "confidence": 0.9980469,
+        "endTime": 6.08,
+        "startTime": 5.92,
+        "token": " co",
+        "tokenId": 867
+      },
+      {
+        "confidence": 1,
+        "endTime": 6.32,
+        "startTime": 6.08,
+        "token": "urt",
+        "tokenId": 3095
+      },
+      {
+        "confidence": 1,
+        "endTime": 6.48,
+        "startTime": 6.32,
+        "token": " with",
+        "tokenId": 1868
+      },
+      {
+        "confidence": 0.99902344,
+        "endTime": 6.720000000000001,
+        "startTime": 6.48,
+        "token": " c",
+        "tokenId": 298
+      },
+      {
+        "confidence": 0.9926758,
+        "endTime": 6.96,
+        "startTime": 6.72,
+        "token": "over",
+        "tokenId": 3230
+      },
+      {
+        "confidence": 0.9995117,
+        "endTime": 7.28,
+        "startTime": 6.96,
+        "token": "ed",
+        "tokenId": 326
+      },
+      {
+        "confidence": 1,
+        "endTime": 7.6000000000000005,
+        "startTime": 7.28,
+        "token": " fac",
+        "tokenId": 2164
+      },
+      {
+        "confidence": 1,
+        "endTime": 7.920000000000001,
+        "startTime": 7.6000000000000005,
+        "token": "es",
+        "tokenId": 283
+      },
+      {
+        "confidence": 0.54833984,
+        "endTime": 8.24,
+        "startTime": 7.92,
+        "token": ".",
+        "tokenId": 7883
+      }
+    ]
+  }
+]
