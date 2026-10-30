@@ -6,9 +6,11 @@ import XCTest
 @MainActor
 final class SlidingWindowCancellationTests: XCTestCase {
     func testCancelJoinsRecognitionBeforeReleasingItsOwner() async throws {
-        let cache = AsrModels.defaultCacheDirectory()
-        try XCTSkipUnless(AsrModels.modelsExist(at: cache), "Install the Parakeet v3 models before running this test")
-        let models = try await AsrModels.load(from: cache)
+        let allowDownload = ProcessInfo.processInfo.environment["FLUIDAUDIO_RUN_ASR_E2E"] == "1"
+        try XCTSkipUnless(
+            AsrModels.modelsExist(at: AsrModels.defaultCacheDirectory()) || allowDownload,
+            "Parakeet v3 models not cached; set FLUIDAUDIO_RUN_ASR_E2E=1 to download")
+        let models = try await AsrModels.downloadAndLoad()
         let names = ["01-validation-request-21.4s", "02-release-readiness-19.8s", "03-diff-explanation-16.9s"]
         let samples = try names.flatMap { try recordedSpeech($0) }
         let owner = try await cancelBusyManager(models: models, samples: samples)

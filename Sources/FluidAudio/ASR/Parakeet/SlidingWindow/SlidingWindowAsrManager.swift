@@ -21,7 +21,7 @@ public actor SlidingWindowAsrManager {
 
     // ASR components
     private var asrManager: AsrManager?
-    private var recognizerTask: Task<Void, Error>?
+    private var recognizerTask: Task<Void, Never>?
     private var audioSource: AudioSource = .microphone
 
     // Decoder state for this sliding window session
@@ -244,13 +244,8 @@ public actor SlidingWindowAsrManager {
         // Signal end of input
         inputBuilder.finish()
 
-        // Wait for recognition task to complete
-        do {
-            try await recognizerTask?.value
-        } catch {
-            logger.error("Recognition task failed: \(error)")
-            throw error
-        }
+        // Wait for recognition task to complete (it handles its own errors and never throws)
+        await recognizerTask?.value
 
         // Surface total failure: every window errored, so the transcript is empty
         // or covers only a fraction of the audio. Silently returning it would be
@@ -336,15 +331,8 @@ public actor SlidingWindowAsrManager {
         task?.cancel()
         updateContinuation?.finish()
 
-        if let task {
-            do {
-                try await task.value
-            } catch is CancellationError {
-                // Cancellation is the expected exit path.
-            } catch {
-                logger.error("Recognition task failed while cancelling: \(error)")
-            }
-        }
+        // A cancelled recognizer returns normally at its next cancellation check.
+        await task?.value
 
         logger.info("SlidingWindowAsrManager cancelled")
     }
