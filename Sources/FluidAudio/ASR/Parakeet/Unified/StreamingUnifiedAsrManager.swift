@@ -228,15 +228,17 @@ public actor StreamingUnifiedAsrManager {
     ///   - config: Optional rescorer configuration (default:
     ///     `VocabularyBoostingSession.itnDefaultConfig` — this engine's ITN
     ///     output needs the #702 spotter-rescue similarity floors)
+    ///   - thresholds: Rescoring thresholds (default: vocabulary-size defaults)
     /// - Throws: Error if rescorer initialization fails
     public func configureVocabularyBoosting(
         vocabulary: CustomVocabularyContext,
         ctcModels: CtcModels,
-        config: VocabularyRescorer.Config? = nil
+        config: VocabularyRescorer.Config? = nil,
+        thresholds: VocabularyBoostingSession.Thresholds = .default
     ) async throws {
         self.vocabularyBoosting = try await VocabularyBoostingSession(
             vocabulary: vocabulary, ctcModels: ctcModels,
-            config: config ?? VocabularyBoostingSession.itnDefaultConfig
+            config: config ?? VocabularyBoostingSession.itnDefaultConfig, thresholds: thresholds
         )
         // Anchor the retained-audio clock at the current stream position and
         // freeze any text decoded before boosting was enabled: audio for it

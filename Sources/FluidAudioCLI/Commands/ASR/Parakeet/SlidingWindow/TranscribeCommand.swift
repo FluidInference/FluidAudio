@@ -1255,7 +1255,8 @@ enum TranscribeCommand {
                 --vocab-spotter-min-sim <0-1>        Min similarity for acoustic single-word rescue (e.g. 0.30)
                 --vocab-spotter-min-sim-multi <0-1>  Min similarity for multi-word rescue (e.g. 0.50)
                 --vocab-disable-spotter-rescue       Turn the acoustic rescue OFF entirely (#724; pre-#634
-                                                     behavior — biggest over-fire reduction for short vocabs)
+                                                     behavior — biggest over-fire reduction for short vocabs;
+                                                     the rescue only runs for vocabularies of <= 10 terms)
 
             PARAKEET VARIANT MODE (--parakeet-variant):
                 --parakeet-variant <variant>     Engine: parakeet-eou-160ms, nemotron-560ms, …

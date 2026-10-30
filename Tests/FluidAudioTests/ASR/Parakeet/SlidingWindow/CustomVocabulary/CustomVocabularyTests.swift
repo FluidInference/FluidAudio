@@ -297,6 +297,44 @@ final class CustomVocabularyTests: XCTestCase {
         XCTAssertEqual(VocabularyBoostingSession.detectedTermTexts([]), [])
     }
 
+    // MARK: - Session thresholds (#967)
+
+    func testDetectedTermTextsDropDetectionsBelowTheFloor() {
+        func detection(_ text: String, score: Float, at start: TimeInterval) -> CtcKeywordSpotter.KeywordDetection {
+            CtcKeywordSpotter.KeywordDetection(
+                term: CustomVocabularyTerm(text: text), score: score, totalFrames: 100,
+                startFrame: Int(start * 12.5), endFrame: Int(start * 12.5) + 5,
+                startTime: start, endTime: start + 0.4)
+        }
+        let detections = [
+            detection("Codex", score: -9, at: 1.0), detection("Tuist", score: -1, at: 2.0),
+            detection("codex", score: -2, at: 3.0), detection("Qwen", score: -14, at: 4.0),
+        ]
+        // A later, stronger repeat still lists the term once, at its first surviving position.
+        XCTAssertEqual(VocabularyBoostingSession.detectedTermTexts(detections, minScore: -5), ["Tuist", "codex"])
+        XCTAssertEqual(
+            VocabularyBoostingSession.detectedTermTexts(detections), ["Codex", "Tuist", "Qwen"],
+            "no floor keeps the previous behaviour")
+        XCTAssertEqual(VocabularyBoostingSession.detectedTermTexts(detections, minScore: 0), [])
+    }
+
+    func testThresholdOverridesKeepTheVocabularyFloorAndDefaults() {
+        let defaults = VocabularyBoostingSession.Thresholds.default
+        XCTAssertNil(defaults.cbw)
+        XCTAssertNil(defaults.minSimilarity)
+        XCTAssertEqual(defaults.marginSeconds, 0.5)
+        XCTAssertEqual(defaults.detectionMinScore, VocabularyBoostingSession.Thresholds.defaultDetectionMinScore)
+
+        let size = ContextBiasingConstants.rescorerConfig(forVocabSize: 51).minSimilarity
+        XCTAssertEqual(
+            VocabularyBoostingSession.minSimilarity(override: nil, sizeDefault: size, vocabularyFloor: 0.52), size)
+        XCTAssertEqual(
+            VocabularyBoostingSession.minSimilarity(override: 0.7, sizeDefault: size, vocabularyFloor: 0.52), 0.7)
+        XCTAssertEqual(
+            VocabularyBoostingSession.minSimilarity(override: 0.3, sizeDefault: size, vocabularyFloor: 0.52), 0.52,
+            "a looser override cannot go below the vocabulary's own threshold")
+    }
+
     // MARK: - Bounded nearest-word fallback (#899)
 
     private func word(_ text: String, _ start: Double, _ end: Double) -> VocabularyRescorer.WordTiming {

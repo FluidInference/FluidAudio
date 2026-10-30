@@ -74,7 +74,9 @@ public struct VocabularyRescorer: Sendable {
         /// distinctive-name vocabularies, but loses recovery of brand names TDT
         /// mangles past the string-similarity gate. Prefer this for short-vocab
         /// KWS. (Composes with `spotterRescueMinSimilarity`: this is the on/off
-        /// switch, that is the in-between similarity floor.)
+        /// switch, that is the in-between similarity floor.) The rescue only
+        /// runs for vocabularies of at most `largeVocabThreshold` (10) terms;
+        /// above that this switch has no effect.
         public let spotterRescueEnabled: Bool
 
         public static let `default` = Config()
