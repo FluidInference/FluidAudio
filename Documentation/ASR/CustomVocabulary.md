@@ -266,8 +266,8 @@ let tokenIds = tokenizer.encode("NVIDIA")
 Runs CTC model inference and implements the NeMo CTC word spotting algorithm.
 
 **Inference pipeline** (`+Inference.swift`):
-1. Audio → MelSpectrogram model → mel features
-2. Mel features → AudioEncoder model → CTC logits
+1. Audio → MelSpectrogram model (always on the CPU; on the Neural Engine its features made every frame blank, #1074) → mel features
+2. Mel features → AudioEncoder model (CPU + Neural Engine) → CTC logits
 3. Logits → log-softmax → log-probabilities `[T, V]`
 4. For long audio (>15s), processes in overlapping chunks and averages log-probs at boundaries
 
