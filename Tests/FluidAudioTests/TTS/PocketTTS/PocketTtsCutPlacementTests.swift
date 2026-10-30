@@ -5,17 +5,32 @@ import XCTest
 
 final class PocketTtsCutPlacementTests: XCTestCase {
 
-    /// One token per word, so token counts equal word counts.
-    private func makeTokenizer(words: [String]) throws -> SentencePieceTokenizer {
-        let letters = "abcdefghijklmnopqrstuvwxyz".map { String($0) }
-        return try SentencePieceTestModel.tokenizer(
-            pieces: ["<unk>", "\u{2581}"] + words.map { "\u{2581}" + $0 } + letters)
+    /// The v2.1 English tokenizer (see Fixtures/README.md). Chunk sizing normalizes
+    /// each candidate as synthesis does, so token counts come from the real vocabulary.
+    private func makeEnglishTokenizer() throws -> SentencePieceTokenizer {
+        let modelURL = try XCTUnwrap(
+            Bundle.module.url(forResource: "pocket_tts_english_tokenizer", withExtension: "model"))
+        return try SentencePieceTokenizer(modelData: Data(contentsOf: modelURL))
     }
 
-    private let numberWords = [
-        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-        "eleven", "twelve",
-    ]
+    /// Chunks as `synthesizeStreaming` makes them for a voice whose conditioning
+    /// ends at `voiceCachePosition` (126 for a shipped voice, 251 for a cloned one).
+    private func chunks(
+        _ text: String, tokenizer: SentencePieceTokenizer, voiceCachePosition: Int
+    ) throws -> [String] {
+        let maxTokens = try PocketTtsSynthesizer.effectiveMaxTokensPerChunk(
+            requested: PocketTtsConstants.maxTokensPerChunk, voiceCachePosition: voiceCachePosition)
+        return PocketTtsSynthesizer.chunkTextWithMetadata(
+            text, tokenizer: tokenizer, maxTokens: maxTokens,
+            preferredMaxTokens: min(PocketTtsConstants.preferredTokensPerChunk, maxTokens),
+            voiceCachePosition: voiceCachePosition
+        ).map(\.text)
+    }
+
+    private let dashSentence =
+        "The humidity feels comfortable despite the approaching storm, and the air carries that "
+        + "distinctive electric charge that precedes rain \u{2014} a mix of ozone and wet soil that makes "
+        + "everything feel fresh and alive before the first drops hit the pavement."
 
     // MARK: - Dashes as clause boundaries
 
@@ -59,6 +74,29 @@ final class PocketTtsCutPlacementTests: XCTestCase {
             ["the ridge", "(which faces west),", "and the valley"])
     }
 
+    func testBracketsInsideAWordAreNotAnAside() {
+        XCTAssertEqual(
+            PocketTtsSynthesizer.splitAtClauseBoundaries("we write f(x) for the item(s) we keep"),
+            ["we write f(x) for the item(s) we keep"])
+        XCTAssertEqual(
+            PocketTtsSynthesizer.splitAtClauseBoundaries("the call g(a (b) c) returns"),
+            ["the call g(a", "(b)", "c) returns"])
+    }
+
+    func testRegroupedClausesKeepTheirSeparators() throws {
+        let tokenizer = try makeEnglishTokenizer()
+        let text =
+            "alpha beta,gamma delta\u{2014}epsilon zeta, and then a much longer clause that has to "
+            + "go into a chunk of its own because it keeps going for quite a while longer"
+        let parts = PocketTtsSynthesizer.splitOversizedSentence(text, tokenizer: tokenizer, maxTokens: 30)
+
+        XCTAssertGreaterThan(parts.count, 1)
+        XCTAssertEqual(parts.first, "alpha beta,gamma delta\u{2014}epsilon zeta,")
+        for part in parts {
+            XCTAssertTrue(text.contains(part), "part is not verbatim text: \(part)")
+        }
+    }
+
     func testEllipsisEndsAClause() {
         XCTAssertEqual(
             PocketTtsSynthesizer.splitAtClauseBoundaries("and then\u{2026} nothing happened"),
@@ -81,40 +119,96 @@ final class PocketTtsCutPlacementTests: XCTestCase {
 
     // MARK: - Balanced word-boundary splitting
 
-    func testOversizedTextSplitsIntoBalancedParts() throws {
-        // 12 tokens against a limit of 10 needs two parts. Filling to the
-        // limit gives 10 + 2; balancing gives 6 + 6.
-        let tokenizer = try makeTokenizer(words: numberWords)
-        let parts = PocketTtsSynthesizer.splitAtWordBoundaries(
-            numberWords.joined(separator: " "), tokenizer: tokenizer, maxTokens: 10)
-        XCTAssertEqual(
-            parts,
-            [
-                "one two three four five six",
-                "seven eight nine ten eleven twelve",
-            ])
-    }
+    func testWordSplitUsesTheFewestPartsAndBalancesThem() throws {
+        // About 107 and 143 tokens against a limit of 50: both need three parts.
+        // Filling each part to the limit strands a short tail on the first, and a
+        // fixed per-part target could spill the second into a fourth part.
+        let tokenizer = try makeEnglishTokenizer()
+        let clause =
+            "the scheduler kept retrying the same request over and over again until the operator "
+            + "finally noticed the alert on the dashboard late at night"
+        for clauses in [3, 4] {
+            let text = Array(repeating: clause, count: clauses).joined(separator: " and ")
+            let parts = PocketTtsSynthesizer.splitAtWordBoundaries(text, tokenizer: tokenizer, maxTokens: 50)
 
-    func testNoPartExceedsTheLimitOrStrandsAShortTail() throws {
-        let tokenizer = try makeTokenizer(words: numberWords)
-        let text = (numberWords + numberWords + ["one"]).joined(separator: " ")
-        let parts = PocketTtsSynthesizer.splitAtWordBoundaries(
-            text, tokenizer: tokenizer, maxTokens: 10)
-
-        XCTAssertEqual(parts.count, 3)
-        for part in parts {
-            let tokens = tokenizer.encode(part).count
-            XCTAssertLessThanOrEqual(tokens, 10, "part over the limit: \(part)")
-            XCTAssertGreaterThanOrEqual(tokens, 7, "part far below its share: \(part)")
+            XCTAssertEqual(parts.count, 3, "\(clauses) clauses")
+            for part in parts {
+                XCTAssertTrue(
+                    PocketTtsSynthesizer.fitsTextChunk(
+                        part, tokenizer: tokenizer, maxTokens: 50, voiceCachePosition: nil),
+                    "part over the limit: \(part)")
+            }
+            let counts = parts.map { tokenizer.encode($0).count }
+            XCTAssertLessThanOrEqual(counts.max()! - counts.min()!, 2, "unbalanced parts: \(counts)")
+            XCTAssertEqual(parts.joined(separator: " "), text)
         }
-        XCTAssertEqual(parts.joined(separator: " "), text)
     }
 
     func testTextWithinTheLimitIsNotSplit() throws {
-        let tokenizer = try makeTokenizer(words: numberWords)
-        let text = numberWords.prefix(8).joined(separator: " ")
+        let tokenizer = try makeEnglishTokenizer()
+        let text = "the scheduler kept retrying the same request"
         XCTAssertEqual(
-            PocketTtsSynthesizer.splitAtWordBoundaries(text, tokenizer: tokenizer, maxTokens: 10),
-            [text])
+            PocketTtsSynthesizer.splitAtWordBoundaries(text, tokenizer: tokenizer, maxTokens: 50), [text])
+    }
+
+    func testZeroTokenLimitTerminates() throws {
+        let tokenizer = try makeEnglishTokenizer()
+        XCTAssertEqual(
+            PocketTtsSynthesizer.chunkText("one two three, four five", tokenizer: tokenizer, maxTokens: 0),
+            ["one", "two", "three,", "four", "five"])
+    }
+
+    // MARK: - Cuts within the KV cache (#934)
+
+    func testClonedVoiceCutsAtTheDash() throws {
+        let tokenizer = try makeEnglishTokenizer()
+        XCTAssertEqual(
+            try chunks(dashSentence, tokenizer: tokenizer, voiceCachePosition: 251),
+            [
+                "The humidity feels comfortable despite the approaching storm, and the air carries that "
+                    + "distinctive electric charge that precedes rain \u{2014}",
+                "a mix of ozone and wet soil that makes everything feel fresh and alive before the first "
+                    + "drops hit the pavement.",
+            ])
+    }
+
+    func testClonedVoiceCutsAfterTheBracketedAside() throws {
+        let tokenizer = try makeEnglishTokenizer()
+        let text =
+            "The control plane on the Pi (which also serves the dashboard) polls the shard every fifteen "
+            + "minutes and merges whatever services it finds into a single response that the rest of the "
+            + "platform treats as the source of truth."
+        let result = try chunks(text, tokenizer: tokenizer, voiceCachePosition: 251)
+
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result.first, "The control plane on the Pi (which also serves the dashboard)")
+    }
+
+    func testClonedVoiceBalancesASentenceWithoutPunctuation() throws {
+        let tokenizer = try makeEnglishTokenizer()
+        let text =
+            "Nobody should ever need to restart the whole machine just because one small demand loaded "
+            + "model ran out of memory while another bigger one was still busy answering a long question "
+            + "from the voice loop."
+        let counts = try chunks(text, tokenizer: tokenizer, voiceCachePosition: 251)
+            .map { tokenizer.encode($0).count }
+
+        XCTAssertEqual(counts.count, 2)
+        XCTAssertLessThanOrEqual(abs(counts[0] - counts[1]), 2, "unbalanced parts: \(counts)")
+    }
+
+    func testShippedVoiceKeepsTheSentenceWholeAndCutsALongerOneAtTheDash() throws {
+        let tokenizer = try makeEnglishTokenizer()
+        XCTAssertEqual(try chunks(dashSentence, tokenizer: tokenizer, voiceCachePosition: 126), [dashSentence])
+
+        let longer =
+            "The humidity feels comfortable despite the approaching storm and the air carries that "
+            + "distinctive electric charge that precedes rain\u{2014}a mix of ozone and wet soil that makes "
+            + "everything feel fresh and alive before the first drops hit the pavement and the children run "
+            + "back inside laughing while their parents close the windows."
+        let result = try chunks(longer, tokenizer: tokenizer, voiceCachePosition: 126)
+        XCTAssertEqual(result.count, 2)
+        XCTAssertTrue(result[0].hasSuffix("precedes rain\u{2014}"), "cut not at the dash: \(result)")
+        XCTAssertTrue(result[1].hasPrefix("a mix of ozone"), "cut not at the dash: \(result)")
     }
 }
