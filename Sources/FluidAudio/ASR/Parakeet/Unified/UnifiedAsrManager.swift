@@ -73,7 +73,7 @@ public actor UnifiedAsrManager {
 
     // Vocabulary boosting (issue #851): configured via
     // configureVocabularyBoosting() before transcription.
-    private var vocabularyBoosting: VocabularyBoostingSession?
+    private(set) var vocabularyBoosting: VocabularyBoostingSession?
 
     public private(set) var mlConfiguration: MLModelConfiguration
 

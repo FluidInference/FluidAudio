@@ -71,7 +71,7 @@ public actor StreamingUnifiedAsrManager {
     // segment at a time (~15 s, matching the sliding-window batch cadence)
     // instead of per 1 s chunk — CTC keyword spans would straddle chunk
     // seams and a per-chunk CTC pass would dominate the step budget.
-    private var vocabularyBoosting: VocabularyBoostingSession?
+    private(set) var vocabularyBoosting: VocabularyBoostingSession?
     // Transcript already rescored (immutable prefix). The un-rescored tail
     // is the concatenation of `vocabTimings` token texts.
     private var rescoredTranscript: String = ""
@@ -497,10 +497,7 @@ public actor StreamingUnifiedAsrManager {
                 text: segmentText, tokenTimings: segmentTimings, audioSamples: vocabAudio
             )
         {
-            // The rescorer rebuilds its text as words joined by single spaces,
-            // dropping the segment's leading separator — restore it so the
-            // released text still butts cleanly against the rescored prefix.
-            releasedText = (segmentText.hasPrefix(" ") ? " " : "") + rescored.text
+            releasedText = Self.releasedSegmentText(segmentText, rescored: rescored)
             pendingVocabReplacements.append(contentsOf: rescored.replacements.filter { $0.shouldReplace })
         }
         rescoredTranscript += releasedText
@@ -520,6 +517,15 @@ public actor StreamingUnifiedAsrManager {
         if releasedText != segmentText, let callback = partialCallback {
             callback(currentTranscript())
         }
+    }
+
+    /// Text released for a rescored segment. A modified text is rebuilt by the rescorer as words joined by
+    /// single spaces, without the segment's leading separator, so restore it to butt cleanly against the
+    /// rescored prefix. An unmodified segment keeps its own text: the session then hands back the caller's text,
+    /// separator included, and prefixing it again doubled the space (#967).
+    static func releasedSegmentText(_ segmentText: String, rescored: VocabularyRescorer.RescoreOutput) -> String {
+        guard rescored.wasModified else { return segmentText }
+        return (segmentText.hasPrefix(" ") ? " " : "") + rescored.text
     }
 
     private func dropVocabAudio(count: Int) {

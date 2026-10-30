@@ -324,6 +324,7 @@ final class CustomVocabularyTests: XCTestCase {
         XCTAssertNil(defaults.minSimilarity)
         XCTAssertEqual(defaults.marginSeconds, 0.5)
         XCTAssertEqual(defaults.detectionMinScore, VocabularyBoostingSession.Thresholds.defaultDetectionMinScore)
+        XCTAssertEqual(VocabularyBoostingSession.Thresholds.defaultDetectionMinScore, -6.5, "calibrated in #967")
 
         let size = ContextBiasingConstants.rescorerConfig(forVocabSize: 51).minSimilarity
         XCTAssertEqual(
@@ -333,6 +334,20 @@ final class CustomVocabularyTests: XCTestCase {
         XCTAssertEqual(
             VocabularyBoostingSession.minSimilarity(override: 0.3, sizeDefault: size, vocabularyFloor: 0.52), 0.52,
             "a looser override cannot go below the vocabulary's own threshold")
+    }
+
+    func testRescoreParametersUseOverridesOrTheSizeDefaults() {
+        let size = ContextBiasingConstants.rescorerConfig(forVocabSize: 51)
+        let defaults = VocabularyBoostingSession.rescoreParameters(.default, sizeConfig: size, vocabularyFloor: 0.52)
+        XCTAssertEqual(defaults.cbw, size.cbw)
+        XCTAssertEqual(defaults.minSimilarity, max(size.minSimilarity, 0.52))
+        XCTAssertEqual(defaults.marginSeconds, 0.5)
+
+        let dictation = VocabularyBoostingSession.rescoreParameters(
+            .init(cbw: 0, minSimilarity: 0.7, marginSeconds: 0.1), sizeConfig: size, vocabularyFloor: 0.52)
+        XCTAssertEqual(dictation.cbw, 0)
+        XCTAssertEqual(dictation.minSimilarity, 0.7)
+        XCTAssertEqual(dictation.marginSeconds, 0.1)
     }
 
     // MARK: - Bounded nearest-word fallback (#899)

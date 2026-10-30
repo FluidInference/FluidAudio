@@ -146,6 +146,20 @@ public struct VocabularyBoostingSession: Sendable {
             vocabularyFloor: vocabulary.minSimilarity)
     }
 
+    /// The `ctcTokenRescore` arguments for `thresholds`: overrides where set, otherwise the vocabulary-size
+    /// defaults. Pure, for testability.
+    static func rescoreParameters(
+        _ thresholds: Thresholds, sizeConfig: ContextBiasingConstants.VocabSizeConfig, vocabularyFloor: Float
+    ) -> (cbw: Float, minSimilarity: Float, marginSeconds: Double) {
+        (
+            cbw: thresholds.cbw ?? sizeConfig.cbw,
+            minSimilarity: minSimilarity(
+                override: thresholds.minSimilarity, sizeDefault: sizeConfig.minSimilarity,
+                vocabularyFloor: vocabularyFloor),
+            marginSeconds: thresholds.marginSeconds
+        )
+    }
+
     /// The override (or the vocabulary-size default), raised to the vocabulary's own threshold when that
     /// is stricter. Pure, for testability.
     static func minSimilarity(override: Float?, sizeDefault: Float, vocabularyFloor: Float) -> Float {
@@ -183,14 +197,16 @@ public struct VocabularyBoostingSession: Sendable {
                 return nil
             }
 
+            let parameters = Self.rescoreParameters(
+                thresholds, sizeConfig: vocabSizeConfig, vocabularyFloor: vocabulary.minSimilarity)
             let rescoreOutput = rescorer.ctcTokenRescore(
                 transcript: text,
                 tokenTimings: tokenTimings,
                 logProbs: logProbs,
                 frameDuration: spotResult.frameDuration,
-                cbw: thresholds.cbw ?? vocabSizeConfig.cbw,
-                marginSeconds: thresholds.marginSeconds,
-                minSimilarity: minSimilarity
+                cbw: parameters.cbw,
+                marginSeconds: parameters.marginSeconds,
+                minSimilarity: parameters.minSimilarity
             )
 
             // The spotter runs with its lenient default floor (-15 per token), which lists nearly every

@@ -523,10 +523,10 @@ The thresholds, the size buckets (`largeVocabThreshold = 10`,
 
 #### Overriding the thresholds (#967)
 
-These defaults favour recall: they were tuned on keyword-spotting benchmarks where every listed term is
-spoken. In dictation most listed terms are not in any given sentence, and a wrong replacement of a
-correctly heard word costs more than a miss. `VocabularyBoostingSession.Thresholds` overrides them; `nil`
-keeps the size default:
+These defaults favour recall: they were tuned on the keyword-spotting benchmarks above, which count how
+many spoken terms are recovered. In dictation most listed terms are not in any given sentence, and a wrong
+replacement of a correctly heard word costs more than a miss. `VocabularyBoostingSession.Thresholds`
+overrides them; `nil` keeps the size default:
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -543,14 +543,19 @@ let session = try await VocabularyBoostingSession(
 
 The managers' `configureVocabularyBoosting(vocabulary:ctcModels:config:thresholds:)` take the same value.
 On the #967 reporter's 13 dictation clips (12-term list, this release), the defaults replaced three
-correctly heard words (`twist of lime` → `Tuist`, `analytics` → `Qualtrics`, `Xcode` → `Codex`);
+correctly heard words (`twist` → `Tuist` in "a twist of lime", `analytics` → `Qualtrics`, `Xcode` → `Codex`);
 `cbw: 0, minSimilarity: 0.7` replaced none and kept three of the nine corrections the defaults made.
 
-`detectedTerms` used to list every term on any speech: the spotter's own floor is −15 per token. The −6.5
-default kept every spoken term on the #967 clips and 40 LibriSpeech utterances (including all 13 that
-Parakeet misheard) and cut unspoken terms from 299/300 to 53/300; a junk term was never listed. Sound-alikes
-at real locations (`Sora` inside "Saurabh", `Codex` on "Xcode") still appear, since they score like spoken
-terms.
+`detectedTerms` used to list every term on any speech: the spotter's own floor is −15 per token. With the
+−6.5 default (pairs of clip and term):
+
+| Data | Spoken terms listed | Unspoken terms listed | Junk term listed |
+|---|---|---|---|
+| #967 dictation clips (13 clips, 12 terms) | 16/16, including the misheard ones | 40/140 (was 140/140) | 0/13 |
+| LibriSpeech test-clean (40 utterances) | 141/141 | 13/160 (was 159/160) | 0/40 |
+
+Most unspoken terms that remain are sound-alikes at real locations (`Sora` inside "Saurabh", `Codex` on
+"Xcode", `Qualtrics` on "analytics"), which score like spoken terms, so no score floor removes them.
 
 ### Short-Term Over-Fire Controls (opt-in, #702)
 
@@ -614,11 +619,9 @@ let config = VocabularyRescorer.Config(
     spotterRescueMinSimilarity: 0.30,     // single-word acoustic-rescue floor
     spotterRescueMultiWordMinSimilarity: 0.50  // multi-word floor
 )
-let rescorer = try await VocabularyRescorer.create(
-    spotter: ctcSpotter,
-    vocabulary: vocabulary,
-    config: config
-)
+// Through a session (or any manager's configureVocabularyBoosting(vocabulary:ctcModels:config:)):
+let session = try await VocabularyBoostingSession(
+    vocabulary: vocabulary, ctcModels: ctcModels, config: config)
 ```
 
 ```bash
@@ -718,13 +721,17 @@ let output = await session.rescore(
     text: result.text, tokenTimings: result.tokenTimings ?? [], audioSamples: audioSamples)
 let text = output?.text ?? result.text  // nil: nothing replaced and nothing detected
 
-// output?.replacements: one decision per candidate span (`shouldReplace` = applied)
+// output?.replacements: the replacements that were applied
 // output?.detectedTerms: terms the spotter found above `thresholds.detectionMinScore`
 ```
 
-`SlidingWindowAsrManager`, `UnifiedAsrManager` and `StreamingUnifiedAsrManager` run the same session
-internally after `configureVocabularyBoosting(vocabulary:ctcModels:)`; their results carry
-`ctcDetectedTerms`, `ctcAppliedTerms` and `ctcReplacements`.
+The managers run the same session internally after `configureVocabularyBoosting(vocabulary:ctcModels:)`:
+
+| Manager | What the rescoring reports |
+|---|---|
+| `SlidingWindowAsrManager` | Each update carries `ctcDetectedTerms`, `ctcAppliedTerms` and `ctcReplacements` |
+| `UnifiedAsrManager` | `transcribeDetailed(_:)` returns them on the `ASRResult`; `transcribe(_:)` returns text only |
+| `StreamingUnifiedAsrManager` | Applied replacements via `consumeVocabularyReplacements()`; no detected terms |
 
 ## Streaming Mode Limitations
 

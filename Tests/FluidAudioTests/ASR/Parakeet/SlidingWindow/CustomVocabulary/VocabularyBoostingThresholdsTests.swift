@@ -56,4 +56,34 @@ final class VocabularyBoostingThresholdsTests: XCTestCase {
         let blocked = try await rescore(["Helpp"], .init(cbw: -100))
         XCTAssertFalse(blocked?.wasModified ?? false, blocked?.text ?? "nil")
     }
+
+    /// The managers hand their thresholds to the session they build. Needs only the CTC 110M models.
+    func testManagersPassThresholdsToTheirSession() async throws {
+        let allowDownload = ProcessInfo.processInfo.environment["FLUIDAUDIO_RUN_ASR_E2E"] == "1"
+        try XCTSkipUnless(
+            CtcModels.modelsExist(at: CtcModels.defaultCacheDirectory()) || allowDownload,
+            "CTC models not cached; set FLUIDAUDIO_RUN_ASR_E2E=1 to download")
+        let ctcModels = try await CtcModels.downloadAndLoad()
+        let vocabulary = CustomVocabularyContext(terms: [CustomVocabularyTerm(text: "Tuist")])
+        let thresholds = VocabularyBoostingSession.Thresholds(
+            cbw: 0, minSimilarity: 0.7, marginSeconds: 0.2, detectionMinScore: -5)
+
+        let slidingWindow = SlidingWindowAsrManager()
+        try await slidingWindow.configureVocabularyBoosting(
+            vocabulary: vocabulary, ctcModels: ctcModels, thresholds: thresholds)
+        let slidingWindowThresholds = await slidingWindow.vocabularyBoosting?.thresholds
+        XCTAssertEqual(slidingWindowThresholds, thresholds)
+
+        let unified = UnifiedAsrManager()
+        try await unified.configureVocabularyBoosting(
+            vocabulary: vocabulary, ctcModels: ctcModels, thresholds: thresholds)
+        let unifiedThresholds = await unified.vocabularyBoosting?.thresholds
+        XCTAssertEqual(unifiedThresholds, thresholds)
+
+        let streamingUnified = StreamingUnifiedAsrManager()
+        try await streamingUnified.configureVocabularyBoosting(
+            vocabulary: vocabulary, ctcModels: ctcModels, thresholds: thresholds)
+        let streamingUnifiedThresholds = await streamingUnified.vocabularyBoosting?.thresholds
+        XCTAssertEqual(streamingUnifiedThresholds, thresholds)
+    }
 }

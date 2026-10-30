@@ -228,9 +228,12 @@ public struct VocabularyRescorer: Sendable {
         public let text: String
         public let replacements: [RescoringResult]
         public let wasModified: Bool
-        /// Vocabulary terms the CTC spotter detected in the audio (canonical
+        /// Vocabulary terms the CTC spotter detected in the audio with a
+        /// per-token score of at least
+        /// `VocabularyBoostingSession.Thresholds.detectionMinScore` (canonical
         /// text, in time order, deduplicated), whether or not any replacement
-        /// was applied. Populated by `VocabularyBoostingSession.rescore` (#899).
+        /// was applied. Populated by `VocabularyBoostingSession.rescore`
+        /// (#899, #967).
         public var detectedTerms: [String] = []
     }
 
