@@ -255,9 +255,10 @@ extension CtcModels {
         MLModelConfigurationUtils.defaultConfiguration(computeUnits: .cpuAndNeuralEngine)
     }
 
-    /// CoreML configuration for the `MelSpectrogram` front end: CPU only, like every other FluidAudio
-    /// mel / preprocessor model. With the Neural Engine allowed, macOS 27.0.1 on M1 Pro and M4 Max places
-    /// part of it there, and those features make the encoder emit blank for every frame (#1074).
+    /// CoreML configuration for the `MelSpectrogram` front end: CPU only, like the standalone preprocessors of
+    /// Parakeet TDT, Canary, SenseVoice, Paraformer, CAM++ and FSMN-VAD. With the Neural Engine allowed, macOS
+    /// 27.0.1 on M1 Pro and M4 Max places part of it there, and those features make the encoder emit blank for
+    /// every frame (#1074).
     public static func melSpectrogramConfiguration() -> MLModelConfiguration {
         MLModelConfigurationUtils.defaultConfiguration(computeUnits: .cpuOnly)
     }
