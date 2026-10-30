@@ -73,6 +73,8 @@ struct LFM3AudioFeedResult: Sendable {
 protocol LFM3AudioLanguageModel: Actor {
     /// Clears the context (new MLState / zeroed Core AI states).
     func reset() throws
+    /// Loads whatever `rows`-row calls need now instead of on their first call.
+    func prepare(rows: Int) throws
     /// Appends `rows` at the current position and returns what `want` asks for from the last row.
     func feed(_ rows: LFM3AudioRows, want: LFM3AudioWant) async throws -> LFM3AudioFeedResult
 }

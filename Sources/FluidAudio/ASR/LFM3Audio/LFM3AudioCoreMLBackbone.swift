@@ -115,6 +115,25 @@ enum LFM3AudioMasks {
     }
 }
 
+/// A backbone stage function: loaded with the pack, or on the first call of its bucket
+/// (`LFM3AudioConfig.deferredPrefillRows`).
+enum LFM3AudioStageModel: Sendable {
+    case loaded(MLModel)
+    case deferred(@Sendable () throws -> MLModel)
+
+    var isDeferred: Bool {
+        if case .deferred = self { return true }
+        return false
+    }
+
+    func load() throws -> MLModel {
+        switch self {
+        case .loaded(let model): return model
+        case .deferred(let load): return try load()
+        }
+    }
+}
+
 /// Core ML LFM3 backbone pack: two stateful multifunction stages (A: layers 0-11, B: 12-23; functions
 /// `decode_q1`, `prefill_q256/64/16/13`) driven at the embedding level, plus a stateless chunked top-k head.
 @available(macOS 15, iOS 18, tvOS 18, visionOS 2, *)
@@ -136,15 +155,40 @@ actor LFM3AudioCoreMLBackbone: LFM3AudioLanguageModel {
         }
     }
 
+    /// One decode / prefill bucket across the stages; a deferred bucket loads its stage models on first use.
     private final class Function {
         let q: Int
         let span: Int
-        let stages: [Stage]
-        let shared: [String: MLMultiArray]
-        init(q: Int, span: Int, stages: [Stage], shared: [String: MLMultiArray]) {
+        private(set) var stages: [Stage] = []
+        private(set) var shared: [String: MLMultiArray] = [:]
+        private var pending: [LFM3AudioStageModel]?
+
+        init(q: Int, span: Int, sources: [LFM3AudioStageModel]) throws {
             self.q = q
             self.span = span
-            self.stages = stages
+            if sources.contains(where: \.isDeferred) {
+                pending = sources
+            } else {
+                try build(sources)
+            }
+        }
+
+        /// Loads the stage models of a deferred bucket; no-op once loaded.
+        func load() throws {
+            guard let sources = pending else { return }
+            try build(sources)
+            pending = nil
+        }
+
+        private func build(_ sources: [LFM3AudioStageModel]) throws {
+            let models = try sources.map { try $0.load() }
+            var shared: [String: MLMultiArray] = [:]
+            for model in models {
+                for (name, array) in try LFM3AudioArrays.zeroInputs(model.modelDescription) where shared[name] == nil {
+                    shared[name] = array
+                }
+            }
+            stages = try models.map { try Stage(model: $0, shared: shared) }
             self.shared = shared
         }
     }
@@ -164,9 +208,9 @@ actor LFM3AudioCoreMLBackbone: LFM3AudioLanguageModel {
     private var slot = 0
     private var nPad = 0
 
-    /// - Parameter stageModels: `"<stage index>:<function>"` -> loaded model.
+    /// - Parameter stageModels: `"<stage index>:<function>"` -> stage model (loaded, or deferred to first use).
     init(
-        config: LFM3AudioPackConfig, embedding: LFM3AudioEmbeddingTable, stageModels: [String: MLModel],
+        config: LFM3AudioPackConfig, embedding: LFM3AudioEmbeddingTable, stageModels: [String: LFM3AudioStageModel],
         head: MLModel
     ) throws {
         guard let full = config.rope["full"], let sliding = config.rope["sliding"] else {
@@ -178,21 +222,14 @@ actor LFM3AudioCoreMLBackbone: LFM3AudioLanguageModel {
         ropeSliding = LFM3AudioRope(theta: sliding.theta, pairs: sliding.pairs, headDim: config.headDim)
         var functions: [Int: [Function]] = [:]
         for plan in config.callPlans {
-            var models: [MLModel] = []
+            var sources: [LFM3AudioStageModel] = []
             for (index, name) in plan.calls.enumerated() {
-                guard let model = stageModels["\(index):\(name)"] else {
+                guard let source = stageModels["\(index):\(name)"] else {
                     throw LFM3AudioError.modelNotFound("backbone stage \(index) function \(name)")
                 }
-                models.append(model)
+                sources.append(source)
             }
-            var shared: [String: MLMultiArray] = [:]
-            for model in models {
-                for (name, array) in try LFM3AudioArrays.zeroInputs(model.modelDescription) where shared[name] == nil {
-                    shared[name] = array
-                }
-            }
-            let stages = try models.map { try Stage(model: $0, shared: shared) }
-            functions[plan.q, default: []].append(Function(q: plan.q, span: plan.span, stages: stages, shared: shared))
+            functions[plan.q, default: []].append(try Function(q: plan.q, span: plan.span, sources: sources))
         }
         guard functions[1] != nil else { throw LFM3AudioError.invalidModel("pack has no decode function") }
         self.functions = functions.mapValues { $0.sorted { $0.span < $1.span } }
@@ -209,7 +246,12 @@ actor LFM3AudioCoreMLBackbone: LFM3AudioLanguageModel {
 
     private static func makeStates(_ functions: [Int: [Function]]) throws -> [MLState] {
         guard let decode = functions[1]?.first else { throw LFM3AudioError.invalidModel("no decode function") }
+        try decode.load()
         return decode.stages.map { $0.model.makeState() }
+    }
+
+    func prepare(rows: Int) throws {
+        for function in functions[rows] ?? [] { try function.load() }
     }
 
     func reset() throws {
@@ -254,6 +296,7 @@ actor LFM3AudioCoreMLBackbone: LFM3AudioLanguageModel {
         guard let match = functions[q]?.first(where: { $0.span >= needed }) else {
             throw LFM3AudioError.contextFull(needed: needed, available: functions[q]?.last?.span ?? 0)
         }
+        try match.load()
         return match
     }
 

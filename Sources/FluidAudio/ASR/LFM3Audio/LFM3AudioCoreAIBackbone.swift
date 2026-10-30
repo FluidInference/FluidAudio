@@ -85,6 +85,9 @@ actor LFM3AudioCoreAIBackbone: LFM3AudioLanguageModel {
         }
     }
 
+    /// Core AI loads every entrypoint with the bundle.
+    func prepare(rows: Int) {}
+
     func reset() throws {
         guard var key = keyCache.take(), var value = valueCache.take(), var conv = convStates.take() else {
             throw LFM3AudioError.processingFailed("Core AI states in use")

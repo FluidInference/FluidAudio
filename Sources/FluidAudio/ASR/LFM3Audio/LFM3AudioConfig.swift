@@ -20,6 +20,8 @@ public enum LFM3AudioError: Error, LocalizedError, Sendable {
     case liveSessionActive
     case noLiveSession
     case processingFailed(String)
+    /// Loading failed with less than `LFM3AudioConfig.lowDiskBytes` free on the volume of the Core ML compile cache.
+    case lowDiskSpace(freeBytes: Int64, underlying: String)
 
     public var errorDescription: String? {
         switch self {
@@ -32,7 +34,20 @@ public enum LFM3AudioError: Error, LocalizedError, Sendable {
         case .liveSessionActive: return "A LFM3-Audio live transcription session is active; finish it first"
         case .noLiveSession: return "No LFM3-Audio live transcription session; call startLiveTranscription() first"
         case .processingFailed(let message): return "LFM3-Audio processing failed: \(message)"
+        case .lowDiskSpace(let freeBytes, let underlying):
+            return
+                "LFM3-Audio failed to load with \(freeBytes / 1_000_000_000) GB free disk; the system likely purged "
+                + "Core ML's compile cache mid-load. Free at least \(LFM3AudioConfig.lowDiskBytes / 1_000_000_000) GB "
+                + "and retry: \(underlying)"
         }
+    }
+}
+
+extension LFM3AudioError: ModelCachePreservingError {
+    /// A low-disk load failure is not a bad download, so `ModelHub.loadWithRecovery` keeps the cache.
+    public var preservesModelCache: Bool {
+        if case .lowDiskSpace = self { return true }
+        return false
     }
 }
 
@@ -46,6 +61,27 @@ enum LFM3AudioConfig {
     /// `AudioEncoder-fp16` functions (tokens per call at 12.5 tokens/s); n12 is one 0.96 s LiveASR chunk.
     static let liveEncoderTokens = 12
     static let offlineEncoderTokens = [96, 375]
+
+    /// Backbone prefill buckets loaded on first use rather than with the pack. q13 runs the LiveASR chunks
+    /// (12 encoder rows + `<|text_end|>`); otherwise q13 and q16 only take the short remainder of a prefill.
+    /// Deferring them leaves 4 fewer GPU functions (about 3 GB less Core ML compile cache) in a cold offline
+    /// load, see `lowDiskBytes`.
+    static let deferredPrefillRows: Set<Int> = [13, 16]
+    /// Free space on the Core ML compile-cache volume below which a cold load is at risk on macOS 27. A cold load
+    /// compiles each GPU function into a purgeable cache (several GB for LFM3-Audio) and reloads it immediately.
+    /// On a low disk the system can purge those files in between, and the model then fails to load or aborts on
+    /// its first prediction (`MPSGraphTensorData shape.count = 0 != strides.count = 3`).
+    static let lowDiskBytes: Int64 = 30_000_000_000
+
+    /// Free bytes on the volume of the Core ML compile cache (`~/Library/Caches`), nil if unknown.
+    static func freeDiskBytes() -> Int64? {
+        let caches =
+            FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        guard let free = try? caches.resourceValues(forKeys: [.volumeAvailableCapacityKey]).volumeAvailableCapacity
+        else { return nil }
+        return Int64(free)
+    }
 
     /// Offline ASR transcribes clips up to 40 s in one pass (as upstream) and cuts longer audio into
     /// <= 30 s segments at the quietest 20 ms window in each segment's last 5 s.

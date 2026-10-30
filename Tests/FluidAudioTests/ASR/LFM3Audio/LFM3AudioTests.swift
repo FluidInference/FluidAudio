@@ -84,6 +84,25 @@ final class LFM3AudioTests: XCTestCase {
         XCTAssertTrue(LFM3AudioPrefill.plan(n: 0, buckets: [256], padFirst: true).isEmpty)
     }
 
+    func testLiveChunksUseADeferredPrefillBucket() {
+        // A LiveASR chunk feeds `<|text_end|>` + 12 encoder rows mid-context: one q13 call, loaded on first use.
+        let rows = 1 + LFM3AudioConfig.liveEncoderTokens
+        let plan = LFM3AudioPrefill.plan(n: rows, buckets: [256, 64, 16, 13], padFirst: true, startSlot: 200)
+        XCTAssertEqual(plan, [LFM3AudioChunk(slotStart: 200, q: 13, nPad: 0)])
+        XCTAssertTrue(LFM3AudioConfig.deferredPrefillRows.isSuperset(of: plan.map(\.q)))
+        // Decode and the large prefill buckets load with the pack.
+        XCTAssertTrue(LFM3AudioConfig.deferredPrefillRows.isDisjoint(with: [1, 64, 256]))
+    }
+
+    func testLowDiskLoadFailureKeepsTheModelCache() {
+        let lowDisk = LFM3AudioError.lowDiskSpace(freeBytes: 12_000_000_000, underlying: "load failed")
+        XCTAssertTrue(lowDisk.preservesModelCache)
+        XCTAssertTrue(lowDisk.localizedDescription.contains("12 GB"), lowDisk.localizedDescription)
+        XCTAssertFalse(LFM3AudioError.invalidModel("embedding shape").preservesModelCache)
+        XCTAssertFalse(LFM3AudioError.modelNotFound("coreml/AudioEncoder-fp16.mlmodelc").preservesModelCache)
+        XCTAssertNotNil(LFM3AudioConfig.freeDiskBytes())
+    }
+
     func testFullMaskIsCausalAndIsolatesPads() {
         let span = 8
         var mask = [Float16](repeating: 1, count: 3 * span)
