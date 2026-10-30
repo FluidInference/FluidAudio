@@ -305,6 +305,33 @@ final class ModelCacheCompletenessTests: XCTestCase {
         }
     }
 
+    func testLoadWithRecoveryCachePreservingErrorKeepsCache() async throws {
+        struct LowDisk: ModelCachePreservingError {
+            var preservesModelCache: Bool { true }
+        }
+        let baseDir = makeUniqueBaseDir()
+        let vadRepoPath = baseDir.appendingPathComponent(Repo.vad.folderName)
+        defer { try? FileManager.default.removeItem(at: baseDir) }
+        let bundle = vadRepoPath.appendingPathComponent(ModelNames.VAD.sileroVadFile)
+        try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: bundle.appendingPathComponent("coremldata.bin"))
+
+        // Online: a purge-and-redownload would delete the bundle before any network attempt.
+        do {
+            _ = try await ModelHub.loadWithRecovery(
+                .vad, directory: baseDir,
+                requiredFiles: [ModelNames.VAD.sileroVadFile]
+            ) { throw LowDisk() }
+            XCTFail("expected LowDisk to surface")
+        } catch is LowDisk {
+            XCTAssertTrue(
+                FileManager.default.fileExists(atPath: bundle.path),
+                "a failure outside the cache must not purge it")
+        } catch {
+            XCTFail("expected LowDisk, got: \(error)")
+        }
+    }
+
     func testLoadWithRecoveryCancellationPreservesCache() async throws {
         let baseDir = makeUniqueBaseDir()
         let vadRepoPath = baseDir.appendingPathComponent(Repo.vad.folderName)

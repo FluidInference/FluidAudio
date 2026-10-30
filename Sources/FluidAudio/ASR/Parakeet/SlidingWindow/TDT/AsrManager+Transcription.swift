@@ -630,6 +630,8 @@ extension AsrManager {
         processingTime: TimeInterval
     ) -> ASRResult {
 
+        let (tokenIds, timestamps, confidences, tokenDurations) = droppingUnknownTokens(
+            tokenIds: tokenIds, timestamps: timestamps, confidences: confidences, tokenDurations: tokenDurations)
         let text = convertTokensToText(tokenIds)
         let duration = TimeInterval(audioSampleCount) / TimeInterval(config.sampleRate)
 

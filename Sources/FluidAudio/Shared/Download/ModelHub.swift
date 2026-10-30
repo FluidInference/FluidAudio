@@ -225,8 +225,9 @@ public enum ModelHub {
     ///   HTTP Range) instead of being mistaken for a warm cache.
     /// - When `load` throws, the repo cache is purged and re-downloaded
     ///   and `load` retried once — except in offline mode, on
-    ///   cancellation, and on transient network errors, where the cache
-    ///   is preserved and the error rethrown.
+    ///   cancellation, on transient network errors, and on a
+    ///   `ModelCachePreservingError` that preserves the cache, where the
+    ///   cache is kept and the error rethrown.
     ///
     /// - Parameters:
     ///   - requiredFiles: Paths relative to the repo cache directory that
@@ -296,6 +297,11 @@ public enum ModelHub {
                 logger.warning(
                     "Load failed with transient network error; preserving model cache for resume. \(error.localizedDescription)"
                 )
+                throw error
+            }
+            if let preserving = error as? any ModelCachePreservingError, preserving.preservesModelCache {
+                logger.warning(
+                    "Load failed for a reason outside the model cache; preserving it. \(error.localizedDescription)")
                 throw error
             }
 

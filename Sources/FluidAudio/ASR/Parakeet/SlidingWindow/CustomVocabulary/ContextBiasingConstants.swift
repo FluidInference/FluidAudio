@@ -339,7 +339,9 @@ public enum ContextBiasingConstants {
     /// short-distractor set, disabling it drops false-positive insertions from
     /// ~94 to ~19 (the pre-#634 / 0.14.5 level) with no loss of biasing recall
     /// on distinctive-name vocabularies. Set to `false` for short-vocab KWS
-    /// where the acoustic rescue costs more than it recovers. Env:
+    /// where the acoustic rescue costs more than it recovers. The rescue only
+    /// runs for vocabularies of at most `largeVocabThreshold` terms, so this
+    /// has no effect on larger ones. Env:
     /// `FLUID_SPOTTER_RESCUE` (`0`/`false`/`no`/`off` disables).
     public static var defaultSpotterRescueEnabled: Bool {
         envBool("FLUID_SPOTTER_RESCUE") ?? true

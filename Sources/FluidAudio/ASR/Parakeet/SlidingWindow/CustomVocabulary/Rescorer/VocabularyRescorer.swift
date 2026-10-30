@@ -74,7 +74,9 @@ public struct VocabularyRescorer: Sendable {
         /// distinctive-name vocabularies, but loses recovery of brand names TDT
         /// mangles past the string-similarity gate. Prefer this for short-vocab
         /// KWS. (Composes with `spotterRescueMinSimilarity`: this is the on/off
-        /// switch, that is the in-between similarity floor.)
+        /// switch, that is the in-between similarity floor.) The rescue only
+        /// runs for vocabularies of at most `largeVocabThreshold` (10) terms;
+        /// above that this switch has no effect.
         public let spotterRescueEnabled: Bool
 
         public static let `default` = Config()
@@ -212,7 +214,7 @@ public struct VocabularyRescorer: Sendable {
     // MARK: - Result Types
 
     /// Result of rescoring a word
-    public struct RescoringResult: Sendable {
+    public struct RescoringResult: Codable, Sendable {
         public let originalWord: String
         public let originalScore: Float
         public let replacementWord: String?
@@ -226,9 +228,12 @@ public struct VocabularyRescorer: Sendable {
         public let text: String
         public let replacements: [RescoringResult]
         public let wasModified: Bool
-        /// Vocabulary terms the CTC spotter detected in the audio (canonical
+        /// Vocabulary terms the CTC spotter detected in the audio with a
+        /// per-token score of at least
+        /// `VocabularyBoostingSession.Thresholds.detectionMinScore` (canonical
         /// text, in time order, deduplicated), whether or not any replacement
-        /// was applied. Populated by `VocabularyBoostingSession.rescore` (#899).
+        /// was applied. Populated by `VocabularyBoostingSession.rescore`
+        /// (#899, #967).
         public var detectedTerms: [String] = []
     }
 

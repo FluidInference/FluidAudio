@@ -92,7 +92,9 @@ swift run fluidaudiocli ctc-decode-benchmark \
 // For best WER, use TDT (not CTC)
 let tdtModels = try await AsrModels.downloadAndLoad(version: .v3)
 let asrManager = AsrManager(config: .default)
-let result = try await asrManager.transcribe(audioURL)
+try await asrManager.loadModels(tdtModels)
+var state = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
+let result = try await asrManager.transcribe(audioURL, decoderState: &state)
 // 2.5% WER, no LM needed!
 ```
 
@@ -368,7 +370,9 @@ swift run fluidaudiocli ctc-decode-benchmark \
 ```swift
 let tdtModels = try await AsrModels.downloadAndLoad(version: .v3)
 let asrManager = AsrManager(config: .default)
-let result = try await asrManager.transcribe(audioURL)
+try await asrManager.loadModels(tdtModels)
+var state = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
+let result = try await asrManager.transcribe(audioURL, decoderState: &state)
 // 2.5% WER on LibriSpeech, no LM needed
 ```
 
@@ -399,29 +403,23 @@ try await eouManager.initialize(chunkSize: .ms320)
 Combine TDT (best WER) + CTC (entity boosting):
 
 ```swift
-// 1. TDT for base transcription (15% WER)
-let tdtResult = try await asrManager.transcribe(audioURL)
+// 1. TDT for base transcription
+let tdtModels = try await AsrModels.downloadAndLoad(version: .v3)
+let asrManager = AsrManager(config: .default)
+try await asrManager.loadModels(tdtModels)
+var state = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
+let tdtResult = try await asrManager.transcribe(samples, decoderState: &state)  // 16 kHz mono
 
-// 2. CTC for keyword spotting (99.3% entity recall)
+// 2. CTC keyword spotting + rescoring (terms built in code are tokenized by the session)
 let ctcModels = try await CtcModels.downloadAndLoad(variant: .ctc110m)
-let spotter = CtcKeywordSpotter(models: ctcModels, blankId: 1024)
-
-let vocab = CustomVocabularyContext(terms: [
-    "Nvidia", "Tesla", "Amazon"  // Company names
-])
-
-let spotResult = try await spotter.spotKeywordsWithLogProbs(
-    audioSamples: samples,
-    customVocabulary: vocab
-)
-
-// 3. Combine with VocabularyRescorer
-let finalText = rescorer.ctcTokenRescore(
-    transcript: tdtResult.text,
-    tokenTimings: tdtResult.tokenTimings,
-    logProbs: spotResult.logProbs
-)
+let vocab = CustomVocabularyContext(terms: ["Nvidia", "Tesla", "Amazon"].map { CustomVocabularyTerm(text: $0) })
+let session = try await VocabularyBoostingSession(vocabulary: vocab, ctcModels: ctcModels)
+let output = await session.rescore(
+    text: tdtResult.text, tokenTimings: tdtResult.tokenTimings ?? [], audioSamples: samples)
+let finalText = output?.text ?? tdtResult.text
 ```
+
+See [CustomVocabulary.md](ASR/CustomVocabulary.md#usage-example) for thresholds and what the output reports.
 
 **Best of both:** Low WER + high entity recall
 

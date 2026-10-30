@@ -12,9 +12,51 @@ public struct VocabularyBoostingSession: Sendable {
     private let logger = AppLogger(category: "VocabBoosting")
 
     public let vocabulary: CustomVocabularyContext
+    public let thresholds: Thresholds
     let spotter: CtcKeywordSpotter
     let rescorer: VocabularyRescorer
     let vocabSizeConfig: ContextBiasingConstants.VocabSizeConfig
+
+    /// Rescoring thresholds. `nil` fields keep the vocabulary-size defaults of
+    /// `ContextBiasingConstants.rescorerConfig(forVocabSize:)` (cbw 4.5; similarity 0.50 up to 10 terms,
+    /// 0.55 up to 100, 0.60 above).
+    ///
+    /// The defaults favour recall. For dictation, where a wrong replacement costs more than a miss,
+    /// `cbw: 0, minSimilarity: 0.7` replaces far fewer correctly heard words (#967).
+    public struct Thresholds: Sendable, Equatable {
+        /// Weight added to a term's per-token CTC score before it is compared with the transcribed words'
+        /// own score over the same window. 0 makes the term win on acoustics alone; a negative value makes
+        /// it win by that margin (scaled up for terms over 3 tokens when adaptive thresholds are on).
+        public var cbw: Float?
+        /// Minimum string similarity between a transcript span and a term. The vocabulary's own
+        /// `minSimilarity` still applies when it is stricter.
+        public var minSimilarity: Float?
+        /// Audio searched on each side of a span, in seconds, for both the term and the transcribed words.
+        public var marginSeconds: Double
+        /// Minimum per-token spotter score (average log-probability) for a term to be listed in
+        /// `RescoreOutput.detectedTerms`. Does not affect which replacements are made.
+        public var detectionMinScore: Float
+
+        public init(
+            cbw: Float? = nil,
+            minSimilarity: Float? = nil,
+            marginSeconds: Double = 0.5,
+            detectionMinScore: Float = Thresholds.defaultDetectionMinScore
+        ) {
+            self.cbw = cbw
+            self.minSimilarity = minSimilarity
+            self.marginSeconds = marginSeconds
+            self.detectionMinScore = detectionMinScore
+        }
+
+        /// Measured on real speech (13 dictation clips from #967 and 40 LibriSpeech test-clean utterances):
+        /// at -6.5 every spoken term stayed listed, including all 13 that Parakeet misheard (the weakest
+        /// at -6.13), while unspoken terms fell from 299/300 listed at the spotter's own -15 to 53/300, and a
+        /// junk term (best -8.53) was never listed. Sound-alikes at real locations (`Sora` inside "Saurabh",
+        /// `Codex` on "Xcode") score like spoken terms, so no floor removes them.
+        public static let defaultDetectionMinScore: Float = -6.5
+        public static let `default` = Thresholds()
+    }
 
     /// Recommended rescorer config for engines whose output text is
     /// inverse-text-normalized (parakeet-unified writes "11.4 billion" and
@@ -40,13 +82,16 @@ public struct VocabularyBoostingSession: Sendable {
     ///     used as-is.
     ///   - ctcModels: Pre-loaded CTC models for keyword spotting
     ///   - config: Optional rescorer configuration (default: `.default`)
+    ///   - thresholds: Rescoring thresholds (default: vocabulary-size defaults)
     /// - Throws: Error if the CTC tokenizer cannot be loaded for untokenized
     ///   terms, or if rescorer initialization fails
     public init(
         vocabulary: CustomVocabularyContext,
         ctcModels: CtcModels,
-        config: VocabularyRescorer.Config? = nil
+        config: VocabularyRescorer.Config? = nil,
+        thresholds: Thresholds = .default
     ) async throws {
+        self.thresholds = thresholds
         let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
 
         // Terms built in code arrive without CTC token IDs, and every consumer
@@ -90,8 +135,35 @@ public struct VocabularyBoostingSession: Sendable {
         rescorer.hasCTCRescoringCandidates(
             transcript: text,
             tokenTimings: tokenTimings,
-            minSimilarity: max(vocabSizeConfig.minSimilarity, vocabulary.minSimilarity)
+            minSimilarity: minSimilarity
         )
+    }
+
+    /// Similarity floor for rescoring.
+    var minSimilarity: Float {
+        Self.minSimilarity(
+            override: thresholds.minSimilarity, sizeDefault: vocabSizeConfig.minSimilarity,
+            vocabularyFloor: vocabulary.minSimilarity)
+    }
+
+    /// The `ctcTokenRescore` arguments for `thresholds`: overrides where set, otherwise the vocabulary-size
+    /// defaults. Pure, for testability.
+    static func rescoreParameters(
+        _ thresholds: Thresholds, sizeConfig: ContextBiasingConstants.VocabSizeConfig, vocabularyFloor: Float
+    ) -> (cbw: Float, minSimilarity: Float, marginSeconds: Double) {
+        (
+            cbw: thresholds.cbw ?? sizeConfig.cbw,
+            minSimilarity: minSimilarity(
+                override: thresholds.minSimilarity, sizeDefault: sizeConfig.minSimilarity,
+                vocabularyFloor: vocabularyFloor),
+            marginSeconds: thresholds.marginSeconds
+        )
+    }
+
+    /// The override (or the vocabulary-size default), raised to the vocabulary's own threshold when that
+    /// is stricter. Pure, for testability.
+    static func minSimilarity(override: Float?, sizeDefault: Float, vocabularyFloor: Float) -> Float {
+        max(override ?? sizeDefault, vocabularyFloor)
     }
 
     /// Rescore a transcript against CTC acoustic evidence from its audio.
@@ -125,21 +197,22 @@ public struct VocabularyBoostingSession: Sendable {
                 return nil
             }
 
-            // Vocabulary-size-aware thresholds, respecting the caller-specified
-            // threshold when stricter.
-            let minSimilarity = max(vocabSizeConfig.minSimilarity, vocabulary.minSimilarity)
-
+            let parameters = Self.rescoreParameters(
+                thresholds, sizeConfig: vocabSizeConfig, vocabularyFloor: vocabulary.minSimilarity)
             let rescoreOutput = rescorer.ctcTokenRescore(
                 transcript: text,
                 tokenTimings: tokenTimings,
                 logProbs: logProbs,
                 frameDuration: spotResult.frameDuration,
-                cbw: vocabSizeConfig.cbw,
-                marginSeconds: 0.5,
-                minSimilarity: minSimilarity
+                cbw: parameters.cbw,
+                marginSeconds: parameters.marginSeconds,
+                minSimilarity: parameters.minSimilarity
             )
 
-            let detectedTerms = Self.detectedTermTexts(spotResult.detections)
+            // The spotter runs with its lenient default floor (-15 per token), which lists nearly every
+            // term on any speech (#967); report only detections above `detectionMinScore`.
+            let detectedTerms = Self.detectedTermTexts(
+                spotResult.detections, minScore: thresholds.detectionMinScore)
             guard rescoreOutput.wasModified || !detectedTerms.isEmpty else { return nil }
 
             if rescoreOutput.wasModified {
@@ -167,12 +240,14 @@ public struct VocabularyBoostingSession: Sendable {
         }
     }
 
-    /// Canonical texts of the spotter's detections, in time order, without
+    /// Canonical texts of the spotter's detections scoring at least `minScore`, in time order, without
     /// repeats. Pure, for testability.
-    static func detectedTermTexts(_ detections: [CtcKeywordSpotter.KeywordDetection]) -> [String] {
+    static func detectedTermTexts(
+        _ detections: [CtcKeywordSpotter.KeywordDetection], minScore: Float = -.infinity
+    ) -> [String] {
         var seen = Set<String>()
         var texts: [String] = []
-        for detection in detections.sorted(by: { $0.startTime < $1.startTime }) {
+        for detection in detections.sorted(by: { $0.startTime < $1.startTime }) where detection.score >= minScore {
             let text = detection.term.text
             if seen.insert(text.lowercased()).inserted {
                 texts.append(text)

@@ -345,7 +345,7 @@ public actor AsrManager {
                 emitTokensAfterGlobalFrame: emitTokensAfterGlobalFrame,
                 initialTimeIndexOverride: initialTimeIndexOverride
             )
-        case .v3, .redux, .ultra, .phonon2:
+        case .v3, .redux, .ultra, .phonon2, .phonon25, .bark3, .bark3Clean:
             // Pass `vocabulary` unconditionally. `TdtDecoderV3.tokenLanguageFilter`
             // short-circuits when `language` is nil, so there's no cost to
             // forwarding vocab in the default path.
@@ -565,7 +565,9 @@ public actor AsrManager {
     internal func convertTokensToText(_ tokenIds: [Int]) -> String {
         guard !tokenIds.isEmpty else { return "" }
 
-        let tokens = tokenIds.compactMap { vocabulary[$0] }.filter { !$0.isEmpty }
+        let tokens = tokenIds.compactMap { vocabulary[$0] }.filter {
+            !$0.isEmpty && $0 != ASRConstants.sentencePieceUnknownToken
+        }
         return tokens.joined()
             .replacingOccurrences(of: ASRConstants.sentencePieceWordBoundary, with: " ")
             .trimmingCharacters(in: .whitespaces)

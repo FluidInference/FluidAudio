@@ -42,9 +42,9 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 
 ## Highlights
 
-- **Automatic Speech Recognition (ASR)**: [Parakeet TDT v3](Documentation/Models.md#batch-transcription-near-real-time) (0.6b) and other TDT/CTC models for batch transcription supporting 25 European languages and Japanese, plus SenseVoice and Paraformer for Mandarin Chinese; [Parakeet EOU](Documentation/Models.md#streaming-transcription-true-real-time) (120m) for streaming ASR with end-of-utterance detection (English only). See all [ASR models](Documentation/Models.md#asr-models).
+- **Automatic Speech Recognition (ASR)**: [Parakeet TDT v3](Documentation/Models.md#batch-transcription-near-real-time) (0.6b) and other TDT/CTC models for batch transcription supporting 25 European languages and Japanese, plus SenseVoice and Paraformer for Mandarin Chinese, [Nemotron 3.5 Transcribe Lite](Documentation/ASR/NemotronTranscribeLite.md) for fast meeting transcripts with speakers, and [LFM3-Audio-2B](Documentation/ASR/LFM3Audio.md) for ASR, live captions and TTS from one audio LM; [Parakeet EOU](Documentation/Models.md#streaming-transcription-true-real-time) (120m) for streaming ASR with end-of-utterance detection (English only). See all [ASR models](Documentation/Models.md#asr-models).
 - **Inverse Text Normalization (ITN)**: Post-process ASR output to convert spoken-form to written-form ("two hundred" → "200"). See [text-processing-rs](https://github.com/FluidInference/text-processing-rs). Optional: ASR-only apps can drop the engine (~8 MB per slice) with `traits: []` (Swift 6.2+), see [PostProcessing.md](Documentation/ASR/PostProcessing.md#opting-out-of-the-engine)
-- **Text-to-Speech (TTS)**: Kokoro (82m) for parallel synthesis with SSML and pronunciation control across 9 languages (EN, ES, FR, HI, IT, JA, PT, ZH); PocketTTS for streaming TTS with voice cloning support (EN, DE, ES, FR, IT, PT — 6L and 24L variants); Chatterbox Multilingual (520M, 18 languages) and Chatterbox Nano (110M, English with `[laugh]`/`[chuckle]` paralinguistic tags) in beta — see [Documentation/TTS/Chatterbox.md](Documentation/TTS/Chatterbox.md); Paradee (8M Kokoro distill, English, 12 MB) in beta — see [Documentation/TTS/Paradee.md](Documentation/TTS/Paradee.md); Gradium's Phonon 31m (Apache-2.0, English, 103 voices) on the Neural Engine at ~20x real time — see [Documentation/TTS/PocketTTS.md](Documentation/TTS/PocketTTS.md#phonon-31m-gradium)
+- **Text-to-Speech (TTS)**: Kokoro (82m) for parallel synthesis with SSML and pronunciation control across 9 languages (EN, ES, FR, HI, IT, JA, PT, ZH); PocketTTS for streaming TTS with voice cloning support (EN, DE, ES, FR, IT, PT — 6L and 24L variants); Chatterbox Multilingual (520M, 18 languages) and Chatterbox Nano (110M, English with `[laugh]`/`[chuckle]` paralinguistic tags) in beta — see [Documentation/TTS/Chatterbox.md](Documentation/TTS/Chatterbox.md); Paradee (8M Kokoro distill, English, four voices incl. two British, 11 MB) in beta — see [Documentation/TTS/Paradee.md](Documentation/TTS/Paradee.md); Gradium's Phonon 31m (Apache-2.0, English, 103 voices) on the Neural Engine at ~20x real time — see [Documentation/TTS/PocketTTS.md](Documentation/TTS/PocketTTS.md#phonon-31m-gradium)
 - **Speaker Diarization (Online + Offline)**: Speaker separation and identification across audio streams. Streaming pipeline for real-time processing and offline batch pipeline with advanced clustering.
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
@@ -342,6 +342,8 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
   - `FluidInference/parakeet-redux-coreml` (multilingual, smallest download at ~220 MB; iOS 18+ / macOS 15+ only, see [Parakeet Redux](Documentation/ASR/ParakeetRedux.md))
   - `FluidInference/parakeet-tdt-0.6b-v2-coreml` (English-only, highest recall)
   - `FluidInference/phonon-2-coreml` (English-only; Fermion Research's five-value re-training of v3, iOS 18+ / macOS 15+, see [Phonon-2](Documentation/ASR/Phonon2.md))
+  - `Muesli-HQ/phonon-2.5-coreml` (multilingual, 25 languages; ~290 MB; GPU encoder, iOS 18+ / macOS 15+, see [Phonon-2.5](Documentation/ASR/Phonon25.md))
+  - `FluidInference/bark-3.0-coreml` (English-only; Underdog Bark 3.0 (verbatim) and Bark 3.0 Clean (dictation, drops fillers), iOS 18+ / macOS 15+, see [Bark 3.0](Documentation/ASR/Bark3.md))
 - **Processing Mode**: Batch transcription for complete audio files
 - **Real-time Factor**: ~190x on M4 Pro (processes 1 hour of audio in ~19 seconds)
 - **Streaming Support**: Real-time streaming via `SlidingWindowAsrManager` with sliding window processing and cancellation support
@@ -747,17 +749,18 @@ Base weights: [hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)
 
 ### Paradee (beta)
 
-Kokoro-82M distilled into 8M parameters (one voice, `af_heart`, English), 12 MB of int8 weights,
-~100× real time on CPU. Uses the Kokoro English frontend. See [Documentation/TTS/Paradee.md](Documentation/TTS/Paradee.md).
+Kokoro-82M distilled into 8M parameters, English, 11 MB of int8 weights, ~100× real time on CPU. v1.2 (default)
+has four voices: `af_heart`, `am_puck`, and the British `bf_isabella` and `bm_fable`, which get British phonemes.
+Uses the Kokoro English frontend. See [Documentation/TTS/Paradee.md](Documentation/TTS/Paradee.md).
 
 ```swift
 let manager = ParadeeManager()
 try await manager.initialize()
-let samples = try await manager.synthesize(text: "Hello from FluidAudio.")  // 24 kHz Float32
+let samples = try await manager.synthesize(text: "Hello from FluidAudio.", voice: .bfIsabella)  // 24 kHz Float32
 ```
 
 ```bash
-swift run fluidaudiocli tts "Hello from FluidAudio." --backend paradee --output out.wav
+swift run fluidaudiocli tts "Hello from FluidAudio." --backend paradee --voice bm_fable --output out.wav
 ```
 
 ## Continuous Integration
@@ -793,7 +796,7 @@ silero-vad: <https://github.com/snakers4/silero-vad>
 
 Kokoro-82M: <https://huggingface.co/hexgrad/Kokoro-82M>
 
-Paradee-8M: <https://huggingface.co/sahilmahendrakar/Paradee-8M-v1.0>
+Paradee-8M: <https://huggingface.co/sahilmahendrakar/Paradee-8M-v1.2> (v1.2), <https://huggingface.co/sahilmahendrakar/Paradee-8M-v1.0> (v1.0)
 
 ### Citation
 

@@ -67,8 +67,9 @@ public struct TTS {
         // Parsed from `--variant` (micro/nano) or the backend token
         // (inflect-micro / inflect-nano).
         var inflectVariant: InflectVariant = .micro
-        // Paradee weight precision — only consulted when backend == .paradee.
+        // Paradee weight precision and release — only consulted when backend == .paradee.
         var paradeeVariant: ParadeeVariant = .int8
+        var paradeeVersion: ParadeeVersion = .v12
         var paradeeSpeed: Float = ParadeeConstants.defaultSpeed
         var paradeeSeed: UInt64 = 0
         var lexiconPath: String? = nil
@@ -239,6 +240,16 @@ public struct TTS {
                         logger.warning(
                             "Unknown --ve-variant '\(raw)'; using fp16. "
                                 + "Valid: fp16, int8/int6/int4 (ANE), dyn-int8/dyn-int6/dyn-int4.")
+                    }
+                    i += 1
+                }
+            case "--paradee-version":
+                if i + 1 < arguments.count {
+                    let raw = arguments[i + 1].lowercased()
+                    if let v = ParadeeVersion(rawValue: raw.hasPrefix("v") ? String(raw.dropFirst()) : raw) {
+                        paradeeVersion = v
+                    } else {
+                        logger.warning("Unknown --paradee-version '\(arguments[i + 1])'; using 1.2. Valid: 1.0, 1.2.")
                     }
                     i += 1
                 }
@@ -499,8 +510,8 @@ public struct TTS {
                 seed: chatterboxSeed, metricsPath: metricsPath)
         case .paradee:
             await runParadee(
-                text: text, output: output, variant: paradeeVariant,
-                treatAsPhonemes: treatAsPhonemes, speed: paradeeSpeed, seed: paradeeSeed,
+                text: text, output: output, version: paradeeVersion, variant: paradeeVariant,
+                voice: voice, treatAsPhonemes: treatAsPhonemes, speed: paradeeSpeed, seed: paradeeSeed,
                 metricsPath: metricsPath)
         }
     }
@@ -509,24 +520,33 @@ public struct TTS {
     /// a misaki-style phoneme string and bypasses the English frontend.
     private static func runParadee(
         text: String, output: String,
-        variant: ParadeeVariant, treatAsPhonemes: Bool,
+        version: ParadeeVersion, variant: ParadeeVariant,
+        voice voiceName: String, treatAsPhonemes: Bool,
         speed: Float, seed: UInt64,
         metricsPath: String?
     ) async {
         do {
+            guard let voice = ParadeeVoice(rawValue: voiceName), version.voices.contains(voice) else {
+                print(
+                    "Paradee \(version.rawValue) has no voice '\(voiceName)'. Voices: "
+                        + version.voices.map(\.rawValue).joined(separator: ", "))
+                exit(1)
+            }
             let tStart = Date()
-            let manager = ParadeeManager(variant: variant)
+            let manager = ParadeeManager(version: version, variant: variant)
 
             let tLoad0 = Date()
             try await manager.initialize()
             let tLoad1 = Date()
 
-            logger.info("Paradee \(variant.rawValue) \(treatAsPhonemes ? "phoneme" : "text") synthesis")
+            logger.info(
+                "Paradee \(version.rawValue) \(variant.rawValue) \(voice.rawValue) "
+                    + "\(treatAsPhonemes ? "phoneme" : "text") synthesis")
             let tSynth0 = Date()
             let samples =
                 treatAsPhonemes
-                ? try await manager.synthesize(phonemes: text, speed: speed, noiseSeed: seed)
-                : try await manager.synthesize(text: text, speed: speed, noiseSeed: seed)
+                ? try await manager.synthesize(phonemes: text, voice: voice, speed: speed, noiseSeed: seed)
+                : try await manager.synthesize(text: text, voice: voice, speed: speed, noiseSeed: seed)
             let tSynth1 = Date()
 
             let outURL = resolveInputURL(output)
@@ -552,7 +572,8 @@ public struct TTS {
 
             if let metricsPath {
                 let metricsDict: [String: Any] = [
-                    "backend": "paradee-\(variant.rawValue)",
+                    "backend": "paradee-\(version.rawValue)-\(variant.rawValue)",
+                    "voice": voice.rawValue,
                     "text": text,
                     "phonemes_mode": treatAsPhonemes,
                     "speed": Double(speed),
@@ -1734,8 +1755,11 @@ public struct TTS {
                                    supertonic3, luxtts, neutts (beta), inflect (beta),
                                    chatterbox (beta, multilingual, macOS 15+),
                                    chatterbox-nano (beta, English + [laugh]/[chuckle] tags, macOS 15+),
-                                   paradee (beta, 8M English, voice af_heart)
+                                   paradee (beta, 8M English; v1.2 voices af_heart,
+                                     bf_isabella, am_puck, bm_fable)
                                    Paradee:
+                                     --voice af_heart           voice (bf_/bm_ get British phonemes)
+                                     --paradee-version 1.2      release: 1.2 (default) or 1.0 (af_heart only)
                                      --variant int8|fp32        weights (default int8)
                                      --speed 1.0                speech rate (default 1.0)
                                      --seed N                   source-noise seed (default 0)
