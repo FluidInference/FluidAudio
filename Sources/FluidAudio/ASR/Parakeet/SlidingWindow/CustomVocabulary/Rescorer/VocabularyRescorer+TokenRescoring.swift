@@ -96,6 +96,8 @@ extension VocabularyRescorer {
         // cannot spend the same acoustic occurrence on duplicate corrections.
         var acousticFrameRange: Range<Int>? = nil
         var sourceFrameRange: Range<Int>? = nil
+        /// Set when the alignment lies outside `sourceFrameRange`: whether the match also wins on its own frames.
+        var passesWithinOwnSpan: Bool? = nil
     }
 
     /// Pending replacement candidate for two-pass selection.
@@ -290,23 +292,43 @@ extension VocabularyRescorer {
             return a.similarity > b.similarity
         }
 
+        // A candidate is acoustically self-supported when its CTC alignment lies inside its own words, or it
+        // also wins on its own frames. Coarse timings can give two genuine repetitions the same strongest path,
+        // so only an unsupported candidate (a borrower) is vetoed, and whether a borrower overlaps another
+        // occurrence must not depend on which of the two is processed first: check it against every
+        // supported candidate's own words as well as the alignments already applied.
+        func isSelfSupported(_ pending: PendingReplacement) -> Bool {
+            guard let acoustic = pending.result.acousticFrameRange else { return true }
+            if let source = pending.result.sourceFrameRange,
+                source.lowerBound <= acoustic.lowerBound, source.upperBound >= acoustic.upperBound
+            {
+                return true
+            }
+            return pending.result.passesWithinOwnSpan ?? false
+        }
+        func termKey(_ pending: PendingReplacement) -> String { normalizedLexical(pending.candidate.vocabTerm) }
+
+        var supportedSources: [String: [(source: Range<Int>, index: Int)]] = [:]
+        for (index, pending) in sortedReplacements.enumerated() where isSelfSupported(pending) {
+            if let source = pending.result.sourceFrameRange, !source.isEmpty {
+                supportedSources[termKey(pending), default: []].append((source, index))
+            }
+        }
+
         var occupiedIndices = occupiedIndices
         var occupiedAcoustics: [String: [Range<Int>]] = [:]
         var applied: [PendingReplacement] = []
         var supersededCandidateIDs = Set<Int>()
-        for pending in sortedReplacements {
-            let term = normalizeForSimilarity(pending.candidate.vocabTerm)
-            let reusesAcoustics =
-                pending.result.acousticFrameRange.map { range in
-                    // Coarse source timings can contain the same strongest CTC
-                    // path for two genuine repetitions. Overlap alone is not a
-                    // veto unless the candidate borrowed outside its own span.
-                    let contained =
-                        pending.result.sourceFrameRange.map {
-                            $0.lowerBound <= range.lowerBound && $0.upperBound >= range.upperBound
-                        } ?? false
-                    return !contained && occupiedAcoustics[term, default: []].contains { $0.overlaps(range) }
-                } ?? false
+        for (index, pending) in sortedReplacements.enumerated() {
+            let term = termKey(pending)
+            var reusesAcoustics = false
+            if let acoustic = pending.result.acousticFrameRange, !isSelfSupported(pending) {
+                reusesAcoustics =
+                    occupiedAcoustics[term, default: []].contains { $0.overlaps(acoustic) }
+                    || supportedSources[term, default: []].contains {
+                        $0.index != index && $0.source.overlaps(acoustic)
+                    }
+            }
             guard !reusesAcoustics, pending.candidate.spanIndices.allSatisfy({ !occupiedIndices.contains($0) }) else {
                 if let candidateID = pending.candidateID {
                     supersededCandidateIDs.insert(candidateID)
@@ -569,6 +591,8 @@ extension VocabularyRescorer {
 
         // Pre-compute normalized words for all timings
         let normalizedWords = wordTimings.map { Self.normalizeForSimilarity($0.word) }
+        // Canonical matching folds curly apostrophes; precompute so the term x word loops only compare.
+        let lexicalWords = wordTimings.map { Self.normalizedLexical($0.word) }
 
         // WORD-CENTRIC LOOP: For each TDT word, find candidate vocabulary terms
         for (wordIdx, timing) in wordTimings.enumerated() {
@@ -644,7 +668,9 @@ extension VocabularyRescorer {
                     : spanIndices.map { normalizedWords[$0] }.joined(separator: " ")
 
                 // Skip if already exact match to canonical (no replacement needed)
-                if Self.isCanonicalMatch(originalPhrase, canonical: vocabTerm) {
+                let canonicalKey = Self.normalizedLexical(vocabTerm)
+                let lexicalPhrase = Self.lexicalPhrase(lexicalWords, spanIndices)
+                if Self.isCanonicalMatch(lexical: lexicalPhrase, canonicalKey: canonicalKey) {
                     continue
                 }
 
@@ -797,12 +823,15 @@ extension VocabularyRescorer {
         var pendingReplacements: [PendingReplacement] = []  // Two-pass: collect first, apply later
 
         let normalizedWords = wordTimings.map { Self.normalizeForSimilarity($0.word) }
+        // Canonical matching folds curly apostrophes; precompute so the term x word loops only compare.
+        let lexicalWords = wordTimings.map { Self.normalizedLexical($0.word) }
         let wordComponentCounts = normalizedWords.map { max(1, $0.split(separator: "-").count) }
         let hasJoinedWords = wordComponentCounts.contains { $0 > 1 }
 
         // TERM-CENTRIC LOOP: For each vocabulary term, find similar TDT words and run constrained CTC
         for term in vocabulary.terms {
             let vocabTerm = term.text
+            let canonicalKey = Self.normalizedLexical(vocabTerm)
 
             // Per-term similarity override (falls back to the vocabulary-level
             // threshold). Safety guards in requiredSimilarity/checkStopwordRules/
@@ -875,7 +904,9 @@ extension VocabularyRescorer {
                         }
 
                         // Skip if already exact match to canonical (no replacement needed)
-                        if Self.isCanonicalMatch(tdtPhrase, canonical: vocabTerm) {
+                        if Self.isCanonicalMatch(
+                            lexical: Self.lexicalPhrase(lexicalWords, spanIndices), canonicalKey: canonicalKey)
+                        {
                             continue
                         }
 
@@ -965,7 +996,7 @@ extension VocabularyRescorer {
                     guard !normalizedWord.isEmpty else { continue }
 
                     // Skip if already exact match to canonical (no replacement needed)
-                    if Self.isCanonicalMatch(tdtWord, canonical: vocabTerm) {
+                    if Self.isCanonicalMatch(lexical: lexicalWords[wordIdx], canonicalKey: canonicalKey) {
                         continue
                     }
 

@@ -300,19 +300,49 @@ final class VocabularyCandidateArbitrationEvidenceTests: XCTestCase {
     }
 
     func testOneAcousticOccurrenceCannotCorrectTwoDisjointWordSpans() {
+        // "mister" (frames 0..<8) aligns on the name's audio; each name spelling aligns inside its own words.
         let borrowed = pending(
             id: 0, origin: .termCentricSingleWord, phrase: "mister", term: "Quilter",
-            indices: [0], similarity: 0.57, acousticFrames: 10..<16)
+            indices: [0], similarity: 0.57, acousticFrames: 10..<16, sourceFrames: 0..<8)
         let correction = pending(
             id: 1, origin: .termCentricSingleWord, phrase: "Quil ter", term: "Quilter",
-            indices: [1, 2], similarity: 1, acousticFrames: 12..<18)
+            indices: [1, 2], similarity: 1, acousticFrames: 12..<18, sourceFrames: 10..<18)
         let repeated = pending(
             id: 2, origin: .termCentricSingleWord, phrase: "Quiltor", term: "Quilter",
-            indices: [3], similarity: 0.86, acousticFrames: 18..<24)
+            indices: [3], similarity: 0.86, acousticFrames: 18..<24, sourceFrames: 18..<24)
 
         let result = VocabularyRescorer.arbitratePendingReplacements([borrowed, repeated, correction])
         XCTAssertEqual(result.applied.compactMap(\.candidateID), [1, 2])
         XCTAssertEqual(result.supersededCandidateIDs, [0])
+    }
+
+    func testABorrowerIsVetoedEvenWhenItIsArbitratedBeforeTheOwner() {
+        // The borrower sorts first (higher similarity bucket); the owner's own words still claim the audio.
+        let borrower = pending(
+            id: 0, origin: .termCentricSingleWord, phrase: "Quilt", term: "Quilter",
+            indices: [0], similarity: 0.95, acousticFrames: 10..<16, sourceFrames: 0..<8)
+        let owner = pending(
+            id: 1, origin: .termCentricSingleWord, phrase: "Quiltor", term: "Quilter",
+            indices: [1], similarity: 0.86, acousticFrames: 11..<17, sourceFrames: 10..<18)
+        for order in [[borrower, owner], [owner, borrower]] {
+            let result = VocabularyRescorer.arbitratePendingReplacements(order)
+            XCTAssertEqual(result.applied.compactMap(\.candidateID), [1])
+            XCTAssertEqual(result.supersededCandidateIDs, [0])
+        }
+    }
+
+    func testAMisheardRepetitionThatWinsOnItsOwnFramesIsKept() {
+        // Both renderings are misheard; the second's best path lands on the first, but it also wins on its
+        // own frames, so it is a genuine repetition rather than a borrower.
+        let first = pending(
+            id: 0, origin: .termCentricSingleWord, phrase: "Quiltor", term: "Quilter",
+            indices: [0], similarity: 0.86, acousticFrames: 0..<8, sourceFrames: 0..<8)
+        let second = pending(
+            id: 1, origin: .termCentricSingleWord, phrase: "Quiltar", term: "Quilter",
+            indices: [3], similarity: 0.86, acousticFrames: 2..<8, sourceFrames: 20..<28, passesWithinOwnSpan: true)
+        let result = VocabularyRescorer.arbitratePendingReplacements([first, second])
+        XCTAssertEqual(Set(result.applied.compactMap(\.candidateID)), [0, 1])
+        XCTAssertTrue(result.supersededCandidateIDs.isEmpty)
     }
 
     func testCoarseAdjacentRepetitionsRemainEligibleDespiteSharedBestAlignment() {
@@ -335,11 +365,13 @@ final class VocabularyCandidateArbitrationEvidenceTests: XCTestCase {
         indices: [Int],
         similarity: Float,
         acousticFrames: Range<Int>? = nil,
-        sourceFrames: Range<Int>? = nil
+        sourceFrames: Range<Int>? = nil,
+        passesWithinOwnSpan: Bool? = nil
     ) -> VocabularyRescorer.PendingReplacement {
         var result = passingResult(replacement: term)
         result.acousticFrameRange = acousticFrames
         result.sourceFrameRange = sourceFrames
+        result.passesWithinOwnSpan = passesWithinOwnSpan
         return VocabularyRescorer.PendingReplacement(
             candidateID: id,
             candidate: candidate(

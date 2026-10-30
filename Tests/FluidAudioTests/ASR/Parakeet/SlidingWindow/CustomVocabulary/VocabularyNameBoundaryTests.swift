@@ -14,9 +14,11 @@ final class VocabularyNameBoundaryTests: XCTestCase {
     // The old three-word matcher includes the following verb in the correction.
     func testFullNameCorrectionPreservesEverySurroundingWordAcrossNameBoundaries() async throws {
         let directory = CtcModels.defaultCacheDirectory()
-        guard CtcModels.modelsExist(at: directory) else {
-            throw XCTSkip("Install CTC 110M for name boundary regressions")
-        }
+        let allowDownload = ProcessInfo.processInfo.environment["FLUIDAUDIO_RUN_ASR_E2E"] == "1"
+        try XCTSkipUnless(
+            CtcModels.modelsExist(at: directory) || allowDownload,
+            "CTC 110M not cached; set FLUIDAUDIO_RUN_ASR_E2E=1 to download")
+        _ = try await CtcModels.download(to: directory)
         let models = try await CtcModels.loadDirect(from: directory)
         let spotter = CtcKeywordSpotter(models: models)
         let tokenizer = try await CtcTokenizer.load(from: directory)

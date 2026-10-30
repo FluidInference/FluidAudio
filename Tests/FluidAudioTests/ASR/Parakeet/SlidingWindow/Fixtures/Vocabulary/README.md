@@ -4,8 +4,8 @@ These are human speech recordings for vocabulary rescoring, stored as 16 kHz
 mono PCM16 WAV. No speech synthesis, gain adjustment or time stretching is used.
 `tdt-v3.json` fixes the uncorrected Parakeet TDT v3 text and token timings for
 each recording. Tests run the installed CTC 110M model against the audio without
-depending on a particular TDT decoder version. They skip when CTC is absent and
-never download models.
+depending on a particular TDT decoder version. They skip when CTC is absent,
+unless `FLUIDAUDIO_RUN_ASR_E2E=1` allows a download (the CI E2E step).
 
 `tdt-v2-solanki.json` stores the recorded v2 text/timings with a hyphenated
 full name. Its boundary regression preserves every surrounding word while
@@ -44,7 +44,7 @@ code license does not replace the recording licenses.
 - **FLEURS**, Google and the FLEURS authors:
   [dataset card, authors and license](https://huggingface.co/datasets/google/fleurs).
   Revision `4683b04`, `data/en_us/audio/test.tar.gz`; the transcription comes
-  from the corresponding normalized reference in `data/en_us/test.tsv`.
+  from the corresponding raw transcription in `data/en_us/test.tsv`.
 
 SHA-256 integrity hashes:
 

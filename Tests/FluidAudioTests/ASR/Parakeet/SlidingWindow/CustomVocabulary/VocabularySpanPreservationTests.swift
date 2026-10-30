@@ -46,8 +46,7 @@ final class VocabularySpanPreservationTests: XCTestCase {
     // changes cannot conceal a rescorer regression. Never downloads models.
     func testRecognizedNamesKeepNeighboringWordsAndPossessives() async throws {
         let directory = CtcModels.defaultCacheDirectory()
-        guard CtcModels.modelsExist(at: directory) else { throw XCTSkip("Install CTC 110M for vocabulary regressions") }
-        let models = try await CtcModels.loadDirect(from: directory)
+        let models = try await installedCtcModels()
         let spotter = CtcKeywordSpotter(models: models)
         let tokenizer = try await CtcTokenizer.load(from: directory)
         let root = try XCTUnwrap(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
@@ -75,8 +74,7 @@ final class VocabularySpanPreservationTests: XCTestCase {
 
     func testLegitimateNameCorrectionsRemainAvailable() async throws {
         let directory = CtcModels.defaultCacheDirectory()
-        guard CtcModels.modelsExist(at: directory) else { throw XCTSkip("Install CTC 110M for vocabulary regressions") }
-        let models = try await CtcModels.loadDirect(from: directory)
+        let models = try await installedCtcModels()
         let spotter = CtcKeywordSpotter(models: models)
         let tokenizer = try await CtcTokenizer.load(from: directory)
         let root = try XCTUnwrap(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
@@ -113,8 +111,7 @@ final class VocabularySpanPreservationTests: XCTestCase {
 
     func testMisspelledAndSplitNamesAreCorrectedWithoutBorrowingTheirEvidenceTwice() async throws {
         let directory = CtcModels.defaultCacheDirectory()
-        guard CtcModels.modelsExist(at: directory) else { throw XCTSkip("Install CTC 110M for vocabulary regressions") }
-        let models = try await CtcModels.loadDirect(from: directory)
+        let models = try await installedCtcModels()
         let spotter = CtcKeywordSpotter(models: models)
         let tokenizer = try await CtcTokenizer.load(from: directory)
         let root = try XCTUnwrap(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
@@ -162,8 +159,7 @@ final class VocabularySpanPreservationTests: XCTestCase {
 
     func testRepeatedNamesWithNormalAndCoarseTimingsRetainTheLegitimateCorrection() async throws {
         let directory = CtcModels.defaultCacheDirectory()
-        guard CtcModels.modelsExist(at: directory) else { throw XCTSkip("Install CTC 110M for vocabulary regressions") }
-        let models = try await CtcModels.loadDirect(from: directory)
+        let models = try await installedCtcModels()
         let spotter = CtcKeywordSpotter(models: models)
         let tokenizer = try await CtcTokenizer.load(from: directory)
         let root = try XCTUnwrap(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
@@ -187,9 +183,11 @@ final class VocabularySpanPreservationTests: XCTestCase {
         for coarse in [false, true] {
             let timings = [
                 TokenTiming(
-                    token: "▁Quilter", tokenId: 1, startTime: 0, endTime: coarse ? duration : boundary, confidence: 1),
+                    token: "▁Quilter", tokenId: 1, startTime: 0, endTime: coarse ? duration : boundary,
+                    confidence: 1),
                 TokenTiming(
-                    token: "▁Quiltor's", tokenId: 2, startTime: coarse ? 0 : boundary, endTime: duration, confidence: 1),
+                    token: "▁Quiltor's", tokenId: 2, startTime: coarse ? 0 : boundary, endTime: duration,
+                    confidence: 1),
             ]
             let result = rescorer.ctcTokenRescore(
                 transcript: "Quilter Quiltor's", tokenTimings: timings,
@@ -202,5 +200,16 @@ final class VocabularySpanPreservationTests: XCTestCase {
 
     private var taperedConfig: VocabularyRescorer.Config {
         .init(shortTermCbwTaperPivot: 5, shortTermCbwTaperExponent: 2, spotterRescueEnabled: false)
+    }
+
+    /// CTC 110M from the cache, or downloaded when `FLUIDAUDIO_RUN_ASR_E2E=1` (the CI E2E step).
+    private func installedCtcModels() async throws -> CtcModels {
+        let directory = CtcModels.defaultCacheDirectory()
+        let allowDownload = ProcessInfo.processInfo.environment["FLUIDAUDIO_RUN_ASR_E2E"] == "1"
+        try XCTSkipUnless(
+            CtcModels.modelsExist(at: directory) || allowDownload,
+            "CTC 110M not cached; set FLUIDAUDIO_RUN_ASR_E2E=1 to download")
+        _ = try await CtcModels.download(to: directory)
+        return try await CtcModels.loadDirect(from: directory)
     }
 }

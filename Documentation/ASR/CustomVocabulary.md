@@ -331,10 +331,13 @@ Performs principled comparison between original transcript words and vocabulary 
 #### Preserving recognized words and inflections
 
 Canonical vocabulary phrases already present in the transcript are protected, including
-singular possessives such as `Quilter's` and `Quilter’s`. Other candidates cannot consume
-part of those phrases. A longer correction may retain recognized words at their existing
-offsets, such as `John Collar` → `John Collier` when `John` is also listed. Corrections to
-misspelled names preserve the possessive in both scoring and replacement text.
+possessives such as `Quilter's`, `Quilter’s` and `Jones'`. Other candidates cannot consume
+part of those phrases: a correction may include a recognized phrase only if its letters survive
+in the replacement on the same side of the other words, such as `John Collar` → `John Collier`
+or `Open AI` → `OpenAI` when `John` or `AI` is also listed, but not `in Envious Labs` →
+`Envious Labs`. Corrections to misspelled names preserve a possessive in both scoring and
+replacement text, unless the apostrophe split the term's own final `s` (`Envious Lab's` →
+`Envious Labs`) or belongs to a neighbouring word in the span.
 
 A hyphenated name may occupy fewer timing words than its canonical phrase.
 Shorter spans are considered only when their hyphen-separated component count
@@ -342,16 +345,19 @@ matches a canonical form or alias. The multi-word similarity floor still applies
 This lets a correction retain the next ordinary word instead of consuming it to
 reach the canonical word count. Partial-word replacements remain unsupported.
 
-With disjoint timestamps, the CTC search margin stops at other recognized occurrences
-of the proposed term. A weak textual match creating a nearby adjacent duplicate must
-beat the original without a positive context-bias bonus. One-edit name spellings and
-registered aliases retain their normal bonus. Coarse overlapping timestamps do not
-establish acoustic ownership and leave the normal search and bias intact.
+With disjoint timestamps (compared in whole CTC frames), the CTC search margin stops at
+other recognized occurrences of the proposed term, and at recognized listed terms that are
+part of its name (a listed surname beside a misheard full name). A weak textual match
+creating a nearby adjacent duplicate must beat the original without a positive context-bias
+bonus. One-edit name spellings and registered aliases retain their normal bonus. Coarse
+overlapping timestamps do not establish acoustic ownership and leave the normal search and
+bias intact.
 
-Candidate selection rejects a replacement that borrows an overlapping CTC alignment
-already used for the same term outside its own source span. Coarse source timings that
-contain the alignment remain eligible, preserving genuine repetitions. Other similarity
-thresholds and bias settings remain unchanged.
+Candidate selection rejects a replacement whose CTC alignment lies outside its own source
+span, does not also win on its own frames, and overlaps another same-term candidate's source
+words or an alignment already applied, whichever candidate is considered first. Coarse source
+timings that contain the alignment, and repetitions that win on their own frames, remain
+eligible. Other similarity thresholds and bias settings remain unchanged.
 
 #### Non-Mutating Candidate Evidence
 
@@ -401,7 +407,8 @@ path finally did after overlap arbitration:
 - `rejectedByComparison` — the legacy floating-point comparison ran and rejected the candidate.
 - `unavailableEvidence` — the comparison could not run, for example because tokenizer evidence was
   unavailable.
-- `supersededByOverlap` — comparison passed, but an overlapping candidate won final arbitration.
+- `supersededByOverlap` — comparison passed, but a selected candidate overlapped its word span, or it
+  borrowed another occurrence's CTC alignment for the same term (see "Preserving recognized words").
 
 `comparisonPassed` and `legacyOutcome` preserve the comparison FluidAudio actually performed. A
 raw score remains `nil` when the underlying scorer produced a non-finite diagnostic value, but that

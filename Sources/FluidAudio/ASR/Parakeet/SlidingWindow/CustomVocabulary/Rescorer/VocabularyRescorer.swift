@@ -288,7 +288,8 @@ public struct VocabularyRescorer: Sendable {
         /// String similarity used to rank and gate the candidate.
         public let similarity: Float
 
-        /// Raw CTC score for the vocabulary term (with any preserved possessive), before context biasing, when available.
+        /// Raw CTC score for the vocabulary term (with any preserved possessive), before context biasing,
+        /// when available.
         public let rawVocabularyCTCScore: Float?
 
         /// Raw CTC score for the original phrase, when available.
