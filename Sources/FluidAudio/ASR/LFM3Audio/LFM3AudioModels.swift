@@ -41,8 +41,8 @@ public struct LFM3AudioComputeUnits: Sendable {
 public struct LFM3AudioModels: Sendable {
 
     enum LanguageModel: Sendable {
-        /// `"<stage index>:<function>"` -> model, plus the head.
-        case coreML(stages: [String: MLModel], head: MLModel)
+        /// `"<stage index>:<function>"` -> stage model (loaded, or deferred to first use), plus the head.
+        case coreML(stages: [String: LFM3AudioStageModel], head: MLModel)
         /// Core AI bundle, loaded by the manager (macOS 27 / iOS 27).
         case coreAI(bundle: URL)
     }
@@ -93,9 +93,19 @@ public struct LFM3AudioModels: Sendable {
         return try await ModelHub.loadWithRecovery(
             .lfm3Audio, directory: root, requiredFiles: files, variant: variant, progressHandler: progressHandler
         ) {
-            try load(
-                from: coreMLDirectory, backend: backend, coreAIDirectory: coreAIDirectory,
-                includeSpeech: wantsSpeech, computeUnits: computeUnits)
+            do {
+                return try load(
+                    from: coreMLDirectory, backend: backend, coreAIDirectory: coreAIDirectory,
+                    includeSpeech: wantsSpeech, computeUnits: computeUnits)
+            } catch {
+                // On a low disk the system can purge Core ML's compile cache mid-load, which surfaces as bogus load
+                // errors ("functionName must be nil unless ML Program"). Keep the download instead of letting
+                // loadWithRecovery purge and re-fetch the multi-GB pack.
+                guard let free = LFM3AudioConfig.freeDiskBytes(), free < LFM3AudioConfig.lowDiskBytes else {
+                    throw error
+                }
+                throw LFM3AudioError.lowDiskSpace(freeBytes: free, underlying: error.localizedDescription)
+            }
         }
     }
 
@@ -108,6 +118,7 @@ public struct LFM3AudioModels: Sendable {
         computeUnits: LFM3AudioComputeUnits = .default
     ) throws -> LFM3AudioModels {
         try checkPlatform(backend)
+        warnIfLowDisk(computeUnits)
         let names = ModelNames.LFM3Audio.self
         let config = try LFM3AudioPackConfig.load(directory.appendingPathComponent(names.packConfigFile))
         guard config.embedding.shape.count == 2 else { throw LFM3AudioError.invalidModel("embedding shape") }
@@ -123,13 +134,22 @@ public struct LFM3AudioModels: Sendable {
         var coreAIDepth: URL?
         switch backend {
         case .coreML:
-            var stages: [String: MLModel] = [:]
+            var stages: [String: LFM3AudioStageModel] = [:]
+            let units = computeUnits.languageModel
             for plan in config.callPlans {
+                let deferred = LFM3AudioConfig.deferredPrefillRows.contains(plan.q)
                 for (index, function) in plan.calls.enumerated() where stages["\(index):\(function)"] == nil {
                     guard index < config.stages.count else { throw LFM3AudioError.invalidModel("stage \(index)") }
-                    stages["\(index):\(function)"] = try loadModel(
-                        stem(config.stages[index].package), from: directory, function: function,
-                        units: computeUnits.languageModel)
+                    let name = stem(config.stages[index].package)
+                    if deferred {
+                        stages["\(index):\(function)"] = .deferred {
+                            logger.info("Loading backbone \(name) \(function) on first use")
+                            return try loadModel(name, from: directory, function: function, units: units)
+                        }
+                    } else {
+                        stages["\(index):\(function)"] = .loaded(
+                            try loadModel(name, from: directory, function: function, units: units))
+                    }
                 }
             }
             let head = try loadModel(stem(config.head.package), from: directory, units: computeUnits.languageModel)
@@ -208,6 +228,19 @@ public struct LFM3AudioModels: Sendable {
         case (.coreAI, true): return "coreai"
         case (.coreAI, false): return "coreai-recognition"
         }
+    }
+
+    /// Cold loads on a low disk can fail or abort on the first prediction (`LFM3AudioConfig.lowDiskBytes`).
+    static func warnIfLowDisk(_ computeUnits: LFM3AudioComputeUnits) {
+        let gpu = [computeUnits.languageModel, computeUnits.offlineEncoder, computeUnits.depthDecoder].contains {
+            $0 == .cpuAndGPU || $0 == .all
+        }
+        guard gpu, let free = LFM3AudioConfig.freeDiskBytes(), free < LFM3AudioConfig.lowDiskBytes else { return }
+        logger.warning(
+            "Only \(free / 1_000_000_000) GB free disk. A first LFM3-Audio load compiles several GB of GPU kernels "
+                + "into the Core ML cache, and below \(LFM3AudioConfig.lowDiskBytes / 1_000_000_000) GB free the "
+                + "system can purge them mid-load (load errors, or an MPSGraphTensorData abort on the first "
+                + "prediction). Free up disk space if that happens.")
     }
 
     static var speechAvailable: Bool {

@@ -4,7 +4,9 @@ import Foundation
 
 /// Preallocated Core ML buffers for the LFM3-Audio runtime: every input and output is a host-owned fp16 / int32
 /// `MLMultiArray`, outputs are bound through `MLPredictionOptions.outputBackings`, and predictions are synchronous.
-/// (On macOS 27 a Core ML-allocated GPU output can abort inside MPSGraphTensorData on a cold compile cache.)
+/// The backings avoid per-call allocation. They do not prevent the macOS 27 first-predict abort
+/// `MPSGraphTensorData shape.count = 0 != strides.count = 3`: that comes from low free disk during a cold load
+/// (see `LFM3AudioConfig.lowDiskBytes`).
 enum LFM3AudioArrays {
 
     static func float16(_ shape: [Int], fill: Float16 = 0) throws -> MLMultiArray {
