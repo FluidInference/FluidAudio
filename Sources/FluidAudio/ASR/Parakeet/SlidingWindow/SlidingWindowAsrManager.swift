@@ -44,8 +44,8 @@ public actor SlidingWindowAsrManager {
             let id = UUID()
             tokenSubscriberID = id
             tokenContinuation = continuation
-            continuation.onTermination = { @Sendable _ in
-                Task { [weak self] in await self?.clearTokenSubscriber(id) }
+            continuation.onTermination = { @Sendable [weak self] _ in
+                Task { await self?.clearTokenSubscriber(id) }
             }
         }
     }
@@ -698,10 +698,13 @@ public actor SlidingWindowAsrManager {
             )
 
             if tokenContinuation != nil {
-                guard let rawTimings = interim.tokenTimings,
-                    rawTimings.count == tokens.count,
-                    zip(rawTimings, tokens).allSatisfy({ $0.tokenId == $1 }),
-                    let manager = asrManager
+                // The revision counts index `accumulatedTokens`, which keeps every decoder token. Build the
+                // timings from those raw tokens: `interim` drops `<unk>` for display (#1054), and Bark 3.0
+                // emits it for quotation marks, which would break the 1:1 match and fail the stream.
+                guard let manager = asrManager else { throw SlidingWindowTokenStreamError.invalidNativeUpdate }
+                let rawTimings = await manager.rawTokenTimings(
+                    tokenIds: tokens, timestamps: adjustedTimestamps, confidences: confidences)
+                guard rawTimings.count == tokens.count, zip(rawTimings, tokens).allSatisfy({ $0.tokenId == $1 })
                 else {
                     throw SlidingWindowTokenStreamError.invalidNativeUpdate
                 }

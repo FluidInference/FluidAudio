@@ -11,7 +11,8 @@ Only positions before `stableTokenCount` are irrevocable. The producer uses the
 existing decoder's trailing-word retirement boundary; confidence confirmation
 is not an immutability guarantee. The sample ranges describe the absolute
 16 kHz window and center that produced the edit, not timestamp deduplication
-thresholds. Token IDs, pieces and timings remain one-to-one, in decoder order.
+thresholds. Token IDs, pieces and timings remain one-to-one, in decoder order. They include
+SentencePiece `<unk>` (id 0; Bark 3.0 emits it for quotation marks), which the display text omits.
 This is raw-token authority, not vocabulary-rescored display text.
 
 A consumer can commit the newly stable prefix exactly once and replace its

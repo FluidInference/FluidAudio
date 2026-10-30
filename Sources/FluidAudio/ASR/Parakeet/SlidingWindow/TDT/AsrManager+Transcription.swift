@@ -620,6 +620,13 @@ extension AsrManager {
         return (currentTokens, currentTimestamps, currentConfidences, encLen, droppedPrevious)
     }
 
+    /// Timings for a window's raw decoder tokens, one per token in decoder order. Unlike
+    /// `processTranscriptionResult`, this keeps `<unk>`: the token-revision stream counts the same tokens
+    /// the sliding window accumulates.
+    internal func rawTokenTimings(tokenIds: [Int], timestamps: [Int], confidences: [Float]) -> [TokenTiming] {
+        createTokenTimings(from: tokenIds, timestamps: timestamps, confidences: confidences)
+    }
+
     internal func processTranscriptionResult(
         tokenIds: [Int],
         timestamps: [Int] = [],
