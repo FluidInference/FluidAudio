@@ -329,6 +329,22 @@ This approach is useful when you need to:
 
 For most use cases, the simpler `manager.process(url)` API is recommended.
 
+#### Embedding Known Spans
+
+When the speaker turns already exist (from another diarizer, or a transcript), `embedSpans` returns one 256-dim
+WeSpeaker embedding per time span, skipping segmentation and clustering. The vectors are the same kind as
+`speakerDatabase` values (raw, not normalized), so they can be compared with cosine similarity:
+
+```swift
+let embeddings = try await manager.embedSpans(
+    audioSource: source,
+    spans: [12.0..<18.5, 40.2..<44.0]
+)
+```
+
+Each span is repeated to fill the 10 s model window. Spans longer than a window are cut into equal pieces and their
+embeddings averaged. Predictions run in batches of `embedding.batchSize` windows.
+
 ## Streaming/Real-time Processing
 
 For online diarization, prefer LS-EEND or Sortformer first, and use WeSpeaker/Pyannote only when you specifically need its speaker-database behavior.

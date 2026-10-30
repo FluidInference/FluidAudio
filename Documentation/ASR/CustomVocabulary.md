@@ -266,8 +266,8 @@ let tokenIds = tokenizer.encode("NVIDIA")
 Runs CTC model inference and implements the NeMo CTC word spotting algorithm.
 
 **Inference pipeline** (`+Inference.swift`):
-1. Audio → MelSpectrogram model → mel features
-2. Mel features → AudioEncoder model → CTC logits
+1. Audio → MelSpectrogram model (always on the CPU; on the Neural Engine its features made every frame blank, #1074) → mel features
+2. Mel features → AudioEncoder model (CPU + Neural Engine) → CTC logits
 3. Logits → log-softmax → log-probabilities `[T, V]`
 4. For long audio (>15s), processes in overlapping chunks and averages log-probs at boundaries
 
@@ -547,6 +547,42 @@ The thresholds, the size buckets (`largeVocabThreshold = 10`,
 `extraLargeVocabThreshold = 100`), and the dispatch logic live in
 `ContextBiasingConstants.rescorerConfig(forVocabSize:)`.
 
+#### Overriding the thresholds (#967)
+
+These defaults favour recall: they were tuned on the keyword-spotting benchmarks above, which count how
+many spoken terms are recovered. In dictation most listed terms are not in any given sentence, and a wrong
+replacement of a correctly heard word costs more than a miss. `VocabularyBoostingSession.Thresholds`
+overrides them; `nil` keeps the size default:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `cbw` | size default (4.5) | Added to the term's per-token CTC score before it is compared with the transcribed words' own score. `0` = the term must win on acoustics alone; negative = it must win by that margin |
+| `minSimilarity` | size default (0.50 / 0.55 / 0.60) | String-similarity floor; the vocabulary's own `minSimilarity` still applies when stricter |
+| `marginSeconds` | 0.5 | Audio searched on each side of a span for both sides of the comparison |
+| `detectionMinScore` | −6.5 | Per-token spotter score a term needs to be listed in `detectedTerms` (reporting only) |
+
+```swift
+let session = try await VocabularyBoostingSession(
+    vocabulary: vocabulary, ctcModels: ctcModels,
+    thresholds: .init(cbw: 0, minSimilarity: 0.7))
+```
+
+The managers' `configureVocabularyBoosting(vocabulary:ctcModels:config:thresholds:)` take the same value.
+On the #967 reporter's 13 dictation clips (12-term list, this release), the defaults replaced three
+correctly heard words (`twist` → `Tuist` in "a twist of lime", `analytics` → `Qualtrics`, `Xcode` → `Codex`);
+`cbw: 0, minSimilarity: 0.7` replaced none and kept three of the nine corrections the defaults made.
+
+`detectedTerms` used to list every term on any speech: the spotter's own floor is −15 per token. With the
+−6.5 default (pairs of clip and term):
+
+| Data | Spoken terms listed | Unspoken terms listed | Junk term listed |
+|---|---|---|---|
+| #967 dictation clips (13 clips, 12 terms) | 16/16, including the misheard ones | 40/140 (was 140/140) | 0/13 |
+| LibriSpeech test-clean (40 utterances) | 141/141 | 13/160 (was 159/160) | 0/40 |
+
+Most unspoken terms that remain are sound-alikes at real locations (`Sora` inside "Saurabh", `Codex` on
+"Xcode", `Qualtrics` on "analytics"), which score like spoken terms, so no score floor removes them.
+
 ### Short-Term Over-Fire Controls (opt-in, #702)
 
 The blank-aware DP score is a per-token average log-prob. A **short** keyword
@@ -609,11 +645,9 @@ let config = VocabularyRescorer.Config(
     spotterRescueMinSimilarity: 0.30,     // single-word acoustic-rescue floor
     spotterRescueMultiWordMinSimilarity: 0.50  // multi-word floor
 )
-let rescorer = try await VocabularyRescorer.create(
-    spotter: ctcSpotter,
-    vocabulary: vocabulary,
-    config: config
-)
+// Through a session (or any manager's configureVocabularyBoosting(vocabulary:ctcModels:config:)):
+let session = try await VocabularyBoostingSession(
+    vocabulary: vocabulary, ctcModels: ctcModels, config: config)
 ```
 
 ```bash
@@ -651,6 +685,10 @@ pipeline; turning it off reproduces the older, much-lower over-fire behavior.
 |---|---|---|---|
 | `spotterRescueEnabled` | `--vocab-disable-spotter-rescue` | `FLUID_SPOTTER_RESCUE` (`0` disables) | `true` (on) |
 
+The rescue only runs for vocabularies of at most `ContextBiasingConstants.largeVocabThreshold` (10) terms on
+the default term-centric path. Above that, `spotterRescueEnabled` and the spotter-rescue similarity floors
+have no effect.
+
 ```swift
 // Disable the acoustic rescue for short-keyword KWS:
 let config = VocabularyRescorer.Config(spotterRescueEnabled: false)
@@ -686,28 +724,40 @@ default is unchanged, so existing distinctive-name setups are unaffected.
 
 ## Usage Example
 
+Batch transcription with Parakeet TDT, then rescoring with `VocabularyBoostingSession`:
+
 ```swift
 // 1. Load models
-let asrManager = try await AsrManager.shared
-let ctcModels = try await CtcModels.downloadAndLoad()
-let ctcSpotter = CtcKeywordSpotter(models: ctcModels)
+let asrModels = try await AsrModels.downloadAndLoad(version: .v3)
+let asr = AsrManager(config: .default)
+try await asr.loadModels(asrModels)
+let ctcModels = try await CtcModels.downloadAndLoad(variant: .ctc110m)
 
-// 2. Define vocabulary
+// 2. Define the vocabulary (terms built in code are tokenized by the session)
 let vocabulary = CustomVocabularyContext(terms: [
     CustomVocabularyTerm(text: "NVIDIA"),
     CustomVocabularyTerm(text: "TensorRT"),
 ])
+let session = try await VocabularyBoostingSession(vocabulary: vocabulary, ctcModels: ctcModels)
 
-// 3. Transcribe with vocabulary boosting
-let result = try await asrManager.transcribe(
-    audioSamples,
-    customVocabulary: vocabulary
-)
+// 3. Transcribe, then rescore against the same audio (16 kHz mono)
+var state = TdtDecoderState.make(decoderLayers: await asr.decoderLayerCount)
+let result = try await asr.transcribe(audioSamples, decoderState: &state)
+let output = await session.rescore(
+    text: result.text, tokenTimings: result.tokenTimings ?? [], audioSamples: audioSamples)
+let text = output?.text ?? result.text  // nil: nothing replaced and nothing detected
 
-// result.text: "NVIDIA announced TensorRT optimizations"
-// result.ctcDetectedTerms: ["NVIDIA", "TensorRT"]
-// result.ctcAppliedTerms: ["NVIDIA", "TensorRT"]
+// output?.replacements: the replacements that were applied
+// output?.detectedTerms: terms the spotter found above `thresholds.detectionMinScore`
 ```
+
+The managers run the same session internally after `configureVocabularyBoosting(vocabulary:ctcModels:)`:
+
+| Manager | What the rescoring reports |
+|---|---|
+| `SlidingWindowAsrManager` | Each update carries `ctcDetectedTerms`, `ctcAppliedTerms` and `ctcReplacements` |
+| `UnifiedAsrManager` | `transcribeDetailed(_:)` returns them on the `ASRResult`; `transcribe(_:)` returns text only |
+| `StreamingUnifiedAsrManager` | Applied replacements via `consumeVocabularyReplacements()`; no detected terms |
 
 ## Streaming Mode Limitations
 

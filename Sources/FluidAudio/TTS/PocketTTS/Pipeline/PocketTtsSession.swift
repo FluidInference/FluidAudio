@@ -211,8 +211,12 @@ public actor PocketTtsSession {
 
     /// Start the generation loop. Must be called once after init.
     func start() {
-        generationTask = Task { [weak self] in
-            guard let self else { return }
+        // Strong capture on purpose: one-shot callers (synthesizeStreamingStateful)
+        // keep only `frames`, so the session can be released before this task
+        // body runs; a weak capture then returned without finishing the stream
+        // and the consumer waited forever. The task holds the session until the
+        // text stream is finished or `cancel()` is called.
+        generationTask = Task {
             await self.generateLoop()
         }
         frameContinuation.onTermination = { [weak self] _ in

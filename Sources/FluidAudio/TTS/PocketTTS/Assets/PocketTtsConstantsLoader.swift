@@ -325,7 +325,7 @@ public enum PocketTtsConstantsLoader {
     // MARK: - safetensors
 
     /// One tensor entry from a safetensors file.
-    fileprivate struct SafetensorsTensor {
+    struct SafetensorsTensor {
         let dtype: String
         let shape: [Int]
         /// Absolute byte offset into the original file (already includes
@@ -337,7 +337,7 @@ public enum PocketTtsConstantsLoader {
     /// Minimal safetensors reader: 8-byte LE u64 header length, then JSON
     /// header, then raw tensor bytes. Only used for v2 voice prebakes — no
     /// need to support arbitrary safetensors features.
-    fileprivate static func parseSafetensors(
+    static func parseSafetensors(
         _ data: Data, fileLabel: String
     ) throws -> [String: SafetensorsTensor] {
         guard data.count >= 8 else {

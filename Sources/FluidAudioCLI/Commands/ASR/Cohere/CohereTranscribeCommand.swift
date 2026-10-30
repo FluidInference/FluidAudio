@@ -24,12 +24,17 @@ enum CohereTranscribeCommand {
         var maxTokens: Int?
         var repetitionPenalty: Float = 1.1
         var noRepeatNgram = 3
-        var computeUnits: MLComputeUnits = .all
+        var computeUnits = CohereComputeUnitsOption()
         var decoderVariant: CoherePipeline.DecoderVariant = .v3
+        var repeatCount = 1
 
         var i = 1
         while i < arguments.count {
             let arg = arguments[i]
+            if computeUnits.consume(arguments, at: &i, logger: logger) {
+                i += 1
+                continue
+            }
             switch arg {
             case "--help", "-h":
                 printUsage()
@@ -79,10 +84,11 @@ enum CohereTranscribeCommand {
                     noRepeatNgram = v
                     i += 1
                 }
-            case "--cpu-only":
-                computeUnits = .cpuOnly
-            case "--cpu-gpu":
-                computeUnits = .cpuAndGPU
+            case "--repeat":
+                if i + 1 < arguments.count, let v = Int(arguments[i + 1]) {
+                    repeatCount = max(1, v)
+                    i += 1
+                }
             case "--decoder-variant":
                 if i + 1 < arguments.count {
                     switch arguments[i + 1].lowercased() {
@@ -124,7 +130,8 @@ enum CohereTranscribeCommand {
             repetitionPenalty: repetitionPenalty,
             noRepeatNgram: noRepeatNgram,
             computeUnits: computeUnits,
-            decoderVariant: decoderVariant
+            decoderVariant: decoderVariant,
+            repeatCount: repeatCount
         )
     }
 
@@ -137,8 +144,9 @@ enum CohereTranscribeCommand {
         maxTokens: Int?,
         repetitionPenalty: Float,
         noRepeatNgram: Int,
-        computeUnits: MLComputeUnits,
-        decoderVariant: CoherePipeline.DecoderVariant
+        computeUnits: CohereComputeUnitsOption,
+        decoderVariant: CoherePipeline.DecoderVariant,
+        repeatCount: Int
     ) async {
         guard #available(macOS 14, iOS 17, *) else {
             logger.error("Cohere mixed pipeline requires macOS 14 or later")
@@ -165,18 +173,38 @@ enum CohereTranscribeCommand {
                 decoderDir: decoderDir,
                 vocabDir: vocabDir,
                 decoderVariant: decoderVariant,
-                computeUnits: computeUnits)
+                computeUnits: computeUnits.shared,
+                encoderComputeUnits: computeUnits.encoder,
+                decoderComputeUnits: computeUnits.decoder)
             let loadSecs = CFAbsoluteTimeGetCurrent() - loadStart
             logger.info("Models loaded in \(String(format: "%.2f", loadSecs))s")
+            logger.info(
+                "Encoder compute: \(CoherePipeline.describe(models.encoderComputeUnits)), "
+                    + "decoder compute: \(CoherePipeline.describe(models.decoderComputeUnits))")
+            logFootprint("after load")
 
             let pipeline = CoherePipeline()
-            let result = try await pipeline.transcribeLong(
-                audio: samples,
-                models: models,
-                language: language,
-                maxNewTokens: maxTokens,
-                repetitionPenalty: repetitionPenalty,
-                noRepeatNgram: noRepeatNgram)
+            var result: CoherePipeline.TranscriptionResult?
+            // `--repeat n` re-runs the same audio so warm per-call timings and
+            // the steady-state footprint are visible after the first-call
+            // compile (#1045). The report below covers the last run.
+            for run in 1...repeatCount {
+                let r = try await pipeline.transcribeLong(
+                    audio: samples,
+                    models: models,
+                    language: language,
+                    maxNewTokens: maxTokens,
+                    repetitionPenalty: repetitionPenalty,
+                    noRepeatNgram: noRepeatNgram)
+                if repeatCount > 1 {
+                    logger.info(
+                        "Run \(run)/\(repeatCount): encoder \(String(format: "%.3f", r.encoderSeconds))s, "
+                            + "decoder \(String(format: "%.3f", r.decoderSeconds))s")
+                    logFootprint("after run \(run)")
+                }
+                result = r
+            }
+            guard let result else { return }
 
             let rtfx = duration / max(result.totalSeconds, 1e-9)
 
@@ -195,10 +223,21 @@ enum CohereTranscribeCommand {
             logger.info("Decoder time:  \(String(format: "%.3f", result.decoderSeconds))s")
             logger.info("Total time:    \(String(format: "%.3f", result.totalSeconds))s")
             logger.info("RTFx:          \(String(format: "%.2f", rtfx))x")
+            logFootprint("after transcribe")
         } catch {
             logger.error("cohere-transcribe failed: \(error)")
             exit(1)
         }
+    }
+
+    /// Physical footprint (what Xcode's memory gauge and Activity Monitor
+    /// report), so the memory cost of a compute-unit choice is visible from
+    /// the CLI (#1045).
+    private static func logFootprint(_ stage: String) {
+        guard let bytes = SystemInfo.currentPhysicalFootprintBytes(),
+            let peak = SystemInfo.peakPhysicalFootprintBytes()
+        else { return }
+        logger.info("Footprint \(stage): \(bytes / 1_048_576) MB (peak \(peak / 1_048_576) MB)")
     }
 
     private static func printUsage() {
@@ -230,11 +269,10 @@ enum CohereTranscribeCommand {
                 --repetition-penalty <f>        CTRL-style penalty, 1.0 disables (default: 1.1)
                 --no-repeat-ngram <n>           Forbid repeating n-grams, 0 disables (default: 3)
                 --decoder-variant <v1|v2|v3>    Decoder to load (default: v3)
+                --repeat <n>                    Transcribe the file n times in one process and
+                                                log per-run timings + footprint (default: 1)
 
-            Compute units:
-                --cpu-only                      Force CPU
-                --cpu-gpu                       CPU + GPU (skip ANE)
-                (default: all, includes ANE)
+            \(CohereComputeUnitsOption.usage)
 
             Example (INT8 encoder + FP16 decoder):
                 fluidaudio cohere-transcribe audio.wav \\

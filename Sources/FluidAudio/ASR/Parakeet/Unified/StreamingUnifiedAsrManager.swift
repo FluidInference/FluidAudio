@@ -26,6 +26,8 @@ public actor StreamingUnifiedAsrManager {
     // WER-equivalent to the original traced preprocessor on test-clean, ~17-21%
     // faster, and avoids the forced-CPU RangeDim mel stage.
     private var swiftMel: UnifiedMelExtractor?
+    /// Encoder `prompt_id` (multilingual Nemotron checkpoint only).
+    private var promptIdArray: MLMultiArray?
 
     // Components
     private let audioConverter = AudioConverter()
@@ -69,7 +71,7 @@ public actor StreamingUnifiedAsrManager {
     // segment at a time (~15 s, matching the sliding-window batch cadence)
     // instead of per 1 s chunk — CTC keyword spans would straddle chunk
     // seams and a per-chunk CTC pass would dominate the step budget.
-    private var vocabularyBoosting: VocabularyBoostingSession?
+    private(set) var vocabularyBoosting: VocabularyBoostingSession?
     // Transcript already rescored (immutable prefix). The un-rescored tail
     // is the concatenation of `vocabTimings` token texts.
     private var rescoredTranscript: String = ""
@@ -84,6 +86,8 @@ public actor StreamingUnifiedAsrManager {
     /// Audio kept before the first pending token when a segment is released,
     /// so the next CTC pass sees the word's onset.
     private let vocabPreRollSeconds: Double = 1.0
+    // Replacement decisions from the segments rescored since the last drain.
+    private var pendingVocabReplacements: [VocabularyRescorer.RescoringResult] = []
 
     public private(set) var mlConfiguration: MLModelConfiguration
 
@@ -102,9 +106,9 @@ public actor StreamingUnifiedAsrManager {
 
     /// Load models from a directory containing the parakeet_unified_* bundles and vocab.json.
     public func loadModels(from directory: URL) async throws {
-        logger.info("Loading Parakeet Unified CoreML models from \(directory.path)...")
+        logger.info("Loading \(config.family.displayName) CoreML models from \(directory.path)...")
 
-        let names = ModelNames.ParakeetUnified.self
+        let names = config.family
         // Decoder/joint run tiny per-token steps that stay on CPU; only the
         // encoder benefits from ANE/GPU. Mel is computed in Swift (no CoreML
         // preprocessor bundle).
@@ -149,12 +153,17 @@ public actor StreamingUnifiedAsrManager {
             configuration: cpuConfig
         )
         self.tokenizer = try Tokenizer(vocabPath: directory.appendingPathComponent(names.vocab))
+        self.promptIdArray = try config.family.promptId.map { id in
+            let array = try MLMultiArray(shape: [1], dataType: .int32)
+            array[0] = NSNumber(value: Int32(id))
+            return array
+        }
         self.rnntDecoder = try UnifiedRnntDecoder(
             decoderModel: decoder!, jointDecisionModel: jointDecision!, config: config
         )
         self.swiftMel = UnifiedMelExtractor(windowSamples: config.windowSamples, nMels: config.melFeatures)
 
-        logger.info("Parakeet Unified models loaded (latency \(config.latencyMs)ms).")
+        logger.info("\(config.family.displayName) models loaded (latency \(config.latencyMs)ms).")
     }
 
     /// Download models from HuggingFace (if needed) and load them.
@@ -167,7 +176,7 @@ public actor StreamingUnifiedAsrManager {
             self.mlConfiguration = configuration
         }
 
-        let repo = Repo.parakeetUnified
+        let repo = config.family.repo
         let modelsBaseDir =
             directory
             ?? FileManager.default.urls(
@@ -180,7 +189,7 @@ public actor StreamingUnifiedAsrManager {
         // Each [L,C,R] tier is a distinct encoder bundle (the attention mask is
         // baked in at conversion), so the cache check and download both target
         // this config's specific encoder rather than the default 70_13_13.
-        let encoderFile = ModelNames.ParakeetUnified.streamingEncoderFile(
+        let encoderFile = config.family.streamingEncoderFile(
             precision: encoderPrecision, contextSuffix: config.contextSuffix)
 
         // Completeness-checked download + purge-and-retry on load failure: a
@@ -190,9 +199,9 @@ public actor StreamingUnifiedAsrManager {
             repo, directory: modelsBaseDir,
             requiredFiles: [
                 encoderFile,
-                ModelNames.ParakeetUnified.decoderFile,
-                ModelNames.ParakeetUnified.jointDecisionFile,
-                ModelNames.ParakeetUnified.vocab,
+                config.family.decoderFile,
+                config.family.jointDecisionFile,
+                config.family.vocab,
             ],
             variant: encoderPrecision == .fp16 ? "fp16" : nil,
             progressHandler: progressHandler
@@ -219,15 +228,17 @@ public actor StreamingUnifiedAsrManager {
     ///   - config: Optional rescorer configuration (default:
     ///     `VocabularyBoostingSession.itnDefaultConfig` — this engine's ITN
     ///     output needs the #702 spotter-rescue similarity floors)
+    ///   - thresholds: Rescoring thresholds (default: vocabulary-size defaults)
     /// - Throws: Error if rescorer initialization fails
     public func configureVocabularyBoosting(
         vocabulary: CustomVocabularyContext,
         ctcModels: CtcModels,
-        config: VocabularyRescorer.Config? = nil
+        config: VocabularyRescorer.Config? = nil,
+        thresholds: VocabularyBoostingSession.Thresholds = .default
     ) async throws {
         self.vocabularyBoosting = try await VocabularyBoostingSession(
             vocabulary: vocabulary, ctcModels: ctcModels,
-            config: config ?? VocabularyBoostingSession.itnDefaultConfig
+            config: config ?? VocabularyBoostingSession.itnDefaultConfig, thresholds: thresholds
         )
         // Anchor the retained-audio clock at the current stream position and
         // freeze any text decoded before boosting was enabled: audio for it
@@ -288,6 +299,17 @@ public actor StreamingUnifiedAsrManager {
         buildWordTimings(from: consumeTokenTimings())
     }
 
+    /// Returns the vocabulary replacements applied since the previous call and
+    /// clears them, draining the same way `consumeTokenTimings()` does so the
+    /// buffer stays bounded over long streams. Each decision carries the
+    /// decoded word the term displaced and the scores behind the replacement,
+    /// which `finish()`'s transcript cannot express. Empty when boosting is not
+    /// configured, or when no segment has been rescored since the last call.
+    public func consumeVocabularyReplacements() -> [VocabularyRescorer.RescoringResult] {
+        defer { pendingVocabReplacements.removeAll(keepingCapacity: true) }
+        return pendingVocabReplacements
+    }
+
     public func reset() async throws {
         samples.removeAll()
         samplesGlobalStart = 0
@@ -300,6 +322,7 @@ public actor StreamingUnifiedAsrManager {
         vocabTimings.removeAll()
         vocabAudio.removeAll()
         vocabAudioGlobalStart = 0
+        pendingVocabReplacements.removeAll()
         try rnntDecoder?.reset()
     }
 
@@ -353,7 +376,7 @@ public actor StreamingUnifiedAsrManager {
 
         // 3. Streaming encoder (chunked attention mask baked in)
         let encoderOutput = try await encoder.prediction(
-            from: UnifiedEncoderFeatureProvider(mel: mel, melLength: melLength)
+            from: UnifiedEncoderFeatureProvider(mel: mel, melLength: melLength, promptId: promptIdArray)
         )
         guard let encoded = encoderOutput.featureValue(for: "encoder")?.multiArrayValue,
             let encodedLength = encoderOutput.featureValue(for: "encoder_length")?.multiArrayValue
@@ -474,10 +497,8 @@ public actor StreamingUnifiedAsrManager {
                 text: segmentText, tokenTimings: segmentTimings, audioSamples: vocabAudio
             )
         {
-            // The rescorer rebuilds its text as words joined by single spaces,
-            // dropping the segment's leading separator — restore it so the
-            // released text still butts cleanly against the rescored prefix.
-            releasedText = (segmentText.hasPrefix(" ") ? " " : "") + rescored.text
+            releasedText = Self.releasedSegmentText(segmentText, rescored: rescored)
+            pendingVocabReplacements.append(contentsOf: rescored.replacements.filter { $0.shouldReplace })
         }
         rescoredTranscript += releasedText
         vocabTimings.removeFirst(cut)
@@ -496,6 +517,15 @@ public actor StreamingUnifiedAsrManager {
         if releasedText != segmentText, let callback = partialCallback {
             callback(currentTranscript())
         }
+    }
+
+    /// Text released for a rescored segment. A modified text is rebuilt by the rescorer as words joined by
+    /// single spaces, without the segment's leading separator, so restore it to butt cleanly against the
+    /// rescored prefix. An unmodified segment keeps its own text: the session then hands back the caller's text,
+    /// separator included, and prefixing it again doubled the space (#967).
+    static func releasedSegmentText(_ segmentText: String, rescored: VocabularyRescorer.RescoreOutput) -> String {
+        guard rescored.wasModified else { return segmentText }
+        return (segmentText.hasPrefix(" ") ? " " : "") + rescored.text
     }
 
     private func dropVocabAudio(count: Int) {
@@ -552,7 +582,7 @@ public actor StreamingUnifiedAsrManager {
 
 extension StreamingUnifiedAsrManager: StreamingAsrManager {
     public var displayName: String {
-        "Parakeet Unified 0.6B (\(config.latencyMs)ms)"
+        "\(config.family.displayName) (\(config.latencyMs)ms)"
     }
 
     public func loadModels() async throws {

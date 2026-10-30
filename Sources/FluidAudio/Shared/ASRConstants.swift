@@ -74,6 +74,9 @@ public enum ASRConstants {
     /// rescorer's word-boundary detection.
     public static let sentencePieceWordBoundary: String = "▁"
 
+    /// SentencePiece unknown piece (id 0 in the Parakeet vocabularies). Never part of a transcript.
+    public static let sentencePieceUnknownToken: String = "<unk>"
+
     /// Standard overlap in encoder frames (2.0s = 25 frames at 0.08s per frame)
     public static let standardOverlapFrames: Int = 25
 

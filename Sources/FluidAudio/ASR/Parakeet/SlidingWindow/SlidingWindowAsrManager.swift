@@ -21,7 +21,7 @@ public actor SlidingWindowAsrManager {
 
     // ASR components
     private var asrManager: AsrManager?
-    private var recognizerTask: Task<Void, Error>?
+    private var recognizerTask: Task<Void, Never>?
     private var audioSource: AudioSource = .microphone
 
     // Decoder state for this sliding window session
@@ -96,14 +96,16 @@ public actor SlidingWindowAsrManager {
     ///   - vocabulary: Custom vocabulary context with terms to detect
     ///   - ctcModels: Pre-loaded CTC models for keyword spotting
     ///   - config: Optional rescorer configuration (default: vocabulary-size-aware config)
+    ///   - thresholds: Rescoring thresholds (default: vocabulary-size defaults)
     /// - Throws: Error if rescorer initialization fails
     public func configureVocabularyBoosting(
         vocabulary: CustomVocabularyContext,
         ctcModels: CtcModels,
-        config: VocabularyRescorer.Config? = nil
+        config: VocabularyRescorer.Config? = nil,
+        thresholds: VocabularyBoostingSession.Thresholds = .default
     ) async throws {
         self.vocabularyBoosting = try await VocabularyBoostingSession(
-            vocabulary: vocabulary, ctcModels: ctcModels, config: config
+            vocabulary: vocabulary, ctcModels: ctcModels, config: config, thresholds: thresholds
         )
 
         let vocabSize = vocabulary.terms.count
@@ -185,6 +187,8 @@ public actor SlidingWindowAsrManager {
             logger.info("Recognition task started, waiting for audio...")
 
             for await pcmBuffer in self.inputSequence {
+                guard !Task.isCancelled else { return }
+
                 do {
                     // Convert to 16kHz mono (streaming)
                     let samples = try audioConverter.resampleBuffer(pcmBuffer)
@@ -203,6 +207,8 @@ public actor SlidingWindowAsrManager {
             }
 
             // Stream ended: no need to flush converter since each conversion is stateless
+
+            guard !Task.isCancelled else { return }
 
             // Then flush remaining assembled audio (no right-context requirement)
             await self.flushRemaining()
@@ -240,13 +246,8 @@ public actor SlidingWindowAsrManager {
         // Signal end of input
         inputBuilder.finish()
 
-        // Wait for recognition task to complete
-        do {
-            try await recognizerTask?.value
-        } catch {
-            logger.error("Recognition task failed: \(error)")
-            throw error
-        }
+        // Wait for recognition task to complete (it handles its own errors and never throws)
+        await recognizerTask?.value
 
         // Surface total failure: every window errored, so the transcript is empty
         // or covers only a fraction of the audio. Silently returning it would be
@@ -324,11 +325,16 @@ public actor SlidingWindowAsrManager {
         logger.info("SlidingWindowAsrManager resources cleaned up")
     }
 
-    /// Cancel streaming without getting results
+    /// Cancel streaming and wait for the recognizer to exit before returning.
+    /// An in-flight model prediction may finish before cancellation completes.
     public func cancel() async {
         inputBuilder.finish()
-        recognizerTask?.cancel()
+        let task = recognizerTask
+        task?.cancel()
         updateContinuation?.finish()
+
+        // A cancelled recognizer returns normally at its next cancellation check.
+        await task?.value
 
         logger.info("SlidingWindowAsrManager cancelled")
     }
@@ -353,6 +359,8 @@ public actor SlidingWindowAsrManager {
 
         var currentAbsEnd = bufferStartIndex + sampleBuffer.count
         while currentAbsEnd >= (nextWindowCenterStart + chunk + right) {
+            guard !Task.isCancelled else { return }
+
             let leftStartAbs = max(0, nextWindowCenterStart - left)
             let rightEndAbs = nextWindowCenterStart + chunk + right
             let startIdx = max(leftStartAbs - bufferStartIndex, 0)
@@ -388,6 +396,8 @@ public actor SlidingWindowAsrManager {
 
         var currentAbsEnd = bufferStartIndex + sampleBuffer.count
         while currentAbsEnd > nextWindowCenterStart {  // process until we exhaust
+            guard !Task.isCancelled else { return }
+
             // If we have less than a chunk ahead, process the final partial chunk
             let availableAhead = currentAbsEnd - nextWindowCenterStart
             if availableAhead <= 0 { break }
@@ -564,7 +574,8 @@ public actor SlidingWindowAsrManager {
                 displayResult = interim.withRescoring(
                     text: rescored?.text ?? interim.text,
                     detected: rescored?.detectedTerms ?? [],
-                    applied: applied.isEmpty ? nil : applied
+                    applied: applied.isEmpty ? nil : applied,
+                    replacements: appliedReplacements.isEmpty ? nil : appliedReplacements
                 )
             }
 
@@ -580,7 +591,8 @@ public actor SlidingWindowAsrManager {
                 tokenIds: tokens,
                 tokenTimings: displayResult.tokenTimings ?? [],
                 ctcDetectedTerms: displayResult.ctcDetectedTerms,
-                ctcAppliedTerms: displayResult.ctcAppliedTerms
+                ctcAppliedTerms: displayResult.ctcAppliedTerms,
+                ctcReplacements: displayResult.ctcReplacements
             )
 
             updateContinuation?.yield(update)
@@ -959,6 +971,11 @@ public struct SlidingWindowTranscriptionUpdate: Sendable {
     public let ctcDetectedTerms: [String]?
     /// Vocabulary terms applied as replacements in this window's text.
     public let ctcAppliedTerms: [String]?
+    /// The rescoring decision behind each applied replacement, aligned 1:1 with
+    /// `ctcAppliedTerms`. Carries the decoded word each term displaced and the
+    /// scores the decision was made on, so callers can tell a recognizer error
+    /// from a bad vocabulary replacement. `nil` when nothing was replaced.
+    public let ctcReplacements: [VocabularyRescorer.RescoringResult]?
 
     public init(
         text: String,
@@ -968,7 +985,8 @@ public struct SlidingWindowTranscriptionUpdate: Sendable {
         tokenIds: [Int] = [],
         tokenTimings: [TokenTiming] = [],
         ctcDetectedTerms: [String]? = nil,
-        ctcAppliedTerms: [String]? = nil
+        ctcAppliedTerms: [String]? = nil,
+        ctcReplacements: [VocabularyRescorer.RescoringResult]? = nil
     ) {
         self.text = text
         self.isConfirmed = isConfirmed
@@ -978,5 +996,6 @@ public struct SlidingWindowTranscriptionUpdate: Sendable {
         self.tokenTimings = tokenTimings
         self.ctcDetectedTerms = ctcDetectedTerms
         self.ctcAppliedTerms = ctcAppliedTerms
+        self.ctcReplacements = ctcReplacements
     }
 }
