@@ -262,6 +262,15 @@ jobs:
         run: swift test --filter 'SlidingWindowFinalWindowRegressionTests|SlidingWindowVocabularyBoostingStreamingTests|CtcModelsComputeUnitsTests|VocabularyBoostingThresholdsTests'
         timeout-minutes: 15
 
+      # #1033: cancel() must join the recognizer before returning (real recordings,
+      # reuses the v3 models cached above).
+      - name: Streaming cancellation regression (real recordings)
+        if: always()
+        env:
+          FLUIDAUDIO_RUN_ASR_E2E: "1"
+        run: swift test --filter 'SlidingWindowCancellationTests'
+        timeout-minutes: 15
+
       - name: Comment PR
         if: always() && github.event_name == 'pull_request'
         continue-on-error: true

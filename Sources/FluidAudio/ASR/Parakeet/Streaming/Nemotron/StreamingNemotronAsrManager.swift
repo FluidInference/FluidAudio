@@ -291,6 +291,7 @@ public actor StreamingNemotronAsrManager {
 
         // Process complete chunks
         while self.audioBuffer.count >= config.chunkSamples {
+            try Task.checkCancellation()
             let chunk = Array(self.audioBuffer.prefix(config.chunkSamples))
             try await processChunk(chunk)
             // Recheck buffer count after await to handle actor reentrancy
@@ -303,6 +304,8 @@ public actor StreamingNemotronAsrManager {
 
     /// Finish processing and return final transcript
     public func finish() async throws -> String {
+        try Task.checkCancellation()
+
         // Check if models are loaded
         guard let tokenizer = tokenizer,
             melExtractor != nil,
@@ -377,6 +380,7 @@ extension StreamingNemotronAsrManager: StreamingAsrManager {
         }
 
         while audioBuffer.count >= config.chunkSamples {
+            try Task.checkCancellation()
             let chunk = Array(audioBuffer.prefix(config.chunkSamples))
             try await processChunk(chunk)
             let samplesToRemove = min(config.chunkSamples, audioBuffer.count)
