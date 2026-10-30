@@ -6,11 +6,19 @@ extension VocabularyRescorer {
         normalizeForSimilarity(text.replacingOccurrences(of: "’", with: "'"))
     }
 
-    /// Nearest CTC frame of a TDT timestamp. Word boundaries are frame multiples computed two ways
-    /// (`start + duration` vs the next word's `frame * frameDuration`), so adjacent words can differ
-    /// by a few ulp; rounding makes them abut exactly instead of overlapping by 1e-16 s.
-    static func frameIndex(_ seconds: Double, frameDuration: Double) -> Int {
-        Int((seconds / frameDuration).rounded())
+    /// Slack for comparing TDT timestamps. A word's end (`start + duration`) and the next word's start
+    /// (`frame * 0.08`) are computed differently and can differ by a few ulp, and CTC frames need not share
+    /// TDT's 0.08 s grid, so exact comparisons in seconds or in CTC frames flip on rounding noise.
+    static let timingTolerance = 0.001
+
+    /// First CTC frame at or after `seconds`, ignoring rounding noise.
+    static func frameCeil(_ seconds: Double, frameDuration: Double) -> Int {
+        Int(((seconds - timingTolerance) / frameDuration).rounded(.up))
+    }
+
+    /// Last CTC frame boundary at or before `seconds`, ignoring rounding noise.
+    static func frameFloor(_ seconds: Double, frameDuration: Double) -> Int {
+        Int(((seconds + timingTolerance) / frameDuration).rounded(.down))
     }
 
     /// A correction changes the name, not an existing possessive inflection: "Quiltor's" → "Quilter's",
@@ -32,12 +40,18 @@ extension VocabularyRescorer {
         let term = normalizedLexical(replacement)
         guard !term.hasSuffix("'s"), !term.hasSuffix("'") else { return replacement }
 
-        // The inflected word must end the name, not be a neighbour such as "it's": the stem's trailing letters
-        // must resemble the term. Letters, so a split rendering ("Quilt er's") still counts.
+        // In a multi-word span the inflected word must belong to the name, not be a neighbour such as "it's":
+        // dropping it must make the span a worse match. Letters, so a split rendering ("Quilt er's") counts.
         let stem = normalizedLexical(String(lexicalOriginal.dropLast(suffixLength)))
-        let termLetters = letters(term)
-        let tail = String(letters(stem).suffix(termLetters.count))
-        guard stringSimilarity(tail, termLetters) >= 0.5 else { return replacement }
+        let stemWords = stem.split(separator: " ")
+        if stemWords.count > 1 {
+            let termLetters = letters(term)
+            let withoutLastWord = stemWords.dropLast().joined(separator: " ")
+            guard
+                stringSimilarity(letters(stem), termLetters)
+                    > stringSimilarity(letters(withoutLastWord), termLetters)
+            else { return replacement }
+        }
 
         if suffixLength == 1 {
             // A plural possessive ("Jonnes'") only fits a term that ends in "s".
@@ -204,45 +218,52 @@ extension VocabularyRescorer {
         let sourceRange = first..<(last + 1)
         let canonical = normalizedLexical(candidate.vocabTerm)
         let canonicalWords = canonical.split(separator: " ")
+        let sourceWords = wordTimings[sourceRange].map { normalizedLexical($0.word) }.filter { !$0.isEmpty }
+            .flatMap { $0.split(separator: " ") }
 
+        // Anchors: recognized occurrences of the term, and recognized listed terms that would be duplicated
+        // beside the span: a sub-phrase that starts the name and sits before the span (or ends it and sits
+        // after), when the span does not already start (end) with it.
         var anchors: [Range<Int>] = []
         for (recognized, ranges) in recognizedSpans.byCanonical {
             if recognized == canonical {
                 if ranges.contains(where: { $0.overlaps(sourceRange) }) { return (start..<start, false) }
                 anchors.append(contentsOf: ranges)
-            } else if isSubPhrase(recognized.split(separator: " "), of: canonicalWords) {
-                anchors.append(contentsOf: ranges.filter { !$0.overlaps(sourceRange) })
+                continue
             }
+            let part = recognized.split(separator: " ")
+            guard part.count < canonicalWords.count else { continue }
+            let startsName =
+                Array(canonicalWords.prefix(part.count)) == part
+                && Array(sourceWords.prefix(part.count)) != part
+            let endsName =
+                Array(canonicalWords.suffix(part.count)) == part
+                && Array(sourceWords.suffix(part.count)) != part
+            anchors.append(
+                contentsOf: ranges.filter {
+                    !$0.overlaps(sourceRange) && ($0.upperBound <= first ? startsName : endsName)
+                })
         }
 
-        let spanStartFrame = frameIndex(candidate.spanStartTime, frameDuration: frameDuration)
-        let spanEndFrame = frameIndex(candidate.spanEndTime, frameDuration: frameDuration)
         var createsAdjacentDuplicate = false
         for range in anchors {
-            let anchorStartFrame = frameIndex(wordTimings[range.lowerBound].startTime, frameDuration: frameDuration)
-            let anchorEndFrame = frameIndex(wordTimings[range.upperBound - 1].endTime, frameDuration: frameDuration)
+            let anchorStart = wordTimings[range.lowerBound].startTime
+            let anchorEnd = wordTimings[range.upperBound - 1].endTime
             // Coarse, overlapping clocks cannot establish which occurrence owns
             // a frame. Preserve independent text spans rather than emptying the
             // second occurrence's search window or removing its normal bias.
-            if anchorStartFrame < spanEndFrame && anchorEndFrame > spanStartFrame { continue }
-            let gapFrames = max(anchorStartFrame - spanEndFrame, spanStartFrame - anchorEndFrame)
-            if range.upperBound == first || range.lowerBound == last + 1,
-                Double(gapFrames) * frameDuration <= marginSeconds
-            {
+            let overlap = min(anchorEnd, candidate.spanEndTime) - max(anchorStart, candidate.spanStartTime)
+            if overlap > timingTolerance { continue }
+            let gap = max(anchorStart - candidate.spanEndTime, candidate.spanStartTime - anchorEnd)
+            if range.upperBound == first || range.lowerBound == last + 1, gap <= marginSeconds + timingTolerance {
                 createsAdjacentDuplicate = true
             }
             if range.upperBound <= first {
-                start = max(start, anchorEndFrame)
+                start = max(start, frameCeil(anchorEnd, frameDuration: frameDuration))
             } else {
-                end = min(end, anchorStartFrame)
+                end = min(end, frameFloor(anchorStart, frameDuration: frameDuration))
             }
         }
         return (start..<max(start, end), createsAdjacentDuplicate)
-    }
-
-    /// Whether `part` is a contiguous, shorter run of `whole`'s words.
-    private static func isSubPhrase(_ part: [Substring], of whole: [Substring]) -> Bool {
-        guard !part.isEmpty, part.count < whole.count else { return false }
-        return (0...(whole.count - part.count)).contains { Array(whole[$0..<($0 + part.count)]) == part }
     }
 }

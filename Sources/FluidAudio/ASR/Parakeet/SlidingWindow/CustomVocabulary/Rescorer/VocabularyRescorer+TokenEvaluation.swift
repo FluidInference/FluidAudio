@@ -117,11 +117,17 @@ extension VocabularyRescorer {
             )
         }
 
+        // Only the term's search is bounded at recognized occurrences. The original phrase keeps its own
+        // span plus margin: a truncated window can cut the phrase's own last token (CTC lags TDT by about a
+        // frame) and let a weak term beat a degenerate original score.
+        let marginFrames = Int(marginSeconds / frameDuration)
+        let originalSearchStart = max(0, Int(candidate.spanStartTime / frameDuration) - marginFrames)
+        let originalSearchEnd = min(logProbs.count, Int(candidate.spanEndTime / frameDuration) + marginFrames)
         let (originalCtcScore, _, _) = spotter.ctcWordSpotConstrained(
             logProbs: logProbs,
             keywordTokens: originalTokens,
-            searchStartFrame: searchStart,
-            searchEndFrame: searchEnd
+            searchStartFrame: originalSearchStart,
+            searchEndFrame: originalSearchEnd
         )
 
         // Apply adaptive context-biasing weight, scaled to the variant
@@ -159,28 +165,11 @@ extension VocabularyRescorer {
         debugLog("    -> \(shouldReplace ? "REPLACE" : "KEEP") (vocab \(shouldReplace ? ">" : "<=") original)")
 
         // Preserve capitalization from original
-        // A passing match whose best alignment lies outside its own words may be borrowing another
-        // occurrence's audio. Record whether it also wins on its own frames, so arbitration can keep
-        // genuine repetitions and veto only borrowers.
-        let sourceStartFrame = Self.frameIndex(candidate.spanStartTime, frameDuration: frameDuration)
         let sourceFrameRange =
-            sourceStartFrame..<max(
-                sourceStartFrame, Self.frameIndex(candidate.spanEndTime, frameDuration: frameDuration))
-        var passesWithinOwnSpan: Bool?
-        if shouldReplace, let acoustic = acousticFrameRange,
-            acoustic.lowerBound < sourceFrameRange.lowerBound || acoustic.upperBound > sourceFrameRange.upperBound
-        {
-            let ownStart = max(0, sourceFrameRange.lowerBound)
-            let ownEnd = min(logProbs.count, sourceFrameRange.upperBound)
-            if ownStart < ownEnd {
-                let (ownScore, _, _) = spotter.ctcWordSpotConstrained(
-                    logProbs: logProbs, keywordTokens: vocabTokensUsed, searchStartFrame: ownStart,
-                    searchEndFrame: ownEnd)
-                passesWithinOwnSpan = ownScore + adaptiveCbwValue > originalCtcScore
-            } else {
-                passesWithinOwnSpan = false
-            }
-        }
+            Self.frameFloor(
+                candidate.spanStartTime, frameDuration: frameDuration)..<max(
+                Self.frameFloor(candidate.spanStartTime, frameDuration: frameDuration),
+                Self.frameCeil(candidate.spanEndTime, frameDuration: frameDuration))
 
         let firstOriginalWord =
             candidate.originalPhrase.split(separator: " ").first.map(String.init)
@@ -208,8 +197,7 @@ extension VocabularyRescorer {
             replacement: replacement,
             reason: reason,
             acousticFrameRange: acousticFrameRange,
-            sourceFrameRange: sourceFrameRange,
-            passesWithinOwnSpan: passesWithinOwnSpan
+            sourceFrameRange: sourceFrameRange
         )
     }
 

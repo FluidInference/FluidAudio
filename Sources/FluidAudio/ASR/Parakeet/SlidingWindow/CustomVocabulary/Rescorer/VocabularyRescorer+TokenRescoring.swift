@@ -96,8 +96,6 @@ extension VocabularyRescorer {
         // cannot spend the same acoustic occurrence on duplicate corrections.
         var acousticFrameRange: Range<Int>? = nil
         var sourceFrameRange: Range<Int>? = nil
-        /// Set when the alignment lies outside `sourceFrameRange`: whether the match also wins on its own frames.
-        var passesWithinOwnSpan: Bool? = nil
     }
 
     /// Pending replacement candidate for two-pass selection.
@@ -292,54 +290,54 @@ extension VocabularyRescorer {
             return a.similarity > b.similarity
         }
 
-        // A candidate is acoustically self-supported when its CTC alignment lies inside its own words, or it
-        // also wins on its own frames. Coarse timings can give two genuine repetitions the same strongest path,
-        // so only an unsupported candidate (a borrower) is vetoed, and whether a borrower overlaps another
-        // occurrence must not depend on which of the two is processed first: check it against every
-        // supported candidate's own words as well as the alignments already applied.
-        func isSelfSupported(_ pending: PendingReplacement) -> Bool {
-            guard let acoustic = pending.result.acousticFrameRange else { return true }
-            if let source = pending.result.sourceFrameRange,
-                source.lowerBound <= acoustic.lowerBound, source.upperBound >= acoustic.upperBound
-            {
-                return true
-            }
-            return pending.result.passesWithinOwnSpan ?? false
-        }
-        func termKey(_ pending: PendingReplacement) -> String { normalizedLexical(pending.candidate.vocabTerm) }
-
-        var supportedSources: [String: [(source: Range<Int>, index: Int)]] = [:]
-        for (index, pending) in sortedReplacements.enumerated() where isSelfSupported(pending) {
-            if let source = pending.result.sourceFrameRange, !source.isEmpty {
-                supportedSources[termKey(pending), default: []].append((source, index))
-            }
+        // A candidate whose CTC alignment lies outside its own words borrows another occurrence's audio when
+        // that alignment is already used for the same term: it is vetoed. Coarse source timings can give two
+        // genuine repetitions the same strongest path, so a candidate whose alignment lies inside its own
+        // words is never vetoed; instead it evicts an earlier applied borrower of that alignment, so the
+        // outcome does not depend on which of the two is considered first.
+        func contains(_ pending: PendingReplacement) -> Bool {
+            guard let acoustic = pending.result.acousticFrameRange, let source = pending.result.sourceFrameRange
+            else { return false }
+            return source.lowerBound <= acoustic.lowerBound && source.upperBound >= acoustic.upperBound
         }
 
         var occupiedIndices = occupiedIndices
-        var occupiedAcoustics: [String: [Range<Int>]] = [:]
         var applied: [PendingReplacement] = []
         var supersededCandidateIDs = Set<Int>()
-        for (index, pending) in sortedReplacements.enumerated() {
-            let term = termKey(pending)
-            var reusesAcoustics = false
-            if let acoustic = pending.result.acousticFrameRange, !isSelfSupported(pending) {
-                reusesAcoustics =
-                    occupiedAcoustics[term, default: []].contains { $0.overlaps(acoustic) }
-                    || supportedSources[term, default: []].contains {
-                        $0.index != index && $0.source.overlaps(acoustic)
-                    }
+        for pending in sortedReplacements {
+            let term = normalizedLexical(pending.candidate.vocabTerm)
+            let acoustic = pending.result.acousticFrameRange
+            func borrows(from other: PendingReplacement) -> Bool {
+                guard let acoustic, let used = other.result.acousticFrameRange else { return false }
+                return normalizedLexical(other.candidate.vocabTerm) == term && used.overlaps(acoustic)
             }
-            guard !reusesAcoustics, pending.candidate.spanIndices.allSatisfy({ !occupiedIndices.contains($0) }) else {
-                if let candidateID = pending.candidateID {
-                    supersededCandidateIDs.insert(candidateID)
+
+            // Only a borrower of a different occurrence is evicted. An alternative span over the same words
+            // (a wider "Barron will" for an applied "Barron") stays subject to word-overlap arbitration.
+            var evicted: [Int] = []
+            if acoustic != nil, contains(pending) {
+                let words = Set(pending.candidate.spanIndices)
+                evicted = applied.indices.filter {
+                    !contains(applied[$0]) && borrows(from: applied[$0])
+                        && words.isDisjoint(with: applied[$0].candidate.spanIndices)
                 }
+            } else if applied.contains(where: borrows(from:)) {
+                if let candidateID = pending.candidateID { supersededCandidateIDs.insert(candidateID) }
                 continue
+            }
+            let freed = Set(evicted.flatMap { applied[$0].candidate.spanIndices })
+            guard pending.candidate.spanIndices.allSatisfy({ !occupiedIndices.contains($0) || freed.contains($0) })
+            else {
+                if let candidateID = pending.candidateID { supersededCandidateIDs.insert(candidateID) }
+                continue
+            }
+            for index in evicted.reversed() {
+                let borrower = applied.remove(at: index)
+                occupiedIndices.subtract(borrower.candidate.spanIndices)
+                if let candidateID = borrower.candidateID { supersededCandidateIDs.insert(candidateID) }
             }
             applied.append(pending)
             occupiedIndices.formUnion(pending.candidate.spanIndices)
-            if let range = pending.result.acousticFrameRange {
-                occupiedAcoustics[term, default: []].append(range)
-            }
         }
 
         return PendingReplacementArbitration(

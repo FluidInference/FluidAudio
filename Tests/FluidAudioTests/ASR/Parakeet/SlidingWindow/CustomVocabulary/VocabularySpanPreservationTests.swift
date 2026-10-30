@@ -43,7 +43,7 @@ final class VocabularySpanPreservationTests: XCTestCase {
     }
 
     // Real CTC inference over recorded speech, with fixed TDT output so decoder
-    // changes cannot conceal a rescorer regression. Never downloads models.
+    // changes cannot conceal a rescorer regression. Downloads CTC 110M only when FLUIDAUDIO_RUN_ASR_E2E=1.
     func testRecognizedNamesKeepNeighboringWordsAndPossessives() async throws {
         let directory = CtcModels.defaultCacheDirectory()
         let models = try await installedCtcModels()

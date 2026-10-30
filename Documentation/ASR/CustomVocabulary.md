@@ -345,19 +345,22 @@ matches a canonical form or alias. The multi-word similarity floor still applies
 This lets a correction retain the next ordinary word instead of consuming it to
 reach the canonical word count. Partial-word replacements remain unsupported.
 
-With disjoint timestamps (compared in whole CTC frames), the CTC search margin stops at
-other recognized occurrences of the proposed term, and at recognized listed terms that are
-part of its name (a listed surname beside a misheard full name). A weak textual match
+With disjoint timestamps (compared with a 1 ms tolerance, so rounding noise does not count as
+overlap), the CTC search margin for the term stops at other recognized occurrences of it, and at
+a recognized listed term the correction would duplicate (a listed surname after a misheard full
+name that ends with it, or a first name before one that starts with it). The original phrase is
+still scored over its full span plus margin. A weak textual match
 creating a nearby adjacent duplicate must beat the original without a positive context-bias
 bonus. One-edit name spellings and registered aliases retain their normal bonus. Coarse
 overlapping timestamps do not establish acoustic ownership and leave the normal search and
 bias intact.
 
 Candidate selection rejects a replacement whose CTC alignment lies outside its own source
-span, does not also win on its own frames, and overlaps another same-term candidate's source
-words or an alignment already applied, whichever candidate is considered first. Coarse source
-timings that contain the alignment, and repetitions that win on their own frames, remain
-eligible. Other similarity thresholds and bias settings remain unchanged.
+span and overlaps an alignment already applied for the same term. A candidate whose alignment
+lies inside its own words is never rejected for this; it replaces an earlier applied borrower
+of that alignment, so the result does not depend on which is considered first. Coarse source
+timings that contain the alignment remain eligible, preserving genuine repetitions. Other
+similarity thresholds and bias settings remain unchanged.
 
 #### Non-Mutating Candidate Evidence
 

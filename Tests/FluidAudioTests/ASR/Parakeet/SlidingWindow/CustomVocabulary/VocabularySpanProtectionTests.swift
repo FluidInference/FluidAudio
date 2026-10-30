@@ -45,6 +45,42 @@ final class VocabularySpanProtectionTests: XCTestCase {
         XCTAssertLessThanOrEqual(window.frames.upperBound, 29, "search must stop at the recognized name")
     }
 
+    func testRoundingNoiseIsIgnoredWhenCtcFramesAreOffTheTdtGrid() {
+        // A 2.4 s clip: 31 CTC frames of 0.0774 s, while TDT words sit on the 0.08 s grid.
+        let words = [word("mister", frame: 10, frames: 5), word("Quilter", frame: 15, frames: 4)]
+        let window = VocabularyRescorer.protectedSearchWindow(
+            for: candidate("mister", term: "Quilter", indices: [0], words: words, similarity: 0.57),
+            wordTimings: words, recognizedSpans: recognized(words, ["Quilter"]),
+            frameDuration: 38_400.0 / 31 / 16_000, frameCount: 31, marginSeconds: 0.5)
+        XCTAssertTrue(window.createsAdjacentDuplicate)
+        XCTAssertLessThanOrEqual(window.frames.upperBound, 15)
+    }
+
+    func testAListedSubTermOnlyCountsWhereTheNameWouldDuplicateIt() {
+        // The span already starts with the listed first name: correcting it adds no second "Chandra".
+        let leading = [
+            word("Chandra", frame: 0, frames: 5), word("Chandra", frame: 5, frames: 5),
+            word("Shankhar", frame: 10, frames: 5), word("Solansky", frame: 15, frames: 5),
+        ]
+        let leadingWindow = VocabularyRescorer.protectedSearchWindow(
+            for: candidate(
+                "Chandra Shankhar Solansky", term: "Chandra Shekhar Solanki", indices: [1, 2, 3], words: leading),
+            wordTimings: leading, recognizedSpans: recognized(leading, ["Chandra", "Chandra Shekhar Solanki"]),
+            frameDuration: frameDuration, frameCount: 100, marginSeconds: 0.5)
+        XCTAssertFalse(leadingWindow.createsAdjacentDuplicate)
+
+        // "Claude" after the span is not the end of "Claude Code".
+        let trailing = [
+            word("Claude", frame: 0, frames: 5), word("Cold", frame: 5, frames: 5),
+            word("Claude", frame: 10, frames: 5), word("is", frame: 15, frames: 3),
+        ]
+        let trailingWindow = VocabularyRescorer.protectedSearchWindow(
+            for: candidate("Claude Cold", term: "Claude Code", indices: [0, 1], words: trailing),
+            wordTimings: trailing, recognizedSpans: recognized(trailing, ["Claude", "Claude Code"]),
+            frameDuration: frameDuration, frameCount: 100, marginSeconds: 0.5)
+        XCTAssertFalse(trailingWindow.createsAdjacentDuplicate)
+    }
+
     func testAListedSurnameBesideTheFullNameBoundsItsSearch() {
         let words = [
             word("Chandra", frame: 0, frames: 5), word("Shankar", frame: 5, frames: 5),
@@ -84,6 +120,11 @@ final class VocabularySpanProtectionTests: XCTestCase {
             ("Envious Lab's", "Envious Labs", "Envious Labs"),
             ("Jone's", "Jones", "Jones"),
             ("Quiltor it's", "Quilter", "Quilter"),
+            ("Envious Lab it's", "Envious Labs", "Envious Labs"),
+            ("John Collar he's", "John Collier", "John Collier"),
+            ("C. S. Solanki's", "Chandra Shekhar Solanki", "Chandra Shekhar Solanki's"),
+            ("Archit's", "Arqit", "Arqit's"),
+            ("Win's", "Nguyen", "Nguyen's"),
         ]
         for (original, term, expected) in cases {
             XCTAssertEqual(
