@@ -96,14 +96,16 @@ public actor SlidingWindowAsrManager {
     ///   - vocabulary: Custom vocabulary context with terms to detect
     ///   - ctcModels: Pre-loaded CTC models for keyword spotting
     ///   - config: Optional rescorer configuration (default: vocabulary-size-aware config)
+    ///   - thresholds: Rescoring thresholds (default: vocabulary-size defaults)
     /// - Throws: Error if rescorer initialization fails
     public func configureVocabularyBoosting(
         vocabulary: CustomVocabularyContext,
         ctcModels: CtcModels,
-        config: VocabularyRescorer.Config? = nil
+        config: VocabularyRescorer.Config? = nil,
+        thresholds: VocabularyBoostingSession.Thresholds = .default
     ) async throws {
         self.vocabularyBoosting = try await VocabularyBoostingSession(
-            vocabulary: vocabulary, ctcModels: ctcModels, config: config
+            vocabulary: vocabulary, ctcModels: ctcModels, config: config, thresholds: thresholds
         )
 
         let vocabSize = vocabulary.terms.count

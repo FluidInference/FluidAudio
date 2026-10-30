@@ -864,6 +864,14 @@ enum TranscribeCommand {
         )
     }
 
+    /// `--vocab-cbw` / `--vocab-min-similarity` / `--vocab-margin` for the managers' sessions (#967); unset flags
+    /// keep the session defaults.
+    private static func makeSessionThresholds(_ args: ParsedArgs) -> VocabularyBoostingSession.Thresholds {
+        VocabularyBoostingSession.Thresholds(
+            cbw: args.vocabCbw, minSimilarity: args.vocabMinSimilarity,
+            marginSeconds: args.vocabMargin ?? VocabularyBoostingSession.Thresholds.default.marginSeconds)
+    }
+
     private static func runStreaming(
         audioFile: String, args: ParsedArgs
     ) async {
@@ -892,7 +900,8 @@ enum TranscribeCommand {
                 try await streamingAsr.configureVocabularyBoosting(
                     vocabulary: customVocab,
                     ctcModels: ctcModels,
-                    config: makeRescorerConfig(args)
+                    config: makeRescorerConfig(args),
+                    thresholds: makeSessionThresholds(args)
                 )
             }
 
@@ -1133,10 +1142,12 @@ enum TranscribeCommand {
             if let vocabPath = args.customVocabPath {
                 let (customVocab, ctcModels) = try await CustomVocabularyContext.loadWithCtcTokens(from: vocabPath)
                 if let unified = engine as? StreamingUnifiedAsrManager {
-                    try await unified.configureVocabularyBoosting(vocabulary: customVocab, ctcModels: ctcModels)
+                    try await unified.configureVocabularyBoosting(
+                        vocabulary: customVocab, ctcModels: ctcModels, thresholds: makeSessionThresholds(args))
                     logger.info("Vocabulary boosting enabled (\(customVocab.terms.count) terms)")
                 } else if let unifiedBatch = engine as? UnifiedAsrManager {
-                    try await unifiedBatch.configureVocabularyBoosting(vocabulary: customVocab, ctcModels: ctcModels)
+                    try await unifiedBatch.configureVocabularyBoosting(
+                        vocabulary: customVocab, ctcModels: ctcModels, thresholds: makeSessionThresholds(args))
                     logger.info("Vocabulary boosting enabled (\(customVocab.terms.count) terms)")
                 } else {
                     logger.warning("--custom-vocab is not supported for \(variant.displayName); ignoring")
@@ -1255,7 +1266,8 @@ enum TranscribeCommand {
                 --vocab-spotter-min-sim <0-1>        Min similarity for acoustic single-word rescue (e.g. 0.30)
                 --vocab-spotter-min-sim-multi <0-1>  Min similarity for multi-word rescue (e.g. 0.50)
                 --vocab-disable-spotter-rescue       Turn the acoustic rescue OFF entirely (#724; pre-#634
-                                                     behavior — biggest over-fire reduction for short vocabs)
+                                                     behavior — biggest over-fire reduction for short vocabs;
+                                                     the rescue only runs for vocabularies of <= 10 terms)
 
             PARAKEET VARIANT MODE (--parakeet-variant):
                 --parakeet-variant <variant>     Engine: parakeet-eou-160ms, nemotron-560ms, …
