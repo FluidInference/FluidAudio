@@ -81,7 +81,7 @@ enum CtcDPAlgorithm {
 
     // MARK: - Core DP
 
-    /// Core DP table construction shared by all CTC word spotting variants.
+    /// Terminal keyword states shared by all CTC word spotting variants.
     ///
     /// The internal table is built on the blank-expanded symbol sequence of
     /// length `2N + 1`. Three transitions are evaluated per state:
@@ -91,24 +91,22 @@ enum CtcDPAlgorithm {
     ///   - **advance** from `s-1`: standard CTC step.
     ///   - **skip blank** from `s-2`: only when `canSkipBlank` permits it.
     ///
-    /// The returned `dp[t][n]` is projected back to the public
-    /// "n tokens consumed" view via
-    /// `dp[t][n] = max(dpI[t][2n - 1], dpI[t][2n])`, i.e. the best of
-    /// "ended on token n" or "ended on the blank after token n". Free start
-    /// is preserved with `dp[t][0] = 0` for all `t`, matching the previous
-    /// API semantics.
+    /// Each frame records the better of ending on the keyword's final token
+    /// or on its following blank. Earlier token states are needed only by
+    /// the next frame, so two working rows suffice. Retained storage is
+    /// O(T + N); scores, free starts and predecessor tie-breaking are unchanged.
     ///
     /// - Parameters:
     ///   - logProbs: CTC log-probabilities `[T, vocab_size]`
     ///   - keywordTokens: Token IDs for the keyword (may include `wildcardTokenId`)
     ///   - blankId: Vocabulary index of the CTC blank token
-    /// - Returns: `(dp, backtrack, lastMatch)` with public `[T+1][N+1]` shape:
-    ///   - `dp[t][n]` = best raw log-prob score for consuming the first `n`
-    ///     tokens by frame `t` (sum of emission log-probs along the path,
+    /// - Returns: Three arrays of length `T+1`:
+    ///   - `scores[t]` = best raw log-prob score for consuming the keyword
+    ///     by frame `t` (sum of emission log-probs along the path,
     ///     **including** blank emissions).
-    ///   - `backtrack[t][n]` = inferred keyword start frame (0-indexed) for
-    ///     the best path ending at `dp[t][n]`.
-    ///   - `lastMatch[t][n]` = frame at which the most recent non-blank
+    ///   - `starts[t]` = inferred keyword start frame (0-indexed) for
+    ///     the best path ending at `scores[t]`.
+    ///   - `ends[t]` = frame at which the most recent non-blank
     ///     token was emitted along that path.
     ///
     /// > Note: Raw scores are **larger in magnitude** than the previous
@@ -118,39 +116,41 @@ enum CtcDPAlgorithm {
     /// > `defaultMinSpotterScore` and `defaultMinVocabCtcScore`
     /// > accordingly. A per-frame normalization
     /// > (`raw / (endFrame - startFrame)`) is more stable.
-    static func fillDPTable(
+    static func terminalStates(
         logProbs: [[Float]],
         keywordTokens: [Int],
         blankId: Int = ContextBiasingConstants.defaultBlankId
-    ) -> (dp: [[Float]], backtrack: [[Int]], lastMatch: [[Int]]) {
+    ) -> (scores: [Float], starts: [Int], ends: [Int]) {
         let T = logProbs.count
         let N = keywordTokens.count
         let neg = -Float.greatestFiniteMagnitude
 
-        var dp = Array(repeating: Array(repeating: neg, count: N + 1), count: T + 1)
-        var backtrack = Array(repeating: Array(repeating: 0, count: N + 1), count: T + 1)
-        var lastMatch = Array(repeating: Array(repeating: 0, count: N + 1), count: T + 1)
+        var scores = Array(repeating: N == 0 ? 0 : neg, count: T + 1)
+        var starts = Array(repeating: 0, count: T + 1)
+        var ends = Array(repeating: 0, count: T + 1)
 
-        // Free start: matching zero tokens has score 0 at any frame.
-        for t in 0...T { dp[t][0] = 0 }
-        if N == 0 { return (dp, backtrack, lastMatch) }
+        if N == 0 { return (scores, starts, ends) }
 
         let s = buildExpandedSequence(keywordTokens)
         let sLen = s.count  // = 2N + 1
 
-        // Internal DP on the expanded graph.
-        var dpI = Array(repeating: Array(repeating: neg, count: sLen), count: T + 1)
-        var startI = Array(repeating: Array(repeating: 0, count: sLen), count: T + 1)
-        var lastTokI = Array(repeating: Array(repeating: 0, count: sLen), count: T + 1)
+        // Expanded states depend only on the preceding frame. Keep two rows
+        // and retain only the final token/blank pair at each frame.
+        var previousScores = Array(repeating: neg, count: sLen)
+        var currentScores = Array(repeating: neg, count: sLen)
+        var previousStarts = Array(repeating: 0, count: sLen)
+        var currentStarts = Array(repeating: 0, count: sLen)
+        var previousLastTokens = Array(repeating: 0, count: sLen)
+        var currentLastTokens = Array(repeating: 0, count: sLen)
         // s = 0 is the initial blank; free-start convention says any frame
         // can be the start of the keyword, so dp at the initial state is 0
         // and the candidate start frame is the current frame index.
-        for t in 0...T {
-            dpI[t][0] = 0
-            startI[t][0] = t
-        }
+        previousScores[0] = 0
 
         for t in 1...T {
+            currentScores[0] = 0
+            currentStarts[0] = t
+            currentLastTokens[0] = 0
             let frame = logProbs[t - 1]
             for sIdx in 1..<sLen {
                 let sym = s[sIdx]
@@ -160,9 +160,9 @@ enum CtcDPAlgorithm {
                 // Wildcards are zero-cost regardless of underlying frame log-probs.
                 let added: Float = isWildcard ? 0 : emitLogProb
 
-                let stay = dpI[t - 1][sIdx]
-                let advance = dpI[t - 1][sIdx - 1]
-                let skipBlank = canSkipBlank(s, at: sIdx) ? dpI[t - 1][sIdx - 2] : neg
+                let stay = previousScores[sIdx]
+                let advance = previousScores[sIdx - 1]
+                let skipBlank = canSkipBlank(s, at: sIdx) ? previousScores[sIdx - 2] : neg
 
                 var bestPred = stay
                 var predKind = 0  // 0 = stay, 1 = advance, 2 = skip-blank
@@ -176,56 +176,55 @@ enum CtcDPAlgorithm {
                 }
 
                 if bestPred <= neg / 2 {
-                    dpI[t][sIdx] = neg
+                    currentScores[sIdx] = neg
+                    currentStarts[sIdx] = 0
+                    currentLastTokens[sIdx] = 0
                     continue
                 }
 
-                dpI[t][sIdx] = bestPred + added
+                currentScores[sIdx] = bestPred + added
                 let isMatchFrame = isToken || isWildcard
 
                 switch predKind {
                 case 0:
-                    startI[t][sIdx] = startI[t - 1][sIdx]
-                    lastTokI[t][sIdx] = isMatchFrame ? t : lastTokI[t - 1][sIdx]
+                    currentStarts[sIdx] = previousStarts[sIdx]
+                    currentLastTokens[sIdx] = isMatchFrame ? t : previousLastTokens[sIdx]
                 case 1:
                     if sIdx == 1 {
                         // First non-blank symbol: keyword starts at this frame.
-                        startI[t][sIdx] = t - 1
+                        currentStarts[sIdx] = t - 1
                     } else {
-                        startI[t][sIdx] = startI[t - 1][sIdx - 1]
+                        currentStarts[sIdx] = previousStarts[sIdx - 1]
                     }
-                    lastTokI[t][sIdx] = isMatchFrame ? t : lastTokI[t - 1][sIdx - 1]
+                    currentLastTokens[sIdx] = isMatchFrame ? t : previousLastTokens[sIdx - 1]
                 default:
                     // Skip-blank: predecessor is at sIdx - 2, which by
                     // canSkipBlank must be a token (or wildcard). For
                     // sIdx = 2 we still inherit start from sIdx - 2 = 0,
                     // which records the candidate keyword-start frame.
-                    startI[t][sIdx] = startI[t - 1][sIdx - 2]
-                    lastTokI[t][sIdx] = isMatchFrame ? t : lastTokI[t - 1][sIdx - 2]
+                    currentStarts[sIdx] = previousStarts[sIdx - 2]
+                    currentLastTokens[sIdx] = isMatchFrame ? t : previousLastTokens[sIdx - 2]
                 }
             }
-        }
-
-        // Project the expanded states back to the public n-tokens-consumed view.
-        for t in 0...T {
-            for n in 1...N {
-                let sTok = 2 * n - 1
-                let sBlank = 2 * n
-                let scTok = sTok < sLen ? dpI[t][sTok] : neg
-                let scBlank = sBlank < sLen ? dpI[t][sBlank] : neg
-                if scTok >= scBlank {
-                    dp[t][n] = scTok
-                    backtrack[t][n] = startI[t][sTok]
-                    lastMatch[t][n] = lastTokI[t][sTok]
-                } else {
-                    dp[t][n] = scBlank
-                    backtrack[t][n] = startI[t][sBlank]
-                    lastMatch[t][n] = lastTokI[t][sBlank]
-                }
+            let sTok = 2 * N - 1
+            let sBlank = 2 * N
+            let scTok = currentScores[sTok]
+            let scBlank = currentScores[sBlank]
+            if scTok >= scBlank {
+                scores[t] = scTok
+                starts[t] = currentStarts[sTok]
+                ends[t] = currentLastTokens[sTok]
+            } else {
+                scores[t] = scBlank
+                starts[t] = currentStarts[sBlank]
+                ends[t] = currentLastTokens[sBlank]
             }
+            swap(&previousScores, &currentScores)
+            swap(&previousStarts, &currentStarts)
+            swap(&previousLastTokens, &currentLastTokens)
         }
 
-        return (dp, backtrack, lastMatch)
+        return (scores, starts, ends)
     }
 
     /// Count non-wildcard tokens for score normalization.
@@ -271,7 +270,7 @@ enum CtcDPAlgorithm {
             return (-Float.infinity, clampedStart, clampedStart)
         }
 
-        let (dp, backtrack, lastMatch) = fillDPTable(
+        let (scores, starts, ends) = terminalStates(
             logProbs: windowLogProbs,
             keywordTokens: keywordTokens,
             blankId: blankId
@@ -281,14 +280,14 @@ enum CtcDPAlgorithm {
         var bestScore = -Float.greatestFiniteMagnitude
 
         for t in N...windowT {
-            if dp[t][N] > bestScore {
-                bestScore = dp[t][N]
+            if scores[t] > bestScore {
+                bestScore = scores[t]
                 bestEnd = t
             }
         }
 
-        let bestStart = backtrack[bestEnd][N]
-        let actualEndFrame = lastMatch[bestEnd][N]
+        let bestStart = starts[bestEnd]
+        let actualEndFrame = ends[bestEnd]
 
         let normFactor = nonWildcardCount(keywordTokens)
         let normalizedScore = normFactor > 0 ? bestScore / Float(normFactor) : bestScore
@@ -322,7 +321,7 @@ enum CtcDPAlgorithm {
             return []
         }
 
-        let (dp, backtrack, lastMatch) = fillDPTable(
+        let (scores, starts, ends) = terminalStates(
             logProbs: logProbs,
             keywordTokens: keywordTokens,
             blankId: blankId
@@ -336,18 +335,18 @@ enum CtcDPAlgorithm {
         guard T >= N else { return [] }
 
         for t in N...T {
-            let rawScore = dp[t][N]
+            let rawScore = scores[t]
             let normalizedScore = rawScore / normFactor
 
-            let prevScore = t > N ? dp[t - 1][N] / normFactor : -Float.greatestFiniteMagnitude
-            let nextScore = t < T ? dp[t + 1][N] / normFactor : -Float.greatestFiniteMagnitude
+            let prevScore = t > N ? scores[t - 1] / normFactor : -Float.greatestFiniteMagnitude
+            let nextScore = t < T ? scores[t + 1] / normFactor : -Float.greatestFiniteMagnitude
 
             let isLocalMax = normalizedScore >= prevScore && normalizedScore > nextScore
             let meetsThreshold = normalizedScore >= minScore
 
             if isLocalMax && meetsThreshold {
-                let startFrame = backtrack[t][N]
-                let actualEndFrame = lastMatch[t][N]
+                let startFrame = starts[t]
+                let actualEndFrame = ends[t]
                 candidates.append((score: normalizedScore, startFrame: startFrame, endFrame: actualEndFrame))
             }
         }
@@ -356,15 +355,15 @@ enum CtcDPAlgorithm {
             var bestEnd = 0
             var bestScore = -Float.greatestFiniteMagnitude
             for t in N...T {
-                let normalizedScore = dp[t][N] / normFactor
+                let normalizedScore = scores[t] / normFactor
                 if normalizedScore > bestScore {
                     bestScore = normalizedScore
                     bestEnd = t
                 }
             }
             if bestScore >= minScore {
-                let startFrame = backtrack[bestEnd][N]
-                let actualEndFrame = lastMatch[bestEnd][N]
+                let startFrame = starts[bestEnd]
+                let actualEndFrame = ends[bestEnd]
                 candidates.append((score: bestScore, startFrame: startFrame, endFrame: actualEndFrame))
             }
         }

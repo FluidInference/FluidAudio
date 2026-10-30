@@ -11,14 +11,19 @@ public enum ParadeeVariant: String, Sendable, CaseIterable {
     /// fp32 weights (34 MB); matches PyTorch to rounding.
     case fp32
 
-    /// Subdirectory under `FluidInference/paradee-8m-coreml/`.
+    /// v1.0 subdirectory under `FluidInference/paradee-8m-coreml/`.
     public var subdirectory: String { rawValue }
 
-    /// HuggingFace repo case for this variant's subdirectory.
-    public var repo: Repo {
-        switch self {
-        case .int8: return .paradeeInt8
-        case .fp32: return .paradeeFp32
+    /// HuggingFace repo case for this variant of v1.0.
+    public var repo: Repo { repo(for: .v10) }
+
+    /// HuggingFace repo case for this variant of `version`.
+    public func repo(for version: ParadeeVersion) -> Repo {
+        switch (version, self) {
+        case (.v10, .int8): return .paradeeInt8
+        case (.v10, .fp32): return .paradeeFp32
+        case (.v12, .int8): return .paradeeV12Int8
+        case (.v12, .fp32): return .paradeeV12Fp32
         }
     }
 }

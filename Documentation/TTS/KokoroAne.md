@@ -59,7 +59,12 @@ The SDK downloads the following immutable release from
 V3 checks the pinned manifest and model-file hashes, fetches its pinned
 seven-stage dependencies, and compiles source `.mlpackage` files on the
 target device. The first load includes downloads and compilation. Later
-loads reuse the downloaded packages and locally compiled models. Its cache
+loads use the locally compiled `.mlmodelc` bundles only: once a stage is
+compiled, its source `.mlpackage` is neither re-hashed nor re-downloaded, so
+an app may delete the `.mlpackage` sources after the first load to roughly
+halve the on-disk footprint (#1043). A compiled bundle that later fails to
+load is discarded: the source is recompiled on the spot, or, if it was
+deleted, fetched and compiled again on the next load. Its cache
 is separate from legacy assets:
 `<Models>/kokoro-82m-coreml/ANE-v3/<release revision>/<en|ja|zh>/`.
 Passing `directory:` overrides the `<Models>` root. Voice packs download
@@ -242,7 +247,11 @@ dictionary and Cutlet word list (about 115 MB) on first use. IPA bypass
 calls do not download them. Spanish and French fetch `es_lexicon_cache.json`
 (4 MB) / `fr_lexicon_cache.json` (13 MB) from the repo root at
 `initialize()`, next to the English `us_lexicon_cache.json`; French also
-fetches the CharsiuG2P CoreML pair.
+fetches the CharsiuG2P CoreML pair. The English frontend (and StyleTTS2 /
+Inflect, which share the phonemizer) fetches the BART G2P assets from the
+repo root (`G2PEncoder.mlmodelc`, `G2PDecoder.mlmodelc`, `g2p_vocab.json`,
+about 1.5 MB); that download takes only those three items, not the other
+root-level lexicon JSONs, which are fetched per language as above (#1044).
 
 ### Swift
 

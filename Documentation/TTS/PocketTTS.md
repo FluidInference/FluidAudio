@@ -48,6 +48,119 @@ fused/prefill artifacts at `v2.1/<lang>/` and otherwise reuses v2's `mimi`,
 
 ---
 
+## Small models (pocket-tts 4.0.0): 18m / 7m / 2m with the FlowLM on the Neural Engine
+
+Kyutai's 2026-10-20 release added six small English models — `english_18m_2026-10`,
+`english_7m_2026-10`, `english_2m_2026-10` and reward-fine-tuned `*_refl_2026-10`
+twins. They are a different architecture from the 100M (grouped-query attention,
+a `z_proj` before the heads, a low-rank text table, one-step flow heads, a
+separate 128-d Mimi decoder), so they have their own packs under
+`FluidInference/pocket-tts-coreml` `v4/<model>/` and their own backend:
+
+```swift
+let tts = PocketTtsSmallManager(model: .english7m)        // .english18m, .english2m, *Refl
+try await tts.initialize()                                 // downloads v4/<model>/ (34–145 MB)
+let wav = try await tts.synthesize(text: "Hello, world!", voice: "alba")
+for try await frame in try await tts.synthesizeStreaming(text: "…") { /* 80 ms frames */ }
+```
+
+```bash
+fluidaudiocli tts "Hello world." --backend pocket-small --model 7m --seed 42 -o out.wav
+```
+
+Requires macOS 15 / iOS 18. The FlowLM runs on the Neural Engine through one
+MLState multifunction package, `pocket_state.mlmodelc`: `prefill` writes the text
+block into the FlowLM KV state and `generate` runs the FlowLM step plus the
+one-step flow head per frame (`latent_final`, `is_eos`). The Mimi decoder runs as
+the fp32 I/O model `mimi_decoder.mlmodelc` on the CPU (`mimiPrecision: .fp32`,
+the default); its state (two small KV caches and ~18 KB of conv histories) is
+plain inputs/outputs the host feeds back, zeroed per utterance.
+
+**Why the Mimi decoder is not on the ANE by default.** The package also carries
+`generate_decode`, which fuses step + head + an fp16 Mimi decoder into a single
+ANE dispatch (`mimiPrecision: .fp16Fused`, `--mimi fp16-fused`). It is faster
+(18m: 2.9 vs 4.4 ms per frame on an M5 Pro) but the fp16 SEANet adds a white noise
+floor at about −72 dBFS, audible as hiss in pauses and at the start of an
+utterance; PyTorch and the fp32 path sit at about −80 dBFS with the same spectral
+tilt. The same graph in fp16 on the CPU has the same floor, so it is fp16
+rounding of O(1) activations against O(1e-3) audio, not an ANE fault; keeping the
+SEANet ops in fp32 inside the stateful program is rejected by the Core ML planner
+(bad_cast, status −14), hence the separate fp32 model. The fused path keeps the
+Mimi KV caches in the MLState; both Mimi models take a one-hot `phase` input per frame
+(10 phases, from the frame counter) that selects the Mimi cache-write rows,
+relative RoPE rotations and mask tables — the graph has no data-dependent integer
+arithmetic because the ANE miscomputes it. Every dimension comes from the pack's
+`arch.json` / `pocket_state.json` (`PocketTtsSmallArch`, `PocketTtsSmallStateInfo`)
+or the compiled model's own input descriptions; nothing in `PocketTtsSmallEngine`
+hard-codes a size.
+
+Text is chunked at sentence boundaries to at most 50 tokens
+(`PocketTtsConstants.preferredTokensPerChunk`), the upstream `MAX_TOKEN_PER_CHUNK`.
+This matters more than for the 100M: the small models were trained on short
+chunks, and fed a whole paragraph in one prefill several voices (eponine, azelma,
+anna, estelle, jane, michael, paul with an 81-token passage) never emit EOS and run
+to the frame budget — upstream PyTorch does exactly the same with
+`max_tokens=512`, so it is model behaviour, not a conversion fault.
+
+Differences from the 100M packs a host must know: the first `sequence` of a chunk
+is `bos_emb` (no NaN protocol); `is_eos` is a raw logit with threshold −1.0 and is
+ignored for the first 6 frames; temperature defaults to 0.3; the text table is
+`[4001, d_model]` with the low-rank projection folded in; voices are the upstream
+KV snapshots `[2, 1, n, Hkv, 64]` written as fp16 into `k_cache{i}` / `v_cache{i}`;
+`–` and `—` are rewritten to `,` before tokenizing.
+
+Measured on an M5 Pro with the fused fp16 path (`fluidaudiocli`, debug build,
+86–91 frames of the verify sentence): 7m 156 ms (44× real time), 18m 260 ms (28×),
+2m 125 ms (47×); the default fp32-Mimi path adds about 1.5 ms per frame (18m:
+~18× real time). First load pays the ANE compile (10–150 s), warm loads are
+sub-second. Whisper transcripts match the PyTorch output. If a pack is replaced in
+place with a changed graph, Core ML may keep serving the previously compiled
+program from its per-app cache (`~/Library/Caches/<app>/com.apple.e5rt.e5bundlecache`);
+a new directory name avoids it. Voice cloning is not wired for the small
+models yet (the Mimi encoder is the 100M English one; only `speaker_proj_weight`
+differs and ships in `constants_bin/`). Conversion code and the full trial log
+(ANE faults in `conv_transpose`, time concat, fp16 RoPE, integer compares) live in
+the private model-lab repo, `models/pocket-tts-small-coreml/`.
+
+## Phonon 31m (Gradium)
+
+[Phonon](https://gradium.ai/phonon) (Gradium, 2026-10-20) is the Pocket TTS recipe trained by
+the Kyutai founders' spin-off. `phonon-31m-en` is Apache-2.0. It has the 100M architecture at
+half width: 512-d, 6 layers, a one-step LSD flow head and the 100M's Mimi decoder. FluidAudio
+runs it on the small-model host above:
+
+```swift
+let tts = PocketTtsSmallManager(model: .phonon31m)
+try await tts.initialize()                          // FluidInference/pocket-tts-coreml phonon/phonon-31m-en
+let wav = try await tts.synthesize(text: "Email support@gradium.ai for 24/7 help.", voice: "en_us_Zoey")
+```
+
+```bash
+fluidaudiocli tts "Hello from Phonon." --backend pocket-small --model phonon --voice en_us_Easton -o out.wav
+```
+
+- **Voices.** 103 in all, listed by `availableVoices()`: 25 English voices named `en_us_<Name>` and
+  `en_gb_<Name>`, 12 characters named `characters_<Name>`, the checkpoint `default`, and Gradium's
+  French, German, Spanish and Portuguese catalogue voices. The released model speaks English only.
+  Voices ship as flow-LM conditioning rows (`voices/*.safetensors`). The first use of a voice
+  prefills it once and caches the result. `default`, `en_us_Easton`, `en_us_Zoey` and `en_gb_Maeve`
+  also ship as KV snapshots.
+- **Text.** Text goes through `PhononTextNormalizer`, a Swift port of Gradium's English normalizer
+  covering numbers, currency, emails, URLs, abbreviations and symbols. It matches the Rust original
+  on 907 test inputs.
+- **Pack contract.** `arch.json` carries Phonon's differences:
+  - EOS threshold +4.0, with no minimum frame count and a tail of 1 frame (`eos_tail_extra`)
+  - a 25 ms raised-cosine fade at each chunk start (`fade_in_*`), which removes the Mimi decoder's
+    −40 dBFS cold-start click, present in Gradium's own runtime too
+  - the 251-wide Mimi window and the summed-conditioner input bias, which are baked into the graphs
+- **Quality.** The fp32 Mimi stays the default. The fp16 Mimi adds near-white noise at about
+  −80 dBFS in pauses. Against Gradium's `ptts` runtime at temperature 0, frame counts match, and
+  Whisper transcripts are identical for the fp32 and Neural Engine paths.
+- **Speed** (M5 Pro): about 20 ms to first audio, 3.3–4.2 ms per 80 ms frame, 19–25x real time.
+- **Demo.** `Examples/PhononDemo` is a SwiftUI app with a ring that follows the live spectrum.
+- **Conversion code**, parity tools and noise measurements live in model-lab,
+  `models/gradium-phonon-coreml/`.
+
 ## Model Files & Precision
 
 The four CoreML submodels (plus the optional Mimi encoder) and their

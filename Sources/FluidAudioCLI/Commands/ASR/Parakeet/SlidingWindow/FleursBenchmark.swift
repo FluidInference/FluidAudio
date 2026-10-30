@@ -870,9 +870,16 @@ extension FLEURSBenchmark {
                         modelVersion = .ultra
                     case "phonon2", "phonon-2":
                         modelVersion = .phonon2
+                    case "phonon25", "phonon-2.5":
+                        modelVersion = .phonon25
+                    case "bark3", "bark-3", "bark":
+                        modelVersion = .bark3
+                    case "bark3-clean", "bark-3-clean", "bark-clean":
+                        modelVersion = .bark3Clean
                     default:
                         AppLogger(category: "FLEURSBenchmark").error(
-                            "Invalid model version: \(arguments[i + 1]). Use 'v3', 'redux', 'ultra' or 'phonon2'.")
+                            "Invalid model version: \(arguments[i + 1]). Use 'v3', 'redux', 'ultra', 'phonon2', 'phonon25', 'bark3' or 'bark3-clean'."
+                        )
                         exit(1)
                     }
                     i += 1
@@ -1339,7 +1346,7 @@ extension FLEURSBenchmark {
                                          Available: \(langsJoined)
                 --samples <number|all>    Number of samples per language (default: all)
                 --single-file <filename>  Test a single audio file (auto-detects language)
-                --model-version <name>    'v3' (default), 'redux', 'ultra' or 'phonon2'
+                --model-version <name>    'v3' (default), 'redux', 'ultra', 'phonon2', 'phonon25', 'bark3' or 'bark3-clean'
                 --encoder-compute-units <u>  'ane', 'gpu', 'cpu' or 'all' (default: model's own)
                 --output <file>          Output JSON file path
                 --cache-dir <path>       Directory for caching FLEURS data

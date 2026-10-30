@@ -225,8 +225,9 @@ public enum ModelHub {
     ///   HTTP Range) instead of being mistaken for a warm cache.
     /// - When `load` throws, the repo cache is purged and re-downloaded
     ///   and `load` retried once — except in offline mode, on
-    ///   cancellation, and on transient network errors, where the cache
-    ///   is preserved and the error rethrown.
+    ///   cancellation, on transient network errors, and on a
+    ///   `ModelCachePreservingError` that preserves the cache, where the
+    ///   cache is kept and the error rethrown.
     ///
     /// - Parameters:
     ///   - requiredFiles: Paths relative to the repo cache directory that
@@ -296,6 +297,11 @@ public enum ModelHub {
                 logger.warning(
                     "Load failed with transient network error; preserving model cache for resume. \(error.localizedDescription)"
                 )
+                throw error
+            }
+            if let preserving = error as? any ModelCachePreservingError, preserving.preservesModelCache {
+                logger.warning(
+                    "Load failed for a reason outside the model cache; preserving it. \(error.localizedDescription)")
                 throw error
             }
 
@@ -453,7 +459,8 @@ public enum ModelHub {
             }
         }
 
-        let include = Self.repoIncludeRule(subPath: subPath, patterns: patterns)
+        let include = Self.repoIncludeRule(
+            subPath: subPath, patterns: patterns, sweepsRootMetadata: repo.sweepsRootMetadata)
 
         // Repo loads: download occupies 0-0.5, CoreML compile 0.5-1.0.
         let reporter = ProgressReporter(handler: progressHandler, downloadPhaseWeight: 0.5)
@@ -811,8 +818,14 @@ public enum ModelHub {
     ///   roughly half of a first-run parakeetEou/kokoroAne download was never
     ///   loaded (#826). Skipping applies to directory traversal too, so the
     ///   tree lister does not recurse into excluded bundles.
+    ///
+    /// For root-level repos (no subPath), `sweepsRootMetadata` controls the
+    /// loose `.json`/`.txt` allowance at the repository root. It is on for
+    /// most repos (tokenizer/config files their required set does not name)
+    /// and off for `Repo.kokoro`, whose root holds ~40 MB of per-language
+    /// lexicon caches that the shared G2P download must not drag in (#1044).
     static func repoIncludeRule(
-        subPath: String?, patterns: [String]
+        subPath: String?, patterns: [String], sweepsRootMetadata: Bool = true
     ) -> (String, Bool) -> Bool {
         { itemPath, isDirectory in
             let isBundlePath =
@@ -846,8 +859,10 @@ public enum ModelHub {
             }
             // Patterns carry a trailing "/" (bundle directories); a required root-level
             // *file* (e.g. `tokenizer.model`) matches when the pattern is exactly its path.
-            return patterns.isEmpty || patterns.contains { itemPath.hasPrefix($0) || $0 == itemPath + "/" }
-                || itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt")
+            if patterns.isEmpty || patterns.contains(where: { itemPath.hasPrefix($0) || $0 == itemPath + "/" }) {
+                return true
+            }
+            return sweepsRootMetadata && (itemPath.hasSuffix(".json") || itemPath.hasSuffix(".txt"))
         }
     }
 }
