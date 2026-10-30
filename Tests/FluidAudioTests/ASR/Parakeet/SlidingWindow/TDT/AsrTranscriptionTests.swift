@@ -182,6 +182,17 @@ final class AsrTranscriptionTests: XCTestCase {
         XCTAssertEqual(result.confidence, 0.9, accuracy: 0.001)
     }
 
+    func testRawTokenTimingsKeepUnknownTokensForTheRevisionStream() async {
+        await setupMockVocabulary()
+        // The token-revision stream counts every decoder token the sliding window accumulates, so its
+        // timings must stay 1:1 with them even though the display path drops <unk> (#1035, #1054).
+        let tokenIds = [1, 0, 2, 5, 0]
+        let timings = await manager.rawTokenTimings(
+            tokenIds: tokenIds, timestamps: [1, 2, 3, 4, 5], confidences: [0.9, 0.1, 0.9, 0.9, 0.1])
+        XCTAssertEqual(timings.map(\.tokenId), tokenIds)
+        XCTAssertEqual(timings.map(\.token), ["hello", "<unk>", " world", ".", "<unk>"])
+    }
+
     // MARK: - Chunk Processing Logic Tests
 
     func testChunkCalculations() {
