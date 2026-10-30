@@ -264,12 +264,15 @@ PocketTtsSynthesizer.synthesize(text:voice:temperature:)
 
 ## Text Chunking
 
-Long text is split into chunks of <=50 tokens to fit the KV cache (512 positions, minus ~125 voice + ~25 overhead).
+Long text is split at sentence boundaries (`.!?`), and sentences are grouped into chunks of up to 50 tokens
+(`PocketTtsConstants.preferredTokensPerChunk`). A longer sentence stays whole as long as it fits the KV cache: the
+voice conditioning (about 125 positions for a shipped voice; a cloned voice uses its prompt length), its tokens and
+its estimated speech frames must fit in 512 positions (#938).
 
-Splitting priority:
-1. Sentence boundaries (`.!?`)
-2. Clause boundaries (`,;:`)
-3. Word boundaries (fallback)
+A sentence that does not fit is cut, and each cut restarts prosody, so cuts go where a speaker pauses anyway (#934):
+1. Clause punctuation: `, ; :`, an em dash, a spaced en dash or hyphen, an ellipsis, and the edges of a bracketed
+   aside. A bracket inside a word (`f(x)`) is not an aside.
+2. Word boundaries, as a fallback: the fewest parts that fit, balanced so no part is left as a short tail.
 
 `normalizeText()` also capitalizes, adds terminal punctuation, and pads short text with leading spaces for better prosody.
 
