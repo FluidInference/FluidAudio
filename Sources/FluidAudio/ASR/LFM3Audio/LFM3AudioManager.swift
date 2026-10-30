@@ -155,10 +155,17 @@ public actor LFM3AudioManager {
     // MARK: - LiveASR
 
     /// Start a live (streaming) English transcription. Audio is processed in 0.96 s chunks as it arrives.
-    public func startLiveTranscription() throws {
+    public func startLiveTranscription() async throws {
         guard live == nil else { throw LFM3AudioError.liveSessionActive }
         encoder.resetState()
         live = LiveState(melStream: LFM3AudioMelStream(mel))
+        // The live chunk's prefill bucket loads on first use; load it here rather than stalling the first chunk.
+        do {
+            try await languageModel.prepare(rows: 1 + LFM3AudioConfig.liveEncoderTokens)
+        } catch {
+            live = nil
+            throw error
+        }
     }
 
     /// Append 16 kHz mono samples to the live session; returns the transcript so far.

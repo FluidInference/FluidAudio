@@ -250,6 +250,10 @@ actor LFM3AudioCoreMLBackbone: LFM3AudioLanguageModel {
         return decode.stages.map { $0.model.makeState() }
     }
 
+    func prepare(rows: Int) throws {
+        for function in functions[rows] ?? [] { try function.load() }
+    }
+
     func reset() throws {
         states = try Self.makeStates(functions)
         slot = 0

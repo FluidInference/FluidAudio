@@ -105,6 +105,20 @@ footprint: 1.9 GB on both backends. The first Core AI load specializes the graph
 `~/Library/Caches/coreai-cache`); the system purges it under storage pressure or when the bundle changes, and
 `LFM3AudioModels.clearCoreAICache()` deletes it on demand.
 
+## First load and disk space
+
+The first Core ML load in an app compiles the GPU functions into the app's Core ML cache
+(`~/Library/Caches/<app>/com.apple.e5rt.e5bundlecache`): 5.3 GB and ~11 s for recognition on the M5 Pro. The
+`prefill_q13` / `prefill_q16` buckets (LiveASR chunks, short prefill remainders) load on first use instead
+(`startLiveTranscription()` loads the live one): ~1.7 s each from a warm cache, and on a cold one ~3 GB more cache
+and a few seconds once.
+
+On macOS 27 these cache files are purgeable as soon as they are written. With little free disk the system can delete
+them while Core ML is still loading, and the model then fails to load or aborts on its first prediction with
+`MPSGraphTensorData shape.count = 0 != strides.count = 3`. Keep ~30 GB free for a first load: `LFM3AudioModels` logs
+a warning below that, and a load failure on a low disk throws `LFM3AudioError.lowDiskSpace` and keeps the download
+instead of deleting and re-fetching it.
+
 ## License
 
 LFM Open License v1.0 (Liquid AI): organizations with USD 10 million or more in annual revenue need a commercial
