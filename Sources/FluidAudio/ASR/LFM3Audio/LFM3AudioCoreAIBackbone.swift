@@ -16,24 +16,27 @@ import Foundation
 actor LFM3AudioCoreAIBackbone: LFM3AudioLanguageModel {
     private static let stateNames = ["keyCache", "valueCache", "convStates"]
 
-    private let models: [AIModel]
-    private let prefill: InferenceFunction
-    private let main: InferenceFunction
-    private let hiddenFunction: InferenceFunction
-    private let embeddingsInput: NDArrayDescriptor
-    private let positionsInput: NDArrayDescriptor
+    // Core AI types are stored as `@CoreAIStorage` so this class's metadata doesn't need
+    // Core AI on systems that don't have it (see `CoreAIStorage`).
+
+    @CoreAIStorage private var models: [AIModel]
+    @CoreAIStorage private var prefill: InferenceFunction
+    @CoreAIStorage private var main: InferenceFunction
+    @CoreAIStorage private var hiddenFunction: InferenceFunction
+    @CoreAIStorage private var embeddingsInput: NDArrayDescriptor
+    @CoreAIStorage private var positionsInput: NDArrayDescriptor
     private let positionsName: String
-    private let logitsOutput: NDArrayDescriptor
-    private let hiddenOutput: NDArrayDescriptor
+    @CoreAIStorage private var logitsOutput: NDArrayDescriptor
+    @CoreAIStorage private var hiddenOutput: NDArrayDescriptor
     private let embedding: LFM3AudioEmbeddingTable
     private let hiddenSize: Int
     private let vocab: Int
     private let chunk: Int
     private let cacheLength: Int
     // Optional so a call can move the states out (unique, so mutable views never copy the KV cache).
-    private var keyCache: NDArray?
-    private var valueCache: NDArray?
-    private var convStates: NDArray?
+    @CoreAIStorage private var keyCache: NDArray?
+    @CoreAIStorage private var valueCache: NDArray?
+    @CoreAIStorage private var convStates: NDArray?
     private var offset = 0
     private var logits: [Float]
 
