@@ -217,6 +217,48 @@ public actor KokoroAneManager {
         return try await phonemize(text: EnglishTextNormalizer.normalizeForFrontend(text))
     }
 
+    /// Joined Misaki pronunciation for one spelling.
+    ///
+    /// Reads the maps already held by the English phonemizer, which loads
+    /// them through ``LexiconAssetCache``. Exact spelling in the
+    /// case-sensitive map, then the lower-cased map. A cold call prepares
+    /// that phonemizer; once the cache is loaded the JSON is not read again.
+    ///
+    /// Does not apply the custom lexicon, split, stem, or call BART.
+    ///
+    /// - Returns: Phoneme tokens joined with no separator, or `nil` when
+    ///   the spelling is absent.
+    public func misakiPronunciation(for spelling: String) async -> String? {
+        let phonemizer = await ensureEnglishPhonemizer()
+        if let tokens = phonemizer.caseSensitiveWordToPhonemes[spelling], !tokens.isEmpty {
+            return tokens.joined()
+        }
+        let lowered = spelling.lowercased()
+        if let tokens = phonemizer.wordToPhonemes[lowered], !tokens.isEmpty {
+            return tokens.joined()
+        }
+        return nil
+    }
+
+    /// BART pronunciation for one piece.
+    ///
+    /// Lowercases `piece` and asks the loaded ``englishG2P`` model. Does not
+    /// call ``englishPhonemes(for:)`` or run ``KokoroAneEnglishPhonemizer``,
+    /// so the piece is not split, stemmed, or looked up. ``phonemize(word:)``
+    /// leaves the flap `ɾ` in place; ``misakiOutputForm(_:)`` rewrites it to
+    /// `T`, the same shape the English BART path speaks.
+    ///
+    /// - Returns: The joined pronunciation, or `nil` when the model returns
+    ///   nothing.
+    public func bartPiecePronunciation(for piece: String) async throws -> String? {
+        let lowered = piece.lowercased()
+        guard !lowered.isEmpty else { return nil }
+        guard let phonemes = try await englishG2P.phonemize(word: lowered), !phonemes.isEmpty else {
+            return nil
+        }
+        return Self.misakiOutputForm(phonemes.joined())
+    }
+
     /// Fetch (if missing) and load the English G2P assets that
     /// ``englishPhonemes(for:)`` needs. The English variant does this in
     /// ``initialize(preloadVoices:)``; other variants can call it up front so
