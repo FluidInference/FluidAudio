@@ -726,7 +726,19 @@ AVERAGE          10.6     17.4       5.4      2.0      3.3      -        323.2
 ==========================================================================================
 ```
 
-12/16 meetings detect the correct speaker count. Average DER 10.62% matches published pyannote-community-1 offline numbers on this split (~11-12%). Results are fully deterministic (two consecutive runs produce bit-identical metrics).
+12/16 meetings detect the correct speaker count. Results are fully deterministic (two consecutive runs produce bit-identical metrics). This table predates #1049, so it was measured with `exclusiveSegments: true` (one speaker at a time). Its scorer uses a 0.25 s collar, skips overlapped reference speech and does not count an extra output speaker as a false alarm, so it cannot see how overlap is handled, and its DER is not comparable with pyannote's published numbers. With today's defaults (threshold 0.6 in the post-#801 semantics) the same scorer gives 9.4% average DER with overlapping output and 9.6% with `--exclusive-segments`, with 15/16 meetings detecting the correct speaker count (2026-10-30, M5 Pro).
+
+**Overlap-scored DER (pyannote protocol).** pyannote's published community-1 numbers use no forgiveness collar and score overlapped speech. Measured that way on the same 16 meetings with pyannote.metrics 3.2.1 and the [AMI-diarization-setup](https://github.com/pyannote/AMI-diarization-setup) `only_words` references (DER over all meetings), on an Apple M5 Pro, 2026-10-30 (#1049). `--dataset ami-sdm` reads the headset mix (`Mix-Headset.wav`), which pyannote's table lists as AMI (IHM).
+
+| Settings | Output | DER | Missed | False alarm | Confusion | Overlapped speech with ≥ 2 output speakers |
+|---|---|---|---|---|---|---|
+| CLI defaults (step ratio 0.2, min segment 1.0 s) | overlapping (default) | 20.3% | 13.2% | 3.0% | 4.1% | 45.8% |
+| CLI defaults | `--exclusive-segments` | 24.2% | 19.0% | 2.3% | 3.0% | 0.0% |
+| `--step-ratio 0.1 --min-segment-duration 0` | overlapping (default) | 18.3% | 9.3% | 3.7% | 5.3% | 63.7% |
+| `--step-ratio 0.1 --min-segment-duration 0` | `--exclusive-segments` | 23.1% | 17.2% | 2.5% | 3.4% | 0.0% |
+| pyannote community-1, published | `speaker_diarization` | 17.0% | | | | |
+
+Exclusive output (the default before #1049) leaves out the second speaker of every overlap: missed speech rises by 6-8 points and DER by 4-5. Set `exclusiveSegments` only when you need one speaker at a time, for example to attribute ASR words.
 
 **Clustering threshold matters on this split.** The table above predates #801 and uses `--threshold 0.7` under the old (inverted) threshold semantics. Since #801 the threshold is a Euclidean cut distance applied directly to the AHC dendrogram (pyannote parity): **larger values merge more aggressively and yield fewer speakers**. Old values map to new ones via `sqrt(2 − 2·old)` — the old default 0.6 behaved like a cut at 0.894, and the old `--threshold 0.7` from this table behaves like `--threshold 0.775` today. The CLI default remains the community-1 preset value (0.6), now interpreted as pyannote does.
 

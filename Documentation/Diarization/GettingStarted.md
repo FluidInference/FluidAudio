@@ -266,7 +266,7 @@ The offline controller mirrors the reference pipeline:
 - `embedding`: Batch size and overlap handling. Keep `excludeOverlap` enabled for community-1 style powerset outputs.
 - `clustering`: The VBx warm-start threshold plus pyannote's Fa/Fb priors.
 - `vbx`: Max iterations and convergence tolerance for the refinement loop.
-- `postProcessing`: Minimum gap duration when stitching segments back together.
+- `postProcessing`: Minimum gap duration when stitching segments back together, and `exclusiveSegments`. It defaults to `false`, which keeps overlapping speech like pyannote's main `speaker_diarization` output. Set it to `true` when you need one speaker at a time, for example to attribute ASR words; a segment that starts while an earlier one is still active is then trimmed to start when that one ends. The CLI flags are `--exclusive-segments` and `--overlapping-segments` (the default).
 - `export`: Optional `embeddingsPath` for dumping per-speaker vectors to JSON.
 
 #### Why VBx has no transition (self-loop) prior
@@ -741,7 +741,7 @@ swift run fluidaudiocli diarization-benchmark --single-file ES2004a
 ## Troubleshooting
 
 ### High DER on certain audio
-- Check if audio has overlapping speech (not yet supported)
+- Check if audio has overlapping speech: `DiarizerManager` handles it poorly (see the comparison table above). The offline pipeline keeps overlapping speakers unless `exclusiveSegments` is `true`.
 - Ensure 16kHz sampling rate
 - Verify audio isn't too noisy
 
