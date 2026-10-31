@@ -26,15 +26,15 @@ Below are some featured local AI apps using Fluid Audio models on macOS and iOS:
 
 <p align="left">
   <a href="https://github.com/Beingpax/VoiceInk/"><img src="Documentation/assets/voiceink.png" height="40" alt="Voice Ink"></a>
-  <a href="https://spokenly.app/"><img src="Documentation/assets/spokenly.png" height="40" alt="Spokenly"></a>
-  <a href="https://slipbox.ai/"><img src="Documentation/assets/slipbox.png" height="40" alt="Slipbox"></a>
+  <a href="https://altic.dev/fluid"><img src="Documentation/assets/fluidvoice.png" height="40" alt="Fluid Voice"></a>
   <a href="https://github.com/anomalyco/hex"><img src="Documentation/assets/hex.png" height="40" alt="Hex"></a>
+  <a href="https://spokenly.app/"><img src="Documentation/assets/spokenly.png" height="40" alt="Spokenly"></a>
   <a href="https://boltai.com/"><img src="Documentation/assets/boltai.png" height="40" alt="BoltAI"></a>
   <a href="https://paraspeech.com"><img src="Documentation/assets/paraspeech.png" height="40" alt="Paraspeech"></a>
-  <a href="https://altic.dev/fluid"><img src="Documentation/assets/fluidvoice.png" height="40" alt="Fluid Voice"></a>
   <a href="https://snaply.ai"><img src="Documentation/assets/snaply.png" height="40" alt="Snaply"></a>
   <a href="https://github.com/yazinsai/OpenOats"><img src="Documentation/assets/openoats.png" height="40" alt="OpenOats"></a>
   <a href="https://talat.app"><img src="Documentation/assets/talat.png" height="40" alt="Talat"></a>
+  <a href="https://slipbox.ai/"><img src="Documentation/assets/slipbox.png" height="40" alt="Slipbox"></a>
 <!-- Add your app: submit logo via PR. The Fluid Inference team works to curate this and add new apps to the showcase section, please do not add to this section if you're adding the app to the showcase section, but including a logo in your PR will help us when we update this section! We appreciate your patience. -->
 </p>
 
