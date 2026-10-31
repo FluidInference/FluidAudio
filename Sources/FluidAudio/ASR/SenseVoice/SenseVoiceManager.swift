@@ -13,6 +13,7 @@ public actor SenseVoiceManager {
     private let models: SenseVoiceModels
     private let language: Int32
     private let textNorm: Int32
+    private let tagCandidates: SenseVoiceTagScoring.Candidates
     private static let logger = AppLogger(category: "SenseVoiceManager")
 
     public init(
@@ -23,6 +24,7 @@ public actor SenseVoiceManager {
         self.models = models
         self.language = language
         self.textNorm = textNorm
+        self.tagCandidates = SenseVoiceTagScoring.Candidates(vocabulary: models.vocabulary)
     }
 
     /// Load models from the default cache (downloading if needed), then build a manager.
@@ -65,7 +67,9 @@ public actor SenseVoiceManager {
             .trimmingCharacters(in: .whitespaces)
         let knownLanguages: Set<String> = ["zh", "en", "yue", "ja", "ko", "nospeech"]
         let language = tags.first { knownLanguages.contains($0) } ?? tags.first
-        return SenseVoiceTranscription(text: text, language: language, tags: tags)
+        let rows = LogitsArgmax.leadingRows(logits: logits, count: SenseVoiceConfig.numQueryTokens)
+        let scores = SenseVoiceTagScoring.scores(rows: rows, candidates: tagCandidates)
+        return SenseVoiceTranscription(text: text, language: language, tags: tags, scores: scores)
     }
 
     // MARK: - Pipeline
@@ -163,4 +167,11 @@ public struct SenseVoiceTranscription: Sendable {
     public let language: String?
     /// All leading tags in order: language, emotion, audio event, text-norm.
     public let tags: [String]
+    /// Per-slot probabilities for language, emotion and audio event.
+    public let scores: SenseVoiceTagScores
+
+    /// The most likely emotion and how confident the model is, e.g. `HAPPY` at 0.82.
+    public var emotion: SenseVoiceTagScore? { scores.emotion.first }
+    /// The most likely audio event, e.g. `Speech` or `Laughter`.
+    public var event: SenseVoiceTagScore? { scores.event.first }
 }
