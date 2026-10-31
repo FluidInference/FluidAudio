@@ -92,6 +92,55 @@ final class SeamGapRepairTests: XCTestCase {
 
     // MARK: - Word-boundary hygiene (#683 rule)
 
+    func testLeadingGapKeepsSpeechAtFrameZero() {
+        let result = ChunkProcessor.spliceCandidate(
+            windowTokens: [8, 5, 7],
+            windowTimestamps: [0, 10, 30],
+            windowConfidences: [0.9, 0.9, 0.9],
+            windowDurations: [1, 1, 1],
+            gapStartFrame: 0,
+            gapEndFrame: 50,
+            leadNeighbor: nil,
+            tailNeighbor: token(10, 50),
+            spliceSafeTokenIds: safeIds,
+            vocabulary: vocabulary
+        )
+        XCTAssertEqual(result.map { $0.timestamp }, [0, 10, 30])
+        XCTAssertEqual(result.map { $0.token }, [8, 5, 7])
+    }
+
+    func testLeadingGapStillDeduplicatesTheSurvivingTailWord() {
+        let result = ChunkProcessor.spliceCandidate(
+            windowTokens: [8, 10],
+            windowTimestamps: [0, 46],
+            windowConfidences: [0.9, 0.9],
+            windowDurations: [1, 1],
+            gapStartFrame: 0,
+            gapEndFrame: 50,
+            leadNeighbor: nil,
+            tailNeighbor: token(10, 50),
+            spliceSafeTokenIds: safeIds,
+            vocabulary: vocabulary
+        )
+        XCTAssertEqual(result.map { $0.token }, [8])
+    }
+
+    func testLeadingGapRejectsOutsideTokensAndPartialFirstWord() {
+        let result = ChunkProcessor.spliceCandidate(
+            windowTokens: [6, 5, 7, 8],
+            windowTimestamps: [0, 10, 49, 50],
+            windowConfidences: [0.9, 0.9, 0.9, 0.9],
+            windowDurations: [1, 1, 1, 1],
+            gapStartFrame: 0,
+            gapEndFrame: 50,
+            leadNeighbor: nil,
+            tailNeighbor: token(10, 50),
+            spliceSafeTokenIds: safeIds,
+            vocabulary: vocabulary
+        )
+        XCTAssertEqual(result.map { $0.token }, [5])
+    }
+
     func testLeadingContinuationPiecesAreTrimmed() {
         // Candidate starts mid-word ("ing" continuation piece): trim to the
         // first word-initial piece.
