@@ -348,6 +348,109 @@ final class AudioConverterTests: XCTestCase {
             result.count, expected: expectedSamples, toleranceFraction: 0.01, "Should handle long audio correctly")
     }
 
+    // MARK: - Sliced Resampling
+
+    /// Resampling feeds the converter in slices so a whole recording never has
+    /// to fit one AVAudioPCMBuffer (its byte count is a UInt32: 4 GiB, about
+    /// six hours of mono at 48 kHz). Slicing must not change the samples.
+    func testSlicedResampleMatchesSingleSlice() async throws {
+        let rate = 44100.0
+        let seconds = 7.3
+        let count = Int(rate * seconds)
+        let samples: [Float] = (0..<count).map { i in
+            let t = Double(i) / rate
+            return Float(0.5 * sin(2 * .pi * 440 * t) + 0.2 * sin(2 * .pi * 3_700 * t))
+        }
+        let whole = try audioConverter.resampleWithAVAudio(samples, from: rate, to: 16_000, sliceFrames: count)
+        let sliced = try audioConverter.resampleWithAVAudio(samples, from: rate, to: 16_000, sliceFrames: 4_096)
+        XCTAssertEqual(whole.count, sliced.count, "slicing changed the output length")
+        var maxDiff: Float = 0
+        for (a, b) in zip(whole, sliced) { maxDiff = max(maxDiff, abs(a - b)) }
+        XCTAssertLessThan(maxDiff, 1e-5, "slicing changed the samples")
+        assertApproximateCount(
+            sliced.count, expected: Int(16_000 * seconds), toleranceFraction: 0.01, "expected 16 kHz output")
+    }
+
+    func testSlicedResampleHandlesSliceLargerThanInput() async throws {
+        let samples: [Float] = (0..<1_000).map { Float(sin(Double($0) * 0.05)) }
+        let out = try audioConverter.resampleWithAVAudio(samples, from: 48_000, to: 16_000, sliceFrames: 1 << 20)
+        assertApproximateCount(
+            out.count, expected: 333, toleranceFraction: 0.05, "a slice larger than the input converts in one pass")
+    }
+
+    /// Files are converted as they are read: each chunk goes straight into one
+    /// converter instead of the whole recording being read at its source rate
+    /// first. That must not change the samples.
+    func testResampleAudioFileStreamsTheSameSamplesAsReadingItAll() async throws {
+        let rate = 48_000.0
+        let seconds = 3.7
+        let count = Int(rate * seconds)
+        let samples: [Float] = (0..<count).map { i in
+            let t = Double(i) / rate
+            return Float(0.4 * sin(2 * .pi * 220 * t) + 0.2 * sin(2 * .pi * 5_100 * t))
+        }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("fluidaudio-stream-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 1, interleaved: false)!
+        do {
+            let file = try AVAudioFile(forWriting: url, settings: format.settings)
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count))!
+            samples.withUnsafeBufferPointer { src in
+                buffer.floatChannelData![0].update(from: src.baseAddress!, count: count)
+            }
+            buffer.frameLength = AVAudioFrameCount(count)
+            try file.write(from: buffer)
+        }
+
+        let streamed = try audioConverter.resampleAudioFile(url)
+        let whole = try audioConverter.resampleWithAVAudio(samples, from: rate, to: 16_000, sliceFrames: count)
+        XCTAssertEqual(streamed.count, whole.count, "streaming changed the output length")
+        var maxDiff: Float = 0
+        for (a, b) in zip(streamed, whole) { maxDiff = max(maxDiff, abs(a - b)) }
+        XCTAssertLessThan(maxDiff, 1e-5, "streaming changed the samples")
+    }
+
+    /// A buffer is converted through one output buffer of bounded size,
+    /// drained until the end, rather than one sized to the whole result (which
+    /// carries the same 4 GiB cap). A small cap must give the same samples.
+    func testConvertBufferWithASmallOutputCapMatchesOnePass() async throws {
+        let rate = 48_000.0
+        let count = Int(rate * 2.5)
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 1, interleaved: false)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count))!
+        for i in 0..<count {
+            buffer.floatChannelData![0][i] = Float(0.5 * sin(2 * .pi * 330 * Double(i) / rate))
+        }
+        buffer.frameLength = AVAudioFrameCount(count)
+        let target = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
+
+        let onePass = try audioConverter.convertBuffer(buffer, to: target, outputSliceFrames: 1 << 20)
+        let drained = try audioConverter.convertBuffer(buffer, to: target, outputSliceFrames: 4_096)
+        XCTAssertEqual(onePass.count, drained.count, "a small output cap changed the output length")
+        var maxDiff: Float = 0
+        for (a, b) in zip(onePass, drained) { maxDiff = max(maxDiff, abs(a - b)) }
+        XCTAssertLessThan(maxDiff, 1e-5, "a small output cap changed the samples")
+        assertApproximateCount(drained.count, expected: 40_000, toleranceFraction: 0.01, "expected 16 kHz output")
+    }
+
+    /// Opt-in: a recording longer than one AVAudioPCMBuffer can hold (set
+    /// FLUIDAUDIO_LONG_FILE to a 48 kHz file over 6 h 12 min, or 44.1 kHz over
+    /// 6 h 46 min). Before slicing, this threw "Failed to create conversion
+    /// buffer"; it needs several GB of memory and a minute or two, so it does
+    /// not run in the ordinary suite.
+    func testResampleAudioFileLongerThanOneBuffer() async throws {
+        guard let path = ProcessInfo.processInfo.environment["FLUIDAUDIO_LONG_FILE"] else {
+            throw XCTSkip("FLUIDAUDIO_LONG_FILE not set")
+        }
+        let file = try AVAudioFile(forReading: URL(fileURLWithPath: path))
+        let seconds = Double(file.length) / file.processingFormat.sampleRate
+        let samples = try audioConverter.resampleAudioFile(path: path)
+        assertApproximateCount(
+            samples.count, expected: Int(seconds * 16_000), toleranceFraction: 0.001, "whole file resampled to 16 kHz")
+    }
+
     // MARK: - Format Variation Tests
 
     func testConvertInt16Format() async throws {
