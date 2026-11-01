@@ -7,10 +7,9 @@ import Foundation
 /// + host sampling. 99.4% of codes identical to HF on 319 golden frames.
 @available(macOS 27, iOS 27, tvOS 27, visionOS 27, *)
 actor LFM3AudioCoreAIDepthDecoder: LFM3AudioDepthModel {
-    // Core AI types are stored as `@CoreAIStorage`; see `CoreAIStorage`.
-    @CoreAIStorage private var model: AIModel
-    @CoreAIStorage private var function: InferenceFunction
-    @CoreAIStorage private var descriptors: [String: NDArrayDescriptor]
+    private let model: AIModel
+    private let function: InferenceFunction
+    private let descriptors: [String: NDArrayDescriptor]
     private let params: [Float16]
 
     init(bundle: URL, sampling: LFM3AudioSpeechSampling) async throws {
