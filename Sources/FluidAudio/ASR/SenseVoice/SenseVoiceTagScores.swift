@@ -71,7 +71,8 @@ enum SenseVoiceTagScoring {
             emotion = lookup(SenseVoiceTagScoring.emotionTags)
             event = lookup(SenseVoiceTagScoring.eventTags)
             // Languages are the lowercase tags (`zh`, `en`, `zh/en`, …) plus `nospeech`.
-            language = byTag
+            language =
+                byTag
                 .filter { tag, _ in tag == tag.lowercased() && !tag.contains("itn") }
                 .map { (id: $0.value, tag: $0.key) }
                 .sorted { $0.id < $1.id }
