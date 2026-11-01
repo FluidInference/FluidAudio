@@ -70,8 +70,8 @@ final class ChunkProcessorUnspacedScriptTests: XCTestCase {
 
     /// The repair pass takes the same set: nil keeps in-gap tokens that do not start a "word".
     func testSeamGapRepairKeepsInGapJapaneseTokens() {
-        let lead = token(1, 100)
-        let tail = token(6, 200)
+        let lead = (ChunkProcessor.comparableWord([1], vocabulary: vocabulary), 100)
+        let tail = (ChunkProcessor.comparableWord([6], vocabulary: vocabulary), 200)
         let tokens: [Token] = [token(2, 120), token(3, 121), token(4, 122), token(5, 123)]
         let candidate = ChunkProcessor.spliceCandidate(
             windowTokens: tokens.map { $0.token },
@@ -80,8 +80,8 @@ final class ChunkProcessorUnspacedScriptTests: XCTestCase {
             windowDurations: tokens.map { _ in 1 },
             gapStartFrame: 110,
             gapEndFrame: 190,
-            leadNeighbor: lead,
-            tailNeighbor: tail,
+            leadWord: lead,
+            tailWord: tail,
             spliceSafeTokenIds: ChunkProcessor.spliceSafeTokenIds(
                 vocabulary: vocabulary, modelVersion: .tdtJa),
             vocabulary: vocabulary)

@@ -49,8 +49,10 @@ public struct ASRConfig: Sendable {
     /// (Documentation/ASR/LongTranscription.md).
     public let seamGapRepair: Bool
 
-    /// Minimum inter-token gap, in seconds, that triggers a seam-gap repair
-    /// probe when `seamGapRepair` is enabled.
+    /// Minimum inter-word gap, in seconds, that triggers a seam-gap repair
+    /// probe when `seamGapRepair` is enabled (default 0.5, the floor): the
+    /// dropped phrases measured on non-English oral history sit in 0.5–1.4 s
+    /// gaps, which the earlier 1.5 s default never probed.
     public let seamGapRepairMinGapSeconds: Double
 
     /// Take seam-token timing from the window that decoded the token away
@@ -71,7 +73,7 @@ public struct ASRConfig: Sendable {
         melChunkContext: Bool? = nil,
         dualDecodeArbitration: Bool = false,
         seamGapRepair: Bool = true,
-        seamGapRepairMinGapSeconds: Double = 1.5,
+        seamGapRepairMinGapSeconds: Double = 0.5,
         seamTimingRealignment: Bool = true
     ) {
         self.sampleRate = sampleRate
