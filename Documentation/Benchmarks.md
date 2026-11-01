@@ -654,7 +654,18 @@ Both offline and online versions use the community-1 model (via FluidInference/s
 
 > **Beta:** CAM++ is a beta model conversion; results and model artifacts may change.
 
-CoreML CAM++ (FunASR, ~7.2M) speaker-embedding extractor. Model: [FluidInference/campplus-coreml](https://huggingface.co/FluidInference/campplus-coreml). 2-stage: fbank80 preprocessor (fp32/CPU) → CAM++ (RangeDim, CPU/GPU) → 192-d L2-normalized embedding. Hardware: Apple M5 Pro.
+CoreML CAM++ (FunASR, ~7.2M) speaker-embedding extractor. Model: [FluidInference/campplus-coreml](https://huggingface.co/FluidInference/campplus-coreml). 2-stage: fbank80 preprocessor (fp32/CPU) → per-utterance mean subtraction → CAM++ (RangeDim, fp32, CPU/GPU) → 192-d L2-normalized embedding. Hardware: Apple M5 Pro.
+
+The `_v2` models (#985) match 3D-Speaker's PyTorch `CAMPPlus` (`campplus_cn_common.bin` on Kaldi fbank): cosine 1.0000 at every length from 0.35 s to 60 s and on 413 single-speaker AMI Mix-Headset segments (3–8 s, 16 speakers). Speaker-verification EER on those segments:
+
+| Models | Within meeting (1,332 target trials) | Across meetings (4,079 target trials) |
+|---|---|---|
+| v1 (Hamming window, ceil-mode pooling divisor, fp16) | 4.67% | 3.73% |
+| v1 + host mean subtraction (#1094) | 3.07% | 3.48% |
+| `_v2` | 2.85% | 3.55% |
+| PyTorch reference | 2.85% | 3.55% |
+
+The AISHELL-1 numbers below were measured on v1.
 
 | Metric | Value |
 |--------|-------|
