@@ -28,8 +28,11 @@ final class SortformerTests: XCTestCase {
         var streamingChunks: [[Float]] = []
 
         diarizer.addAudio(audio)
+        // Finalize as `finalizeSession` does, so the streaming chunker also emits the final
+        // chunks with partial right context.
+        diarizer.padAndEmitRemainingMel()
 
-        while let (mel, _) = diarizer.getNextChunkFeatures() {
+        while let (mel, _) = diarizer.getNextChunkFeatures(isFinal: true) {
             streamingChunks.append(mel)
         }
 

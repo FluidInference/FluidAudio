@@ -354,10 +354,8 @@ public struct SortformerFeatureLoader: Sendable {
         self.startFeat = 0
         self.endFeat = 0
         (self.featSeq, self.featLength, self.featSeqLength) = AudioMelSpectrogram().computeFlatTransposed(audio: audio)
-        // numChunks accounts for right context requirement: need endFeat + rc <= featLength
-        // Chunk n has endFeat = (n+1) * chunkLen, so valid when (n+1) * chunkLen + rc <= featLength
-        // numChunks = floor((featLength - rc) / chunkLen)
-        self.numChunks = max(0, (self.featLength - self.rc) / self.chunkLen)
+        // Every frame is covered: the last chunk may be shorter than chunkLen (NeMo `streaming_feat_loader`)
+        self.numChunks = (self.featLength + self.chunkLen - 1) / self.chunkLen
     }
 
     public mutating func next() -> (chunkFeatures: [Float], chunkLength: Int, leftOffset: Int, rightOffset: Int)? {
@@ -367,11 +365,10 @@ public struct SortformerFeatureLoader: Sendable {
         // Need at least one core frame
         guard endFeat > startFeat else { return nil }
 
-        // Require full right context (same as streaming getNextChunkFeatures)
-        guard endFeat + rc <= featLength else { return nil }
-
+        // The audio is complete, so the last chunks take whatever right context is left, down to none,
+        // like NeMo's `streaming_feat_loader`. Waiting for a full right context would drop the tail.
         let leftOffset = min(lc, startFeat)
-        let rightOffset = rc
+        let rightOffset = min(rc, featLength - endFeat)
 
         let chunkStartFrame = startFeat - leftOffset
         let chunkEndFrame = endFeat + rightOffset
