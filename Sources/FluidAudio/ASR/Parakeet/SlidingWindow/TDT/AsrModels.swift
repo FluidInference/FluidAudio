@@ -888,23 +888,14 @@ extension AsrModels {
         version: AsrModelVersion,
         encoderPrecision: ParakeetEncoderPrecision = .int8
     ) -> Bool {
-        let fileManager = FileManager.default
-        let requiredFiles = getRequiredModels(version: version, encoderPrecision: encoderPrecision)
-
-        // Check in the ModelHub repo structure
-        let repoPath = repoPath(from: directory, version: version)
-
-        let modelsPresent = requiredFiles.allSatisfy { fileName in
-            let path = repoPath.appendingPathComponent(fileName)
-            return fileManager.fileExists(atPath: path.path)
-        }
-
-        // Also check for vocabulary file associated with the version
+        // Load-ready, not bare existence: an interrupted download leaves a bundle
+        // directory holding only `*.partial` weights (#1067). The vocabulary file
+        // associated with the version is required too (#748).
         let vocabularyFileName = getModelFileNames(version: version, encoderPrecision: encoderPrecision).vocabulary
-        let vocabPath = repoPath.appendingPathComponent(vocabularyFileName)
-        let vocabPresent = fileManager.fileExists(atPath: vocabPath.path)
-
-        return modelsPresent && vocabPresent
+        let requiredFiles = getRequiredModels(version: version, encoderPrecision: encoderPrecision)
+            .union([vocabularyFileName])
+        return ModelCache.isCacheComplete(
+            at: repoPath(from: directory, version: version), requiredFiles: requiredFiles)
     }
 
     public static func isModelValid(

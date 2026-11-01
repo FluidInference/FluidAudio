@@ -402,6 +402,30 @@ enum ModelCache {
         return short.sorted()
     }
 
+    /// Delete the cached copies of `files` (bundle directories or plain files,
+    /// relative to `repoPath`) that failed to load, plus a plain file's
+    /// `.partial` staging files, tolerating already-missing paths. The rest of
+    /// the repo folder (other variants' bundles, the revision marker) is kept,
+    /// so the re-download fetches only what was removed (#1067).
+    ///
+    /// Callers MUST check `RetryPolicy.isCancellation` first, as for
+    /// `purgeCorruptedCache(at:)`.
+    static func purgeCorruptedFiles(_ files: [String], at repoPath: URL) {
+        for file in files {
+            let path = repoPath.appendingPathComponent(file)
+            for url in [path, path.appendingPathExtension("partial"), path.appendingPathExtension("partial.etag")] {
+                do {
+                    try FileManager.default.removeItem(at: url)
+                    logger.info("Deleted corrupted cache entry at \(url.path)")
+                } catch {
+                    // Already gone — fine.
+                    guard !isMissingFile(error) else { continue }
+                    logger.warning("Failed to delete \(url.path): \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
     /// Delete a corrupted repo cache, tolerating an already-missing path
     /// (robust directory creation handles any remnants on re-download).
     ///

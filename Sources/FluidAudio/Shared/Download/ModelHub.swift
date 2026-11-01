@@ -131,10 +131,13 @@ public enum ModelHub {
             }
 
             logger.warning("First load failed: \(error.localizedDescription)")
-            logger.info("Deleting cache and re-downloading…")
+            logger.info("Deleting \(modelNames.joined(separator: ", ")) and re-downloading…")
             let repoPath = directory.appendingPathComponent(repo.folderName)
 
-            ModelCache.purgeCorruptedCache(at: repoPath)
+            // Only the bundles this call loads can have failed it. Purging the
+            // whole repo folder also deleted sibling variants that other loads
+            // use, e.g. `.int8`'s Encoder.mlmodelc after an `.int8V2` failure (#1067).
+            ModelCache.purgeCorruptedFiles(modelNames, at: repoPath)
 
             do {
                 return try await loadModelsOnce(
@@ -346,21 +349,25 @@ public enum ModelHub {
         let effectiveModels = requiredModels.union(extraModelNames)
         let reporter = ProgressReporter(handler: progressHandler, downloadPhaseWeight: 0.5)
 
+        // Judge the cache by load-readiness, not bare existence: an interrupted
+        // download leaves a bundle directory holding only `*.partial` weights,
+        // which must re-enter `download` (resuming the partial file) instead of
+        // failing the load and being purged (#1067, the #819 check).
         let revisionMatches = ModelCache.matchesRevision(at: repoPath, revision: revision)
-        if !revisionMatches || !ModelCache.allModelsExist(at: repoPath, models: effectiveModels) {
+        let incomplete =
+            revisionMatches
+            ? ModelCache.incompleteFiles(at: repoPath, requiredFiles: effectiveModels)
+            : effectiveModels.sorted()
+        if !incomplete.isEmpty {
             // In offline mode surface a typed error listing the
             // missing files instead of attempting a HuggingFace fetch.
             if offlineMode {
-                let missing =
-                    revisionMatches
-                    ? ModelCache.missingModels(at: repoPath, models: effectiveModels)
-                    : effectiveModels.sorted()
                 logger.error(
-                    "Offline mode: required models missing at \(repoPath.path): \(missing)"
+                    "Offline mode: required models missing or incomplete at \(repoPath.path): \(incomplete)"
                 )
-                throw DownloadError.modelMissing(repo: repo.folderName, missing: missing)
+                throw DownloadError.modelMissing(repo: repo.folderName, missing: incomplete)
             }
-            logger.info("Models not found in cache at \(repoPath.path)")
+            logger.info("Models missing or incomplete in cache at \(repoPath.path): \(incomplete)")
             try await download(
                 repo, to: directory, variant: variant,
                 additionalModelNames: extraModelNames,
