@@ -42,17 +42,53 @@ public enum Language: String, Sendable, CaseIterable {
     case english = "en"
     case polish = "pl"
     case russian = "ru"
-    // ... 18 languages total
+    // ... 28 languages total
 }
 
 public enum Script: Sendable {
     case latin
     case cyrillic
+    case greek
 }
 ```
 
 `Language.script` returns the writing script. Pass `language:` on the
 transcribe APIs to enable filtering; omit it to disable.
+
+## Scope: script, not language
+
+A language hint constrains the script, not the language (#1063). Every
+Latin-script `Language` resolves to `.latin`, so `.spanish`, `.english`,
+`.german` and the rest filter the identical token set and decode the same
+audio identically. On Latin-script audio they usually match no hint as well,
+since the filter only acts when the top token is in another script (808 of
+808 FLEURS es/it/pt/de clips were byte-identical to no hint). Parakeet
+v3 has no language-conditioning token, so a hint cannot stop it from
+emitting English words inside Spanish (or Italian, German, …) speech.
+
+`.french` is the one exception: it also runs the English function-word
+blocklist (`TdtDecoderV3.applyEnglishBlocklist`, #630). That blocklist is
+scoped to French because its pieces (` so`, ` was`, ` her`, ` and`, …) are
+words or word starts in other languages (#840, #847). On Spanish it turns
+"sociedad" into "suciedad", "hermana" into "armana" and "Washington" into
+"Witthington".
+
+Measured on FLEURS es_419 (dev 408 + test 100 clips, v3, macOS 27):
+
+| Decode | WER dev / test | Clips with English function words |
+|---|---|---|
+| v3, no hint (= `.spanish` = `.english`, byte-identical on all 508) | 4.86% / 4.03% | 6 |
+| Canary-1b-v2, source and target `.spanish` | 4.50% / 4.94% | 0 |
+
+In two of those six clips v3 rendered most of the sentence in English ("The
+structure that present the plumage suggests that the function is not
+relation with the vuelo…"); Canary transcribes them with 0 and 1 word errors. Canary's higher
+test WER comes mainly from number formatting ("80.000" vs "800 000").
+
+For a decode conditioned on one language, use Canary
+(`CanaryManager(models:source:target:)`, 25 European languages) or Cohere
+Transcribe (`CoherePipeline.transcribe(audio:models:language:)`, 14
+languages). Both prompt the decoder with the language.
 
 ## Algorithm
 
@@ -135,9 +171,12 @@ probability.
 The filter currently partitions by Unicode script only. Per-language token
 allowlists (e.g. distinguishing Polish from Czech within the Latin script)
 could plug in at the `matches` call site without changing the decoder API.
+Validate any per-language token list against real speech in that language,
+including names, titles and code-switching: SentencePiece pieces are shared
+across languages, and blocking one also blocks every word it starts (#840).
 
 Adding a new language: extend `Language` and its `script` mapping. If the
-new language introduces a third script, extend `Script` and add a
+new language introduces another script, extend `Script` and add a
 corresponding `matches` case.
 
 ## Testing
