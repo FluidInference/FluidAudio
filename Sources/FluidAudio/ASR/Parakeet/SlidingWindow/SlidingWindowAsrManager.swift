@@ -681,7 +681,17 @@ public actor SlidingWindowAsrManager {
                 )
             }
 
-            await updateTranscriptionState(with: displayResult, shouldConfirm: shouldConfirm)
+            // A window that opens inside a word continues the previous text: the
+            // token stream glues its first piece on, so the text state must too, or
+            // the seam reads "detail . As" or leaves a stray "y" from "Andre|y" (#912).
+            var transcriptText = displayResult.text
+            if retainedTokenCount > 0, let manager = asrManager, await manager.startsMidWord(tokens) {
+                let previousRawWord = await manager.trailingWordText(
+                    Array(accumulatedTokens.prefix(retainedTokenCount)))
+                transcriptText = joinMidWordWindow(
+                    transcriptText, rawWindowText: interim.text, previousRawWord: previousRawWord)
+            }
+            await updateTranscriptionState(with: displayResult, text: transcriptText, shouldConfirm: shouldConfirm)
             lastWindowRenderedLastWord = Self.renderedLastWord(
                 rawText: interim.text, renderedText: displayResult.text, replacements: appliedReplacements)
 
@@ -739,7 +749,54 @@ public actor SlidingWindowAsrManager {
         }
     }
 
-    private func updateTranscriptionState(with result: ASRResult, shouldConfirm: Bool) async {
+    /// Glue the opening fragment of a window that starts inside a word onto the
+    /// end of the transcript text, and return the rest of the window's text (#912).
+    private func joinMidWordWindow(_ windowText: String, rawWindowText: String, previousRawWord: String) -> String {
+        let extendsVolatile = !volatileTranscript.isEmpty
+        let previous = extendsVolatile ? volatileTranscript : confirmedTranscript
+        guard !previous.isEmpty else { return windowText }
+        let joined = Self.joiningMidWordStart(
+            previous: previous, windowText: windowText, rawWindowText: rawWindowText,
+            previousRawWord: previousRawWord)
+        if extendsVolatile {
+            volatileTranscript = joined.previous
+        } else {
+            confirmedTranscript = joined.previous
+        }
+        return joined.rest
+    }
+
+    /// Join a window that opens inside a word onto the previous text the way the
+    /// token stream joins its pieces (#912). The window's first fragment (up to
+    /// its first space) continues the previous word: punctuation attaches
+    /// ("detail" + "." → "detail."), and so do a continuation's letters ("Andre"
+    /// + "y" → "Andrey") unless rescoring replaced the previous word, whose
+    /// vocabulary term already spells the whole word ("Andrzej" + "y" →
+    /// "Andrzej"). An apostrophe suffix ("'s") always attaches. A fragment that
+    /// rescoring rewrote (`windowText` no longer opens with `rawWindowText`'s
+    /// fragment) is a whole vocabulary term and keeps its own word. Returns the
+    /// new previous text and the rest of the window's text. Pure.
+    static func joiningMidWordStart(
+        previous: String, windowText: String, rawWindowText: String, previousRawWord: String
+    ) -> (previous: String, rest: String) {
+        func split(_ text: String) -> (fragment: Substring, rest: String) {
+            let trimmed = text.drop(while: { $0 == " " })
+            let fragment = trimmed.prefix(while: { $0 != " " })
+            return (fragment, String(trimmed.dropFirst(fragment.count).drop(while: { $0 == " " })))
+        }
+        let (fragment, rest) = split(windowText)
+        guard !fragment.isEmpty, fragment == split(rawWindowText).fragment else { return (previous, windowText) }
+
+        func core<S: StringProtocol>(_ word: S) -> String {
+            word.lowercased().trimmingCharacters(in: .punctuationCharacters.union(.symbols))
+        }
+        let letters = fragment.prefix(while: { !$0.isPunctuation && !$0.isSymbol })
+        let previousWord = previous.split(separator: " ").last ?? ""
+        let replaced = !letters.isEmpty && core(previousWord) != core(previousRawWord)
+        return (previous + (replaced ? fragment.dropFirst(letters.count) : fragment), rest)
+    }
+
+    private func updateTranscriptionState(with result: ASRResult, text: String, shouldConfirm: Bool) async {
         let totalAudioProcessed = Double(bufferStartIndex + sampleBuffer.count) / 16000.0
 
         if shouldConfirm {
@@ -751,9 +808,9 @@ public actor SlidingWindowAsrManager {
                 components.append(volatileTranscript)
                 confirmedTranscript = components.joined(separator: " ")
             }
-            volatileTranscript = result.text
+            volatileTranscript = text
             logger.debug(
-                "CONFIRMED (\(result.confidence), \(String(format: "%.1f", totalAudioProcessed))s context): promoted to confirmed; new volatile '\(result.text)'"
+                "CONFIRMED (\(result.confidence), \(String(format: "%.1f", totalAudioProcessed))s context): promoted to confirmed; new volatile '\(text)'"
             )
         } else {
             // Each window carries new audio, so an unconfirmed window extends the
@@ -761,12 +818,12 @@ public actor SlidingWindowAsrManager {
             // window's text whenever two consecutive windows went unconfirmed — with
             // boosting on, finish() builds from this text, and a trailing empty flush
             // window returned an empty transcript for a 15 s clip (#851).
-            volatileTranscript = Self.appendingVolatile(volatileTranscript, result.text)
+            volatileTranscript = Self.appendingVolatile(volatileTranscript, text)
             let hasMinimumContext = totalAudioProcessed >= config.minContextForConfirmation
             let reason =
                 !hasMinimumContext
                 ? "insufficient context (\(String(format: "%.1f", totalAudioProcessed))s)" : "low confidence"
-            logger.debug("VOLATILE (\(result.confidence)): \(reason) - updated volatile '\(result.text)'")
+            logger.debug("VOLATILE (\(result.confidence)): \(reason) - updated volatile '\(text)'")
         }
     }
 
