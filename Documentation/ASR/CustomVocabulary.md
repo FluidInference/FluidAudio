@@ -792,6 +792,43 @@ When using `--custom-vocab` with `--streaming`, be aware of the following constr
 - If streaming is required, prefer single-word vocabulary terms over multi-word phrases
 - Consider post-processing the streaming transcript with vocabulary boosting on the complete audio
 
+### Opt-in rescue floors (#702, #899)
+
+The spotter-anchored rescue pass can replace a word with a term on CTC evidence alone, even when
+the two spellings share almost nothing. Two similarity floors gate it. Both are `0.0` (off) in
+`VocabularyRescorer.Config.default`; the Unified engines' `VocabularyBoostingSession.itnDefaultConfig`
+sets them to `0.30` (single word) and `0.50` (multi-word). With floors on, the rescue pass no longer
+fires on unrelated speech, but it also stops recovering brand names that TDT mangles past the
+similarity gate. Measured on main b3eda843 (before #1100), streaming `SlidingWindowAsrManager` with the CLI's
+default `--streaming` config:
+
+| | No vocabulary | Floors off (default) | Floors on |
+|---|---|---|---|
+| Earnings-22 keyword clips (772): keyword TP/FP/FN | 581/0/693 | 1220/4/54 | 1082/2/192 |
+| Earnings-22: WER | 21.71% | 26.10% | 19.68% |
+| FLEURS en_us (200 clips) with an unrelated Earnings-22 term list: false term insertions | 0 | 332 | 40 |
+| FLEURS: WER | 6.09% | 24.41% | 6.91% |
+
+Since then, the confident-word guard (#1100, #967) has lowered floors-off false insertions on the
+FLEURS set from 332 to 220 (WER 15.52%), at 1218/4/56 on Earnings-22.
+
+The default favours term recall, for vocabularies the speech actually uses. If much of the audio
+won't contain the terms, turn the floors on:
+
+```swift
+try await manager.configureVocabularyBoosting(
+    vocabulary: vocabulary,
+    ctcModels: ctcModels,
+    config: VocabularyRescorer.Config(
+        spotterRescueMinSimilarity: 0.30,
+        spotterRescueMultiWordMinSimilarity: 0.50
+    )
+)
+```
+
+The same `config:` applies to `VocabularyBoostingSession` in batch mode, which shows the same
+trade-off (Earnings-22 TP/FP/FN 1211/4/63 → 1100/2/174).
+
 ## BK-Tree Approximate String Matching (Experimental)
 
 The rescorer supports an optional **BK-tree** (Burkhard-Keller tree) for efficient approximate string matching. When enabled, the rescorer switches from the default term-centric algorithm to a **word-centric** algorithm.
