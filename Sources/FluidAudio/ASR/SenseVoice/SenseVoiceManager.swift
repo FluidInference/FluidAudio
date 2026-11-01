@@ -14,6 +14,8 @@ public actor SenseVoiceManager {
     private let language: Int32
     private let textNorm: Int32
     private let tagCandidates: SenseVoiceTagScoring.Candidates
+    /// Frame lengths the loaded encoder's `speech` input accepts, ascending.
+    private let encoderFrameCounts: [Int]
     private static let logger = AppLogger(category: "SenseVoiceManager")
 
     public init(
@@ -25,6 +27,23 @@ public actor SenseVoiceManager {
         self.language = language
         self.textNorm = textNorm
         self.tagCandidates = SenseVoiceTagScoring.Candidates(vocabulary: models.vocabulary)
+        self.encoderFrameCounts = Self.acceptedFrameCounts(of: models.encoder)
+    }
+
+    /// Frame lengths an encoder's `speech` input `[1, T, 560]` accepts, ascending: the
+    /// enumerated buckets of the fp16 / int8 encoders, or the one fixed length of the fp32
+    /// encoder (1800). Falls back to `SenseVoiceConfig.buckets` for any other constraint.
+    static func acceptedFrameCounts(of encoder: MLModel) -> [Int] {
+        guard let constraint = encoder.modelDescription.inputDescriptionsByName["speech"]?.multiArrayConstraint
+        else { return SenseVoiceConfig.buckets }
+        let shapes: [[NSNumber]]
+        switch constraint.shapeConstraint.type {
+        case .enumerated: shapes = constraint.shapeConstraint.enumeratedShapes
+        case .unspecified: shapes = [constraint.shape]
+        default: return SenseVoiceConfig.buckets
+        }
+        let frames = Set(shapes.compactMap { $0.count == 3 ? $0[1].intValue : nil }).sorted()
+        return frames.isEmpty ? SenseVoiceConfig.buckets : frames
     }
 
     /// Load models from the default cache (downloading if needed), then build a manager.
@@ -95,11 +114,14 @@ public actor SenseVoiceManager {
     private func runEncoder(features: MLMultiArray) throws -> (MLMultiArray, Int) {
         let dim = SenseVoiceConfig.featureDim
         var t = features.shape[1].intValue
-        if t > SenseVoiceConfig.maxFrames {
-            Self.logger.warning("Audio exceeds max length; truncating \(t) → \(SenseVoiceConfig.maxFrames) frames")
-            t = SenseVoiceConfig.maxFrames
+        let maxFrames = encoderFrameCounts.last ?? SenseVoiceConfig.maxFrames
+        if t > maxFrames {
+            Self.logger.warning("Audio exceeds max length; truncating \(t) → \(maxFrames) frames")
+            t = maxFrames
         }
-        let bucket = SenseVoiceConfig.pickBucket(forFrames: t)
+        // The smallest length this encoder accepts: an enumerated bucket, or the fp32 encoder's
+        // fixed 1800 frames.
+        let bucket = encoderFrameCounts.first { $0 >= t } ?? maxFrames
 
         // Zero-padded [1, bucket, 560] with the first T feature frames copied in.
         let speech = try MLMultiArray(shape: [1, bucket as NSNumber, dim as NSNumber], dataType: .float32)
