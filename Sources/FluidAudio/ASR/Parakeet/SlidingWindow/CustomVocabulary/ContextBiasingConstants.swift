@@ -139,6 +139,17 @@ public enum ContextBiasingConstants {
     /// - Used in: `VocabularyRescorer+ConstrainedCTC.swift` stopword check
     public static let stopwordSpanSimilarity: Float = 0.85
 
+    /// Lowest TDT token confidence at which a transcript word counts as confidently heard.
+    ///
+    /// A vocabulary term gets no context bias against a span whose words were all heard this
+    /// confidently, so it must beat the span on CTC evidence alone (#967). Below this, misheard
+    /// names keep the full bias; the 13 #967 dictation clips' correct fixes all sit at 0.70 or less.
+    public static let confidentWordMinConfidence: Float = 0.99
+
+    /// Similarity at and above which a confidently heard span is a close spelling of the term
+    /// ("Quiltor" / "Quilter", "Rashid" / "Rasyid") and keeps its bias, so the listed spelling still wins.
+    public static let closeSpellingSimilarity: Float = 0.80
+
     // MARK: - Context Biasing Weights
 
     /// Default context-biasing weight (CBW) per NeMo paper.

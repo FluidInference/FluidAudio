@@ -639,5 +639,249 @@
         "tokenId": 7883
       }
     ]
+  },
+  {
+    "id": "sort-of-shell",
+    "text": "The moisture on your hands will react with the outer layers, which will feel funny and form a sort of shell.",
+    "tokenTimings": [
+      {
+        "confidence": 0.9951172,
+        "endTime": 0.72,
+        "startTime": 0.4,
+        "token": " The",
+        "tokenId": 1502
+      },
+      {
+        "confidence": 1,
+        "endTime": 0.96,
+        "startTime": 0.72,
+        "token": " mo",
+        "tokenId": 617
+      },
+      {
+        "confidence": 1,
+        "endTime": 1.1199999999999999,
+        "startTime": 0.96,
+        "token": "ist",
+        "tokenId": 398
+      },
+      {
+        "confidence": 1,
+        "endTime": 1.28,
+        "startTime": 1.12,
+        "token": "ure",
+        "tokenId": 1630
+      },
+      {
+        "confidence": 1,
+        "endTime": 1.44,
+        "startTime": 1.28,
+        "token": " on",
+        "tokenId": 431
+      },
+      {
+        "confidence": 1,
+        "endTime": 1.5999999999999999,
+        "startTime": 1.44,
+        "token": " your",
+        "tokenId": 3629
+      },
+      {
+        "confidence": 1,
+        "endTime": 1.76,
+        "startTime": 1.6,
+        "token": " hand",
+        "tokenId": 2784
+      },
+      {
+        "confidence": 1,
+        "endTime": 1.92,
+        "startTime": 1.76,
+        "token": "s",
+        "tokenId": 7870
+      },
+      {
+        "confidence": 1,
+        "endTime": 2.08,
+        "startTime": 1.92,
+        "token": " will",
+        "tokenId": 2783
+      },
+      {
+        "confidence": 1,
+        "endTime": 2.3200000000000003,
+        "startTime": 2.08,
+        "token": " re",
+        "tokenId": 427
+      },
+      {
+        "confidence": 1,
+        "endTime": 2.48,
+        "startTime": 2.32,
+        "token": "act",
+        "tokenId": 4112
+      },
+      {
+        "confidence": 0.9995117,
+        "endTime": 2.64,
+        "startTime": 2.48,
+        "token": " with",
+        "tokenId": 1868
+      },
+      {
+        "confidence": 0.99902344,
+        "endTime": 2.8000000000000003,
+        "startTime": 2.64,
+        "token": " the",
+        "tokenId": 506
+      },
+      {
+        "confidence": 0.9970703,
+        "endTime": 2.9600000000000004,
+        "startTime": 2.8000000000000003,
+        "token": " out",
+        "tokenId": 2009
+      },
+      {
+        "confidence": 0.9995117,
+        "endTime": 3.12,
+        "startTime": 2.96,
+        "token": "er",
+        "tokenId": 277
+      },
+      {
+        "confidence": 0.9970703,
+        "endTime": 3.3600000000000003,
+        "startTime": 3.12,
+        "token": " la",
+        "tokenId": 393
+      },
+      {
+        "confidence": 1,
+        "endTime": 3.44,
+        "startTime": 3.36,
+        "token": "y",
+        "tokenId": 7893
+      },
+      {
+        "confidence": 1,
+        "endTime": 3.6,
+        "startTime": 3.44,
+        "token": "ers",
+        "tokenId": 496
+      },
+      {
+        "confidence": 0.5258789,
+        "endTime": 3.7600000000000002,
+        "startTime": 3.6,
+        "token": ",",
+        "tokenId": 7877
+      },
+      {
+        "confidence": 1,
+        "endTime": 4.08,
+        "startTime": 3.7600000000000002,
+        "token": " which",
+        "tokenId": 4333
+      },
+      {
+        "confidence": 1,
+        "endTime": 4.24,
+        "startTime": 4.08,
+        "token": " will",
+        "tokenId": 2783
+      },
+      {
+        "confidence": 1,
+        "endTime": 4.32,
+        "startTime": 4.24,
+        "token": " fe",
+        "tokenId": 2425
+      },
+      {
+        "confidence": 1,
+        "endTime": 4.640000000000001,
+        "startTime": 4.32,
+        "token": "el",
+        "tokenId": 292
+      },
+      {
+        "confidence": 0.9995117,
+        "endTime": 4.96,
+        "startTime": 4.64,
+        "token": " fun",
+        "tokenId": 3046
+      },
+      {
+        "confidence": 1,
+        "endTime": 5.12,
+        "startTime": 4.96,
+        "token": "ny",
+        "tokenId": 598
+      },
+      {
+        "confidence": 1,
+        "endTime": 5.6000000000000005,
+        "startTime": 5.28,
+        "token": " and",
+        "tokenId": 575
+      },
+      {
+        "confidence": 1,
+        "endTime": 5.840000000000001,
+        "startTime": 5.6000000000000005,
+        "token": " form",
+        "tokenId": 2729
+      },
+      {
+        "confidence": 1,
+        "endTime": 6.08,
+        "startTime": 5.84,
+        "token": " a",
+        "tokenId": 279
+      },
+      {
+        "confidence": 0.9980469,
+        "endTime": 6.24,
+        "startTime": 6.08,
+        "token": " s",
+        "tokenId": 275
+      },
+      {
+        "confidence": 1,
+        "endTime": 6.4,
+        "startTime": 6.24,
+        "token": "ort",
+        "tokenId": 621
+      },
+      {
+        "confidence": 0.9838867,
+        "endTime": 6.720000000000001,
+        "startTime": 6.4,
+        "token": " of",
+        "tokenId": 592
+      },
+      {
+        "confidence": 1,
+        "endTime": 7.04,
+        "startTime": 6.72,
+        "token": " sh",
+        "tokenId": 4036
+      },
+      {
+        "confidence": 1,
+        "endTime": 7.28,
+        "startTime": 7.04,
+        "token": "ell",
+        "tokenId": 530
+      },
+      {
+        "confidence": 0.92089844,
+        "endTime": 7.6000000000000005,
+        "startTime": 7.28,
+        "token": ".",
+        "tokenId": 7883
+      }
+    ]
   }
 ]

@@ -413,6 +413,8 @@ public struct VocabularyRescorer: Sendable {
         public let startTime: Double
         public let endTime: Double
         let tokenRange: Range<Int>?
+        /// Lowest TDT token confidence in the word; nil when the timings carry none.
+        var minConfidence: Float? = nil
     }
 
     /// Build word-level timings from token timings.
@@ -425,6 +427,7 @@ public struct VocabularyRescorer: Sendable {
         var wordTokenStart = 0
         var wordTokenEnd = 0
         var wordTokensAreContiguous = true
+        var wordMinConfidence = Float.infinity
 
         for (tokenIndex, timing) in tokenTimings.enumerated() {
             let token = timing.token
@@ -446,7 +449,8 @@ public struct VocabularyRescorer: Sendable {
                             word: trimmedWord,
                             startTime: wordStart,
                             endTime: wordEnd,
-                            tokenRange: wordTokensAreContiguous ? wordTokenStart..<wordTokenEnd : nil
+                            tokenRange: wordTokensAreContiguous ? wordTokenStart..<wordTokenEnd : nil,
+                            minConfidence: wordMinConfidence.isFinite ? wordMinConfidence : nil
                         ))
                 }
                 currentWord = ""
@@ -457,6 +461,7 @@ public struct VocabularyRescorer: Sendable {
                 wordStart = timing.startTime
                 wordTokenStart = tokenIndex
                 wordTokensAreContiguous = true
+                wordMinConfidence = .infinity
             } else {
                 if tokenIndex != wordTokenEnd {
                     wordTokensAreContiguous = false
@@ -465,6 +470,7 @@ public struct VocabularyRescorer: Sendable {
             }
             wordEnd = timing.endTime
             wordTokenEnd = tokenIndex + 1
+            wordMinConfidence = min(wordMinConfidence, timing.confidence)
         }
 
         // Save final word
@@ -475,7 +481,8 @@ public struct VocabularyRescorer: Sendable {
                     word: trimmedWord,
                     startTime: wordStart,
                     endTime: wordEnd,
-                    tokenRange: wordTokensAreContiguous ? wordTokenStart..<wordTokenEnd : nil
+                    tokenRange: wordTokensAreContiguous ? wordTokenStart..<wordTokenEnd : nil,
+                    minConfidence: wordMinConfidence.isFinite ? wordMinConfidence : nil
                 ))
         }
 

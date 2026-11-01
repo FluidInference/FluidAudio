@@ -136,8 +136,14 @@ extension VocabularyRescorer {
         // already recognized name on bias alone. Close spellings and aliases
         // retain the normal bonus so genuine repetitions can still be corrected.
         let configuredBoost = config.adaptiveCbw(baseCbw: cbw, tokenCount: vocabTokensUsed.count)
+        // A span the TDT decoder heard confidently is most likely what was said: unless it is a close spelling
+        // of the term (where the listed spelling should win), the term gets no bias against it and must beat
+        // the span on CTC evidence alone (#967).
+        let confidentlyHeardOtherWord =
+            !Self.isCloseSpelling(candidate) && Self.isConfidentlyHeard(candidate, wordTimings: wordTimings)
         let adaptiveCbwValue =
-            searchWindow.createsAdjacentDuplicate && !Self.isTextSupportedRepetition(candidate)
+            (searchWindow.createsAdjacentDuplicate && !Self.isTextSupportedRepetition(candidate))
+                || confidentlyHeardOtherWord
             ? min(0, configuredBoost) : configuredBoost
         let boostedVocabScore = vocabCtcScore + adaptiveCbwValue
 
@@ -199,6 +205,18 @@ extension VocabularyRescorer {
             acousticFrameRange: acousticFrameRange,
             sourceFrameRange: sourceFrameRange
         )
+    }
+
+    /// Whether the TDT decoder heard every word of the candidate's span with at least
+    /// `ContextBiasingConstants.confidentWordMinConfidence`.
+    static func isConfidentlyHeard(_ candidate: CTCMatchCandidate, wordTimings: [WordTiming]) -> Bool {
+        guard !candidate.spanIndices.isEmpty else { return false }
+        return candidate.spanIndices.allSatisfy { index in
+            guard wordTimings.indices.contains(index), let confidence = wordTimings[index].minConfidence else {
+                return false
+            }
+            return confidence >= ContextBiasingConstants.confidentWordMinConfidence
+        }
     }
 
     /// Build a truthful display reason for an available numeric CTC comparison.
