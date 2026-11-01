@@ -476,6 +476,22 @@ extension AsrManager {
         Self.trailingWordStartIndex(pieces: tokens.map { vocabulary[$0] ?? "" }) ?? 0
     }
 
+    /// Whether `tokens` open inside a word: their first piece carries no word
+    /// boundary (a continuation such as the "y" of "Andre|y", or punctuation),
+    /// so the token stream glues it onto the previous token (#912).
+    func startsMidWord(_ tokens: [Int]) -> Bool {
+        guard
+            let first = tokens.lazy.compactMap({ self.vocabulary[$0] })
+                .first(where: { !$0.isEmpty && $0 != ASRConstants.sentencePieceUnknownToken })
+        else { return false }
+        return !first.hasPrefix(ASRConstants.sentencePieceWordBoundary) && !first.hasPrefix(" ")
+    }
+
+    /// The text of the trailing word of `tokens`, from its last word-start piece.
+    func trailingWordText(_ tokens: [Int]) -> String {
+        convertTokensToText(Array(tokens[stableStreamingTokenCount(tokens)...]))
+    }
+
     /// Chunk transcription that preserves decoder state between calls.
     /// Used by SlidingWindowAsrManager for overlapping-window processing with token deduplication.
     func transcribeChunk(
