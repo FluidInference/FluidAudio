@@ -135,7 +135,11 @@ final class PocketTtsSessionTests: XCTestCase {
         let session = try await manager.makeSession()
         let consumer = Task { () -> Int in
             var n = 0
-            for try await _ in session.frames { n += 1 }
+            do {
+                for try await _ in session.frames { n += 1 }
+            } catch is CancellationError {
+                // `cancel()` ends the stream by throwing CancellationError; ending is what counts.
+            }
             return n
         }
         session.enqueue("A long enough utterance that cancellation arrives while it generates.")
