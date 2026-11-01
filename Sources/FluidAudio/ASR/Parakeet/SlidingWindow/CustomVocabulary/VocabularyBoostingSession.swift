@@ -69,7 +69,8 @@ public struct VocabularyBoostingSession: Sendable {
     /// names the model mangles past the similarity gate.
     public static let itnDefaultConfig = VocabularyRescorer.Config(
         spotterRescueMinSimilarity: 0.30,
-        spotterRescueMultiWordMinSimilarity: 0.50
+        spotterRescueMultiWordMinSimilarity: 0.50,
+        confidentWordBiasGate: false
     )
 
     /// Create a session from a tokenized vocabulary and pre-loaded CTC models.

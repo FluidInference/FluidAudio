@@ -168,4 +168,44 @@ final class VocabularySpanProtectionTests: XCTestCase {
         XCTAssertFalse(VocabularyRescorer.isCanonicalMatch("Quilters", canonical: "Quilter"))
         XCTAssertFalse(VocabularyRescorer.isCanonicalMatch("Lab's", canonical: "Labs"))
     }
+
+    func testWordTimingsCarryTheirLowestTokenConfidence() {
+        let words = VocabularyRescorer.buildWordTimings(from: [
+            TokenTiming(token: " sort", tokenId: 1, startTime: 0, endTime: 0.16, confidence: 0.999),
+            TokenTiming(token: " Sor", tokenId: 2, startTime: 0.16, endTime: 0.24, confidence: 0.4),
+            TokenTiming(token: "a", tokenId: 3, startTime: 0.24, endTime: 0.32, confidence: 0.9),
+        ])
+        XCTAssertEqual(words.map(\.word), ["sort", "Sora"])
+        XCTAssertEqual(words.map(\.minConfidence), [0.999, 0.4])
+    }
+
+    /// Only a span whose every word TDT heard at `confidentWordMinConfidence` loses the bias (#967).
+    func testOnlyAFullyConfidentSpanCountsAsConfidentlyHeard() {
+        let words = VocabularyRescorer.buildWordTimings(from: [
+            TokenTiming(token: " a", tokenId: 1, startTime: 0, endTime: 0.08, confidence: 1),
+            TokenTiming(token: " sort", tokenId: 2, startTime: 0.08, endTime: 0.24, confidence: 0.995),
+            TokenTiming(token: " Sar", tokenId: 3, startTime: 0.24, endTime: 0.32, confidence: 0.39),
+            TokenTiming(token: "ab", tokenId: 4, startTime: 0.32, endTime: 0.4, confidence: 0.99),
+        ])
+        XCTAssertTrue(
+            VocabularyRescorer.isConfidentlyHeard(
+                candidate("sort", term: "Sora", indices: [1], words: words), wordTimings: words))
+        XCTAssertFalse(
+            VocabularyRescorer.isConfidentlyHeard(
+                candidate("Sarab", term: "Saurabh", indices: [2], words: words), wordTimings: words))
+        XCTAssertFalse(
+            VocabularyRescorer.isConfidentlyHeard(
+                candidate("sort Sarab", term: "Saurabh", indices: [1, 2], words: words), wordTimings: words))
+        // Timings without confidence never count as confidently heard.
+        let untimed = [word("sort", frame: 0, frames: 2)]
+        XCTAssertFalse(
+            VocabularyRescorer.isConfidentlyHeard(
+                candidate("sort", term: "Sora", indices: [0], words: untimed), wordTimings: untimed))
+    }
+
+    /// The #967 confident-word gate is calibrated on TDT confidences; the Unified engines' config keeps it off.
+    func testConfidentWordGateIsOnByDefaultAndOffForTheUnifiedEngines() {
+        XCTAssertTrue(VocabularyRescorer.Config.default.confidentWordBiasGate)
+        XCTAssertFalse(VocabularyBoostingSession.itnDefaultConfig.confidentWordBiasGate)
+    }
 }

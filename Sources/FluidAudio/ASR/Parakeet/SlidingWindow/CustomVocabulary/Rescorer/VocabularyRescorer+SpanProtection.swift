@@ -117,15 +117,28 @@ extension VocabularyRescorer {
     /// repetition. An unrelated neighboring word must not gain that same bonus.
     static func isTextSupportedRepetition(_ candidate: CTCMatchCandidate) -> Bool {
         if candidate.similarity == 1 { return true }  // Exact alias or compound spelling, including BK-tree matches.
-        func lexicalCore(_ text: String) -> String {
-            let normalized = normalizedLexical(text)
-            if normalized.hasSuffix("'s") { return String(normalized.dropLast(2)) }
-            if normalized.hasSuffix("s'") { return String(normalized.dropLast()) }
-            return normalized
-        }
         let original = lexicalCore(candidate.originalPhrase)
         let forms = [candidate.vocabTerm] + (candidate.matchedAlias.map { [$0] } ?? [])
         return forms.contains { StringUtils.levenshteinDistance(original, lexicalCore($0)) <= 1 }
+    }
+
+    /// Whether the span is a close spelling of the term or its matched alias, possessive aside ("Quiltor's" /
+    /// "Quilter", "Rashid" / "Rasyid"), at `ContextBiasingConstants.closeSpellingSimilarity`: a spelling
+    /// preference, where the listed form should win even over a confident decode.
+    static func isCloseSpelling(_ candidate: CTCMatchCandidate) -> Bool {
+        let threshold = ContextBiasingConstants.closeSpellingSimilarity
+        if candidate.similarity >= threshold { return true }
+        let original = lexicalCore(candidate.originalPhrase)
+        let forms = [candidate.vocabTerm] + (candidate.matchedAlias.map { [$0] } ?? [])
+        return forms.contains { stringSimilarity(original, lexicalCore($0)) >= threshold }
+    }
+
+    /// `normalizedLexical` without a trailing possessive: "Quiltor's" → "quiltor", "Jonnes'" → "jonnes".
+    static func lexicalCore(_ text: String) -> String {
+        let normalized = normalizedLexical(text)
+        if normalized.hasSuffix("'s") { return String(normalized.dropLast(2)) }
+        if normalized.hasSuffix("s'") { return String(normalized.dropLast()) }
+        return normalized
     }
 
     struct RecognizedVocabularySpans {

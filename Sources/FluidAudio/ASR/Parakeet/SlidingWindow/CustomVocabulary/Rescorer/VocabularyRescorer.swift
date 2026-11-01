@@ -79,6 +79,14 @@ public struct VocabularyRescorer: Sendable {
         /// above that this switch has no effect.
         public let spotterRescueEnabled: Bool
 
+        /// Whether a span every word of which the decoder heard at
+        /// `ContextBiasingConstants.confidentWordMinConfidence` or more loses the
+        /// context-bias bonus against a term it isn't a close spelling of (#967).
+        /// `true` (default) is calibrated on TDT token confidences; the Unified
+        /// engines' `VocabularyBoostingSession.itnDefaultConfig` turns it off, since
+        /// their emission probabilities are a different scale and weren't measured.
+        public let confidentWordBiasGate: Bool
+
         public static let `default` = Config()
 
         public init(
@@ -89,7 +97,8 @@ public struct VocabularyRescorer: Sendable {
             spotterRescueMinSimilarity: Float = ContextBiasingConstants.defaultSpotterRescueMinSimilarity,
             spotterRescueMultiWordMinSimilarity: Float = ContextBiasingConstants
                 .defaultSpotterRescueMultiWordMinSimilarity,
-            spotterRescueEnabled: Bool = ContextBiasingConstants.defaultSpotterRescueEnabled
+            spotterRescueEnabled: Bool = ContextBiasingConstants.defaultSpotterRescueEnabled,
+            confidentWordBiasGate: Bool = true
         ) {
             self.useAdaptiveThresholds = useAdaptiveThresholds
             self.referenceTokenCount = referenceTokenCount
@@ -98,6 +107,7 @@ public struct VocabularyRescorer: Sendable {
             self.spotterRescueMinSimilarity = spotterRescueMinSimilarity
             self.spotterRescueMultiWordMinSimilarity = spotterRescueMultiWordMinSimilarity
             self.spotterRescueEnabled = spotterRescueEnabled
+            self.confidentWordBiasGate = confidentWordBiasGate
         }
 
         // MARK: - Adaptive Threshold Functions
@@ -413,6 +423,8 @@ public struct VocabularyRescorer: Sendable {
         public let startTime: Double
         public let endTime: Double
         let tokenRange: Range<Int>?
+        /// Lowest TDT token confidence in the word; nil when the timings carry none.
+        var minConfidence: Float? = nil
     }
 
     /// Build word-level timings from token timings.
@@ -425,6 +437,7 @@ public struct VocabularyRescorer: Sendable {
         var wordTokenStart = 0
         var wordTokenEnd = 0
         var wordTokensAreContiguous = true
+        var wordMinConfidence = Float.infinity
 
         for (tokenIndex, timing) in tokenTimings.enumerated() {
             let token = timing.token
@@ -446,7 +459,8 @@ public struct VocabularyRescorer: Sendable {
                             word: trimmedWord,
                             startTime: wordStart,
                             endTime: wordEnd,
-                            tokenRange: wordTokensAreContiguous ? wordTokenStart..<wordTokenEnd : nil
+                            tokenRange: wordTokensAreContiguous ? wordTokenStart..<wordTokenEnd : nil,
+                            minConfidence: wordMinConfidence.isFinite ? wordMinConfidence : nil
                         ))
                 }
                 currentWord = ""
@@ -457,6 +471,7 @@ public struct VocabularyRescorer: Sendable {
                 wordStart = timing.startTime
                 wordTokenStart = tokenIndex
                 wordTokensAreContiguous = true
+                wordMinConfidence = .infinity
             } else {
                 if tokenIndex != wordTokenEnd {
                     wordTokensAreContiguous = false
@@ -465,6 +480,7 @@ public struct VocabularyRescorer: Sendable {
             }
             wordEnd = timing.endTime
             wordTokenEnd = tokenIndex + 1
+            wordMinConfidence = min(wordMinConfidence, timing.confidence)
         }
 
         // Save final word
@@ -475,7 +491,8 @@ public struct VocabularyRescorer: Sendable {
                     word: trimmedWord,
                     startTime: wordStart,
                     endTime: wordEnd,
-                    tokenRange: wordTokensAreContiguous ? wordTokenStart..<wordTokenEnd : nil
+                    tokenRange: wordTokensAreContiguous ? wordTokenStart..<wordTokenEnd : nil,
+                    minConfidence: wordMinConfidence.isFinite ? wordMinConfidence : nil
                 ))
         }
 

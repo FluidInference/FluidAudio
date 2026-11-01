@@ -31,6 +31,10 @@ word must remain unchanged because it is not one complete name span.
   superintendent Chandra Shekhar Solanki said the accused appeared in court
   with covered faces.” Keeps the actual TDT `Solansky` → `Solanki` correction
   working with the short-term bias taper enabled.
+- `sort-of-shell.wav`: FLEURS `en_us:1803:11987168412167267165.wav`, “The
+  moisture on your hands will react with the outer layers, which will feel funny
+  and form a sort of shell.” TDT hears `sort` at full confidence; a similar listed
+  term (`Sora`) must not replace it on bias alone (#967).
 
 ## Attribution and license
 
@@ -53,3 +57,4 @@ SHA-256 integrity hashes:
 | quilter.wav | `799f78ed4beb4de7ceae3a809262d4ce242394342ccd1d58cef7d49dbc2def46` |
 | quilter-possessive.wav | `473b1bb573e8f7cdcd639c6e318036236190107b66bfe6892286121a92d464c1` |
 | solanki.wav | `509bc6279b6549a1ed01a712950f0593e43380204f77f39a4fdd11bd216c68c0` |
+| sort-of-shell.wav | `0dfd53aba5bcaa70a09992b937b189f10f273d3b5f3667cb5afc1eeab2b7aa5c` |
