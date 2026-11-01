@@ -77,6 +77,28 @@ phrase at the wrong point.
 | Parallel chunk workers | `ASRConfig.parallelChunkConcurrency` (default `4`, clamped to `>= 1`) | Stateless chunked batch TDT (all of the above) | Decodes independent chunks concurrently across a worker pool of cloned `AsrManager` instances. |
 | Post-merge repair pass | `ASRConfig.seamGapRepair = true` (default), CLI `--no-seam-gap-repair` | Multi-chunk batch TDT (all of the above) | Re-decodes suspicious inter-token gaps with fresh seam-free windows, splicing recovered tokens in. See "Post-Merge Repair Pass". |
 
+### Choosing between mel-context and v3 no-mel
+
+Neither v3 path is better on every recording (#954). Both decode each window
+correctly in isolation; the windows simply start in different places, and v3
+can decode the same word differently depending on where its window starts. On
+an English conference talk (#954), the no-mel default lost "c3" from "501c3"
+in a window starting 11 s before it; `--mel-context` and that word's own
+single-window decode keep it. Dual-decode arbitration did not change it.
+
+Measured on 2026-11-01 (`main` b20d2098, v3 defaults otherwise, macOS 27):
+
+| Audio | v3 no-mel (default) | `--mel-context` |
+|---|---|---|
+| Earnings-22 subset10: 10 English calls, 11.1 h, Rev verbatim references | 13.09% WER | 12.72% WER |
+| FLEURS long-form: 100 clips per language joined (~25 min), 25 languages, pooled | 16.35% WER | 17.45% WER |
+| FLEURS long-form, languages where mel-context is worse | | 17 of 25 (fr +4.5, lv +10.0, sl +6.1 points) |
+
+The default stays no-mel because it is the safer choice across languages. For
+English conversational or interview recordings (calls, meetings, talks), set
+`ASRConfig(melChunkContext: true)` or pass `--mel-context`. Numbers, names
+and short words in hesitant speech are where the two paths differ most.
+
 The dual-decode path probes the first few non-first chunks with three strategies:
 
 - silence-aligned boundaries without warmup
