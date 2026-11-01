@@ -5,7 +5,7 @@ import Foundation
 ///
 /// Use cosine similarity between embeddings for speaker verification / diarization
 /// clustering. Pipeline: waveform -> [Preprocessor fp32/CPU] -> fbank [1,T,80]
-/// -> per-utterance mean subtraction -> [CAM++ fp16] -> [1,192] -> L2 normalize.
+/// -> per-utterance mean subtraction -> [CAM++ fp32] -> [1,192] -> L2 normalize.
 ///
 /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 public actor CampPlusEmbedder {

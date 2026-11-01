@@ -777,10 +777,15 @@ public enum ModelNames {
 
     /// CAM++ speaker-embedding model names (2 CoreML stages).
     ///   Preprocessor (fp32/CPU): waveform -> 80-d fbank
-    ///   CamPlusPlus (fp16/ANE): fbank -> 192-d speaker embedding
+    ///   CamPlusPlus (fp32, CPU/GPU): mean-normalized fbank -> 192-d speaker embedding
+    ///
+    /// `_v2` (issue #985): the preprocessor computes 3D-Speaker's Kaldi fbank (Povey window,
+    /// log floor after the mel filterbank), and CamPlusPlus averages each segment-pooling tail
+    /// over its own frames and runs in fp32. The fp16 v1 gave unrelated embeddings for some
+    /// lengths (e.g. 17.9–20.4 s).
     public enum CampPlus {
-        public static let preprocessor = "CamPlusPreprocessor"
-        public static let model = "CamPlusPlus"
+        public static let preprocessor = "CamPlusPreprocessor_v2"
+        public static let model = "CamPlusPlus_v2"
 
         public static let preprocessorFile = preprocessor + ".mlmodelc"
         public static let modelFile = model + ".mlmodelc"
