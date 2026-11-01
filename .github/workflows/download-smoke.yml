@@ -40,3 +40,5 @@ jobs:
 
       - name: Run smoke test (no model cache, live HF)
         run: FLUID_NETWORK_TESTS=1 swift test --filter DownloadSmokeTests
+
+# ci-verify: run on main after v0.18.2 (throwaway PR, not for merge)

@@ -190,3 +190,5 @@ jobs:
         run: |
           echo "Japanese ASR benchmark failed"
           exit 1
+
+# ci-verify: run on main after v0.18.2 (throwaway PR, not for merge)

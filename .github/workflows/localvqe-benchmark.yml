@@ -117,3 +117,5 @@ jobs:
           name: localvqe-benchmark-${{ github.sha }}
           path: localvqe-results/
           retention-days: 30
+
+# ci-verify: run on main after v0.18.2 (throwaway PR, not for merge)

@@ -86,3 +86,5 @@ jobs:
           name: kokoro-ios-test-results
           path: .kokoro-ios-validation/kokoro-ios.xcresult
           if-no-files-found: ignore
+
+# ci-verify: run on main after v0.18.2 (throwaway PR, not for merge)
