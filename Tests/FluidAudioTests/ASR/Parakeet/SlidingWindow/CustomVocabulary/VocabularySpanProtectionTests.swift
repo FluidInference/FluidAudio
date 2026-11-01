@@ -202,4 +202,10 @@ final class VocabularySpanProtectionTests: XCTestCase {
             VocabularyRescorer.isConfidentlyHeard(
                 candidate("sort", term: "Sora", indices: [0], words: untimed), wordTimings: untimed))
     }
+
+    /// The #967 confident-word gate is calibrated on TDT confidences; the Unified engines' config keeps it off.
+    func testConfidentWordGateIsOnByDefaultAndOffForTheUnifiedEngines() {
+        XCTAssertTrue(VocabularyRescorer.Config.default.confidentWordBiasGate)
+        XCTAssertFalse(VocabularyBoostingSession.itnDefaultConfig.confidentWordBiasGate)
+    }
 }

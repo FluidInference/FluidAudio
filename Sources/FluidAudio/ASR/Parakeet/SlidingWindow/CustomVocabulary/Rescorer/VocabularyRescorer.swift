@@ -79,6 +79,14 @@ public struct VocabularyRescorer: Sendable {
         /// above that this switch has no effect.
         public let spotterRescueEnabled: Bool
 
+        /// Whether a span every word of which the decoder heard at
+        /// `ContextBiasingConstants.confidentWordMinConfidence` or more loses the
+        /// context-bias bonus against a term it isn't a close spelling of (#967).
+        /// `true` (default) is calibrated on TDT token confidences; the Unified
+        /// engines' `VocabularyBoostingSession.itnDefaultConfig` turns it off, since
+        /// their emission probabilities are a different scale and weren't measured.
+        public let confidentWordBiasGate: Bool
+
         public static let `default` = Config()
 
         public init(
@@ -89,7 +97,8 @@ public struct VocabularyRescorer: Sendable {
             spotterRescueMinSimilarity: Float = ContextBiasingConstants.defaultSpotterRescueMinSimilarity,
             spotterRescueMultiWordMinSimilarity: Float = ContextBiasingConstants
                 .defaultSpotterRescueMultiWordMinSimilarity,
-            spotterRescueEnabled: Bool = ContextBiasingConstants.defaultSpotterRescueEnabled
+            spotterRescueEnabled: Bool = ContextBiasingConstants.defaultSpotterRescueEnabled,
+            confidentWordBiasGate: Bool = true
         ) {
             self.useAdaptiveThresholds = useAdaptiveThresholds
             self.referenceTokenCount = referenceTokenCount
@@ -98,6 +107,7 @@ public struct VocabularyRescorer: Sendable {
             self.spotterRescueMinSimilarity = spotterRescueMinSimilarity
             self.spotterRescueMultiWordMinSimilarity = spotterRescueMultiWordMinSimilarity
             self.spotterRescueEnabled = spotterRescueEnabled
+            self.confidentWordBiasGate = confidentWordBiasGate
         }
 
         // MARK: - Adaptive Threshold Functions

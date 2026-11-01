@@ -140,7 +140,8 @@ extension VocabularyRescorer {
         // of the term (where the listed spelling should win), the term gets no bias against it and must beat
         // the span on CTC evidence alone (#967).
         let confidentlyHeardOtherWord =
-            !Self.isCloseSpelling(candidate) && Self.isConfidentlyHeard(candidate, wordTimings: wordTimings)
+            config.confidentWordBiasGate && !Self.isCloseSpelling(candidate)
+            && Self.isConfidentlyHeard(candidate, wordTimings: wordTimings)
         let adaptiveCbwValue =
             (searchWindow.createsAdjacentDuplicate && !Self.isTextSupportedRepetition(candidate))
                 || confidentlyHeardOtherWord
