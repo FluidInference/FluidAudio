@@ -87,4 +87,21 @@ final class ChunkProcessorUnspacedScriptTests: XCTestCase {
             vocabulary: vocabulary)
         XCTAssertEqual(text(candidate), "をつかいます")
     }
+
+    /// Without a word guard the repair pass probes only gaps of 1.5 s or more: its short-gap rules
+    /// need word boundaries, and on joined JSUT read speech the 0.5 s floor spliced re-heard
+    /// neighbour text back in ("モデルモデル", #1031). A vocabulary with a guard keeps the floor.
+    func testUnguardedVocabularyProbesOnlyLongGaps() {
+        let frameDuration = ASRConstants.secondsPerEncoderFrame
+        let longGapFrames = Int(ChunkProcessor.seamGapFullWindowMinGapSeconds / frameDuration)
+        let guarded: Set<Int> = [1]
+        XCTAssertEqual(
+            ChunkProcessor.seamGapMinGapFrames(minGapSeconds: 0.5, spliceSafeTokenIds: guarded),
+            Int(0.5 / frameDuration))
+        XCTAssertEqual(
+            ChunkProcessor.seamGapMinGapFrames(minGapSeconds: 0.5, spliceSafeTokenIds: nil), longGapFrames)
+        XCTAssertEqual(
+            ChunkProcessor.seamGapMinGapFrames(minGapSeconds: 2.0, spliceSafeTokenIds: nil),
+            Int(2.0 / frameDuration))
+    }
 }
