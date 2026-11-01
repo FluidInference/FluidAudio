@@ -2,15 +2,16 @@
 @preconcurrency import CoreML
 import Foundation
 
-/// Actor store for one Paradee variant: `ParadeeText` + `ParadeeAcoustic`
-/// CoreML bundles and the phoneme vocab, downloaded from
-/// `FluidInference/paradee-8m-coreml/<variant>/` on first use.
+/// Actor store for one Paradee release and variant: `ParadeeText` +
+/// `ParadeeAcoustic` CoreML bundles and the phoneme vocab, downloaded from
+/// `FluidInference/paradee-8m-coreml/[v1.2/]<variant>/` on first use.
 ///
 /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 public actor ParadeeModelStore {
 
     private let logger = AppLogger(category: "ParadeeModelStore")
 
+    private let version: ParadeeVersion
     private let variant: ParadeeVariant
     /// Models root every asset of this store resolves under (`nil` = the
     /// default TTS cache root).
@@ -22,10 +23,12 @@ public actor ParadeeModelStore {
     private var vocab: KokoroAneVocab?
 
     public init(
+        version: ParadeeVersion = .v12,
         variant: ParadeeVariant = .int8,
         directory: URL? = nil,
         computeUnits: MLComputeUnits = .cpuOnly
     ) {
+        self.version = version
         self.variant = variant
         self.directory = directory
         self.computeUnits = computeUnits
@@ -46,7 +49,9 @@ public actor ParadeeModelStore {
         } catch {
             throw ParadeeError.modelFileNotFound("\(ModelNames.Paradee.vocabFile): \(error.localizedDescription)")
         }
-        logger.info("Paradee \(variant.rawValue) loaded from \(repoDir.path) (\(Self.describe(computeUnits)))")
+        logger.info(
+            "Paradee \(version.rawValue) \(variant.rawValue) loaded from \(repoDir.path) (\(Self.describe(computeUnits)))"
+        )
     }
 
     public func models() throws -> (text: MLModel, acoustic: MLModel) {
@@ -83,7 +88,7 @@ public actor ParadeeModelStore {
     // MARK: - Helpers
 
     private func ensureModels() async throws -> URL {
-        let repo = variant.repo
+        let repo = variant.repo(for: version)
         let modelsRoot = try directory ?? Self.defaultCacheRoot()
         let repoDir = modelsRoot.appendingPathComponent(repo.folderName)
         let allPresent = ModelNames.Paradee.requiredModels.allSatisfy {
@@ -91,7 +96,7 @@ public actor ParadeeModelStore {
         }
         if allPresent { return repoDir }
 
-        logger.info("Downloading Paradee \(variant.rawValue) CoreML models from HuggingFace…")
+        logger.info("Downloading Paradee \(version.rawValue) \(variant.rawValue) CoreML models from HuggingFace…")
         do {
             try await ModelHub.download(repo, to: modelsRoot)
         } catch {

@@ -131,7 +131,7 @@ enum ProcessCommand {
                 embeddingSkipStrategy: args.skipStrategy,
                 minSegmentDuration: args.minSegmentDuration,
                 minGapDuration: args.minGapDuration,
-                exclusiveSegments: !args.overlappingSegments,
+                exclusiveSegments: args.exclusiveSegments,
                 speechOnsetThreshold: args.speechOnsetThreshold,
                 speechOffsetThreshold: args.speechOffsetThreshold,
                 segmentationMinDurationOn: args.minDurationOn,
@@ -272,7 +272,7 @@ enum ProcessCommand {
         var skipStrategy: OfflineDiarizerConfig.EmbeddingSkipStrategy = .none
         var minSegmentDuration: Double = 1.0
         var minGapDuration: Double = 0.1
-        var overlappingSegments = false
+        var exclusiveSegments = false
         var speechOnsetThreshold: Float = 0.5
         var speechOffsetThreshold: Float = 0.5
         var minDurationOn: Double = 0.0
@@ -406,8 +406,10 @@ enum ProcessCommand {
                     parsed.minGapDuration = Double(args[i + 1]) ?? 0.1
                     i += 1
                 }
+            case "--exclusive-segments":
+                parsed.exclusiveSegments = true
             case "--overlapping-segments":
-                parsed.overlappingSegments = true
+                parsed.exclusiveSegments = false
             case "--onset-threshold":
                 if i + 1 < args.count {
                     parsed.speechOnsetThreshold = Float(args[i + 1]) ?? 0.5
@@ -515,7 +517,8 @@ enum ProcessCommand {
                 --skip-similarity <0-1>         Skip embedding if mask similarity ≥ threshold (default: none)
                 --min-segment-duration <sec>    Minimum segment duration (default: 1.0)
                 --min-gap-duration <sec>        Merge segments separated by less than this gap (default: 0.1)
-                --overlapping-segments          Allow speakers to overlap in output
+                --exclusive-segments            One speaker at a time: trim overlapping speech from the output
+                --overlapping-segments          Keep overlapping speech in the output (default)
                 --onset-threshold <0-1>         VAD onset probability threshold (default: 0.5)
                 --offset-threshold <0-1>        VAD offset probability threshold (default: 0.5)
                 --min-duration-on <sec>         Min speech duration to trigger VAD on (default: 0.0)

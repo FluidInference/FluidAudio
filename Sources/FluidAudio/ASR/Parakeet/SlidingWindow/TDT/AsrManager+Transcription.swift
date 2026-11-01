@@ -100,6 +100,44 @@ extension AsrManager {
         return idx
     }
 
+    /// Where the re-decode retires the previous window's last word, never inside
+    /// the prefix a token subscriber was already told is stable: a continuation
+    /// piece (an apostrophe suffix) can re-attach the last word to a stable one.
+    /// Pure, for testability.
+    nonisolated internal static func redecodeWordStart(pieces: [String], stableTokenFloor: Int) -> Int? {
+        guard let start = trailingWordStartIndex(pieces: pieces) else { return nil }
+        let floored = max(start, stableTokenFloor)
+        return floored < pieces.count ? floored : nil
+    }
+
+    /// How many leading current tokens re-emit the stable start of a word the
+    /// floor split. The re-decode starts at the word, not at the floor, so that
+    /// copy must go before reconciliation or the stable part would repeat.
+    /// Timestamps are global frames. Pure, for testability.
+    nonisolated internal static func reemittedStableWordHead(
+        previousTokens: [Int],
+        previousTimestamps: [Int],
+        wordStart: Int,
+        flooredStart: Int,
+        currentTokens: [Int],
+        currentTimestamps: [Int],
+        frameTolerance: Int = 2 * redecodeEmissionJitterFrames
+    ) -> Int {
+        guard wordStart < flooredStart, flooredStart <= previousTokens.count,
+            previousTimestamps.count == previousTokens.count,
+            currentTimestamps.count == currentTokens.count
+        else { return 0 }
+        let head = flooredStart - wordStart
+        guard currentTokens.count >= head else { return 0 }
+        for offset in 0..<head {
+            let previous = wordStart + offset
+            guard currentTokens[offset] == previousTokens[previous],
+                abs(currentTimestamps[offset] - previousTimestamps[previous]) <= frameTolerance
+            else { return 0 }
+        }
+        return head
+    }
+
     /// The words of `pieces[0..<upTo]` as (core text, start frame), for matching
     /// re-emitted words at the seam. Pure.
     nonisolated internal static func words(
@@ -431,6 +469,13 @@ extension AsrManager {
         return (droppedPrevious, droppedCurrent)
     }
 
+    /// The decoder may retire only its trailing word. Use its exact boundary,
+    /// not confidence, text suffix guesses or timestamp tolerances. Holding all
+    /// tokens when no boundary exists is conservative until terminal drain.
+    func stableStreamingTokenCount(_ tokens: [Int]) -> Int {
+        Self.trailingWordStartIndex(pieces: tokens.map { vocabulary[$0] ?? "" }) ?? 0
+    }
+
     /// Chunk transcription that preserves decoder state between calls.
     /// Used by SlidingWindowAsrManager for overlapping-window processing with token deduplication.
     func transcribeChunk(
@@ -440,7 +485,8 @@ extension AsrManager {
         previousTokenTimestamps: [Int]? = nil,
         globalFrameOffset: Int = 0,
         isLastChunk: Bool = false,
-        language: Language? = nil
+        language: Language? = nil,
+        stableTokenFloor: Int = 0
     ) async throws -> (
         tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int,
         droppedPreviousTokens: Int
@@ -464,7 +510,8 @@ extension AsrManager {
         let redecodeWindow = isLastChunk || !previousTokens.isEmpty
         let trailingWordStart: Int? =
             redecodeWindow && previousTokenTimestamps?.count == previousTokens.count
-            ? Self.trailingWordStartIndex(pieces: previousTokens.map { vocabulary[$0] ?? "" })
+            ? Self.redecodeWordStart(
+                pieces: previousTokens.map { vocabulary[$0] ?? "" }, stableTokenFloor: stableTokenFloor)
             : nil
         let redecodePlan = Self.redecodePlan(
             redecode: redecodeWindow,
@@ -501,6 +548,20 @@ extension AsrManager {
         if redecodePlan.initialTimeIndexOverride == 0, let trailingWordStart,
             let previousTimestamps = previousTokenTimestamps
         {
+            let stableCopy = Self.reemittedStableWordHead(
+                previousTokens: previousTokens,
+                previousTimestamps: previousTimestamps,
+                wordStart: Self.trailingWordStartIndex(pieces: previousTokens.map { vocabulary[$0] ?? "" })
+                    ?? trailingWordStart,
+                flooredStart: trailingWordStart,
+                currentTokens: currentTokens,
+                currentTimestamps: currentTimestamps.map { $0 + globalFrameOffset }
+            )
+            if stableCopy > 0 {
+                currentTokens.removeFirst(stableCopy)
+                currentTimestamps.removeFirst(stableCopy)
+                currentConfidences.removeFirst(min(stableCopy, currentConfidences.count))
+            }
             let seam = Self.reconcileFinalWindowSeam(
                 previousTokens: previousTokens,
                 previousTimestamps: previousTimestamps,
@@ -559,6 +620,13 @@ extension AsrManager {
         return (currentTokens, currentTimestamps, currentConfidences, encLen, droppedPrevious)
     }
 
+    /// Timings for a window's raw decoder tokens, one per token in decoder order. Unlike
+    /// `processTranscriptionResult`, this keeps `<unk>`: the token-revision stream counts the same tokens
+    /// the sliding window accumulates.
+    internal func rawTokenTimings(tokenIds: [Int], timestamps: [Int], confidences: [Float]) -> [TokenTiming] {
+        createTokenTimings(from: tokenIds, timestamps: timestamps, confidences: confidences)
+    }
+
     internal func processTranscriptionResult(
         tokenIds: [Int],
         timestamps: [Int] = [],
@@ -569,6 +637,8 @@ extension AsrManager {
         processingTime: TimeInterval
     ) -> ASRResult {
 
+        let (tokenIds, timestamps, confidences, tokenDurations) = droppingUnknownTokens(
+            tokenIds: tokenIds, timestamps: timestamps, confidences: confidences, tokenDurations: tokenDurations)
         let text = convertTokensToText(tokenIds)
         let duration = TimeInterval(audioSampleCount) / TimeInterval(config.sampleRate)
 

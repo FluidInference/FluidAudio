@@ -107,6 +107,26 @@ extension AsrManager {
         return timings
     }
 
+    /// Drop `<unk>` emissions (and their parallel timestamp / confidence / duration entries) before text and timings
+    /// are built. Fine-tunes such as Underdog Bark emit it where the training text had a character the vocabulary
+    /// lacks (quotation marks); NeMo and HF decoding skip special tokens, so a transcript never contains it. The
+    /// decoder itself still consumed the token, so its LSTM state matches the reference decode.
+    internal func droppingUnknownTokens(
+        tokenIds: [Int], timestamps: [Int], confidences: [Float], tokenDurations: [Int]
+    ) -> (tokenIds: [Int], timestamps: [Int], confidences: [Float], tokenDurations: [Int]) {
+        let unknownIds = Set(
+            vocabulary.compactMap { $0.value == ASRConstants.sentencePieceUnknownToken ? $0.key : nil })
+        guard !unknownIds.isEmpty, tokenIds.contains(where: unknownIds.contains) else {
+            return (tokenIds, timestamps, confidences, tokenDurations)
+        }
+        let keep = tokenIds.indices.filter { !unknownIds.contains(tokenIds[$0]) }
+        // Parallel arrays are either empty or aligned with tokenIds; filter only the aligned ones.
+        func aligned<T>(_ values: [T]) -> [T] {
+            values.count == tokenIds.count ? keep.map { values[$0] } : values
+        }
+        return (keep.map { tokenIds[$0] }, aligned(timestamps), aligned(confidences), aligned(tokenDurations))
+    }
+
     /// A token paired with the global encoder-frame index at which it was emitted.
     /// Used to make dedup matching temporally aware; `timestamp < 0` means "unknown".
     private struct TimedToken {

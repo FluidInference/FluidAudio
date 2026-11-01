@@ -284,7 +284,7 @@ struct ChunkProcessor {
     /// prefix twice. V2-family models keep the zero-padded final window.
     static func supportsSuppressedPrefix(_ version: AsrModelVersion?) -> Bool {
         switch version {
-        case .v3, .redux, .ultra, .phonon2, .tdtJa: return true
+        case .v3, .redux, .ultra, .phonon2, .phonon25, .bark3, .bark3Clean, .tdtJa: return true
         default: return false
         }
     }

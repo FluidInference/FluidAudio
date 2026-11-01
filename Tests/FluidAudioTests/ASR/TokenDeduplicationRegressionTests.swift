@@ -584,6 +584,83 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         XCTAssertNil(AsrManager.trailingWordStartIndex(pieces: []))
     }
 
+    /// A re-decoded apostrophe suffix glues the last word to a word a token
+    /// subscriber already holds as stable (`▁it` stable, then `'` `s`). The next
+    /// re-decode must retire only what lies past that stable prefix.
+    func testRedecodeWordStart_NeverCutsIntoThePublishedStablePrefix() {
+        let pieces = ["▁say", "▁it", "'", "s"]
+        XCTAssertEqual(AsrManager.trailingWordStartIndex(pieces: pieces), 1)
+        XCTAssertEqual(AsrManager.redecodeWordStart(pieces: pieces, stableTokenFloor: 0), 1)
+        XCTAssertEqual(AsrManager.redecodeWordStart(pieces: pieces, stableTokenFloor: 2), 2)
+        XCTAssertNil(
+            AsrManager.redecodeWordStart(pieces: pieces, stableTokenFloor: 4),
+            "an all-stable previous window has no word left to re-decode")
+        XCTAssertNil(AsrManager.redecodeWordStart(pieces: ["▁one", "word"], stableTokenFloor: 0))
+    }
+
+    /// With the stable floor the seam can start mid-word (`'` after a stable
+    /// `▁it`). Reconciliation may retire only tokens from that start onwards.
+    func testReconcileFinalWindowSeam_MidWordStartNeverRetiresTheStablePrefix() {
+        let previousPieces = ["▁say", "▁it", "'", "s"]
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4],
+            previousTimestamps: [10, 20, 25, 28],
+            trailingWordStart: 2,
+            currentTokens: [3, 4, 5],
+            currentTimestamps: [25, 28, 40],
+            currentPieces: ["'", "s", "▁now"],
+            previousPieces: previousPieces
+        )
+        XCTAssertLessThanOrEqual(seam.droppedPrevious, previousPieces.count - 2)
+        XCTAssertLessThan(seam.droppedCurrent, 3, "the new word after the seam is kept")
+    }
+
+    /// The floor splits `▁it ' s` after a stable `▁it`, and the re-decode emits the
+    /// whole word again. Its copy of `▁it` goes before reconciliation, so the
+    /// stable prefix is not repeated: `say it's now`, never `say it it's now`.
+    func testFullWordReemissionAcrossAMidWordFloorKeepsTheStablePrefixOnce() {
+        let previousTokens = [1, 2, 3, 4]
+        let previousTimestamps = [10, 20, 25, 28]
+        let previousPieces = ["▁say", "▁it", "'", "s"]
+        var currentTokens = [2, 3, 4, 5]
+        var currentTimestamps = [20, 25, 28, 40]
+        var currentPieces = ["▁it", "'", "s", "▁now"]
+        let flooredStart = AsrManager.redecodeWordStart(pieces: previousPieces, stableTokenFloor: 2)
+        XCTAssertEqual(flooredStart, 2)
+
+        let copy = AsrManager.reemittedStableWordHead(
+            previousTokens: previousTokens, previousTimestamps: previousTimestamps,
+            wordStart: 1, flooredStart: 2,
+            currentTokens: currentTokens, currentTimestamps: currentTimestamps)
+        XCTAssertEqual(copy, 1)
+        currentTokens.removeFirst(copy)
+        currentTimestamps.removeFirst(copy)
+        currentPieces.removeFirst(copy)
+
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: previousTokens, previousTimestamps: previousTimestamps,
+            trailingWordStart: 2, currentTokens: currentTokens, currentTimestamps: currentTimestamps,
+            currentPieces: currentPieces, previousPieces: previousPieces)
+        let merged =
+            Array(previousPieces.dropLast(seam.droppedPrevious))
+            + Array(currentPieces.dropFirst(seam.droppedCurrent))
+        XCTAssertEqual(merged, ["▁say", "▁it", "'", "s", "▁now"])
+        XCTAssertGreaterThanOrEqual(previousPieces.count - seam.droppedPrevious, 2, "the stable prefix stays")
+    }
+
+    /// Only an exact, in-place copy of the stable part is removed.
+    func testStableWordHeadNeedsTheSameTokensAtTheSameFrames() {
+        func head(_ tokens: [Int], _ frames: [Int], wordStart: Int = 1) -> Int {
+            AsrManager.reemittedStableWordHead(
+                previousTokens: [1, 2, 3, 4], previousTimestamps: [10, 20, 25, 28],
+                wordStart: wordStart, flooredStart: 2, currentTokens: tokens, currentTimestamps: frames)
+        }
+        XCTAssertEqual(head([2, 3], [20, 25]), 1)
+        XCTAssertEqual(head([9, 3], [20, 25]), 0, "a different word is new speech")
+        XCTAssertEqual(head([2, 3], [90, 95]), 0, "a later `it` is a real repetition")
+        XCTAssertEqual(head([2, 3], [20, 25], wordStart: 2), 0, "no split word, nothing to remove")
+    }
+
     /// Clip 03 of the #855 fixtures: previous `▁c ode ▁and ▁an`, re-decode
     /// `, ▁and ▁anal y z ing`. `an` is a strict prefix of `analyzing`: retire it;
     /// the seam comma and the re-emitted `and` (dup of the kept `and`@153) go.

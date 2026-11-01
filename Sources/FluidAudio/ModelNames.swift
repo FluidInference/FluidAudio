@@ -25,6 +25,19 @@ public enum Repo: String, CaseIterable, Sendable {
     /// five-value weights as a sparsity mask plus fp16 palettes (321 MB,
     /// iOS 18+). Loaded through `AsrModelVersion.phonon2`.
     case phonon2 = "FluidInference/phonon-2-coreml"
+    /// Phonon-2.5 multilingual, dense LUT3 encoder for CPU/GPU execution.
+    /// Published conversion and validation: FluidInference/mobius#113.
+    case phonon25 = "Muesli-HQ/phonon-2.5-coreml"
+    /// Underdog Bark 3.0 (Conway Research): post-training of parakeet-tdt-0.6b-v3
+    /// (via moondream/parakeet-ultra), English, verbatim. Same tokenizer, window and
+    /// decoder/joint contract as v3; the encoder keeps the checkpoint's exact
+    /// five-value weights as a sparsity mask plus palettes per 8 rows (399 MB,
+    /// iOS 18+). One repo with a folder per Bark model. Loaded through `AsrModelVersion.bark3`.
+    case bark3 = "FluidInference/bark-3.0-coreml/bark-3.0"
+    /// Underdog Bark 3.0 Clean: Bark 3.0 Plus trained to drop fillers, false starts
+    /// and repeated words. Same contract and encoder encoding as `.bark3` (410 MB).
+    /// Loaded through `AsrModelVersion.bark3Clean`.
+    case bark3Clean = "FluidInference/bark-3.0-coreml/bark-3.0-clean"
     case parakeetV2 = "FluidInference/parakeet-tdt-0.6b-v2-coreml"
     case parakeetCtc110m = "FluidInference/parakeet-ctc-110m-coreml"
     case parakeetCtc06b = "FluidInference/parakeet-ctc-0.6b-coreml"
@@ -32,6 +45,15 @@ public enum Repo: String, CaseIterable, Sendable {
     /// 3-stage: fp32 CPU preprocessor (waveform→560-d LFR feats) + fp16 ANE
     /// encoder+CTC (+ fp32 fallback) + host greedy-CTC decode. See ASR/SenseVoice.
     case senseVoiceSmall = "FluidInference/sensevoice-small-coreml"
+    /// Nemotron 3.5 Transcribe Lite — the ASR encoder + CTC timestamp head of NVIDIA's
+    /// Nemotron 3.5 Transcribe without its LLM: words with 40 ms start times.
+    /// See ASR/NemotronTranscribeLite.
+    case nemotron35TranscribeLite = "FluidInference/nemotron-3.5-transcribe-lite-coreml"
+    /// LFM3-Audio-2B (Liquid AI): one audio language model for ASR, live ASR and TTS.
+    /// Core ML build (int8 LM pack + fp16 encoder / depth decoder / codec). See ASR/LFM3Audio.
+    case lfm3Audio = "FluidInference/lfm3-audio-2b-coreml"
+    /// LFM3-Audio-2B Core AI build (`.aimodel`, macOS 27 / iOS 27). See ASR/LFM3Audio.
+    case lfm3AudioCoreAI = "FluidInference/lfm3-audio-2b-coreai"
     /// CAM++ speaker-embedding model (fbank80 -> 192-d) for speaker verification /
     /// diarization clustering. See Speaker/CampPlusEmbedder.
     case campPlus = "FluidInference/campplus-coreml"
@@ -55,6 +77,9 @@ public enum Repo: String, CaseIterable, Sendable {
     /// chunked-attention encoder re-run over a [left|chunk|right] window
     /// (stateless — no encoder caches). See ASR/Parakeet/Unified.
     case parakeetUnified = "FluidInference/parakeet-unified-en-0.6b-coreml"
+    /// nvidia/nemotron-labs-unified-asr-0.6b: multilingual (25 European languages) Unified FastConformer-RNNT with a
+    /// language-ID prompt. Bundles live in the repo's `coreml/` folder. See ASR/Parakeet/Unified.
+    case nemotronUnified = "FluidInference/nemotron-labs-unified-asr-0.6b-coreml/coreml"
     /// Multilingual streaming model. The HF repo is organized as
     /// `<lang>/<tier>ms/` subfolders (9 languages x 4 chunk tiers); the
     /// specific variant subdirectory is supplied dynamically at download
@@ -118,12 +143,17 @@ public enum Repo: String, CaseIterable, Sendable {
     /// Conversion lives in mobius (`models/tts/inflect-v2`).
     case inflectMicro = "FluidInference/inflect-v2-coreml/micro"
     case inflectNano = "FluidInference/inflect-v2-coreml/nano"
-    /// Paradee-8M (Kokoro-82M distilled to 8M, single voice). One repo with two
-    /// precision subdirectories (`int8/`, `fp32/`), each holding
+    /// Paradee-8M v1.0 (Kokoro-82M distilled to 8M, single voice). One repo with
+    /// two precision subdirectories (`int8/`, `fp32/`), each holding
     /// `ParadeeText.mlmodelc` + `ParadeeAcoustic.mlmodelc` + `vocab.json`.
-    /// Conversion notes are on the model card.
+    /// Conversion lives in mobius (`models/tts/paradee/coreml`).
     case paradeeInt8 = "FluidInference/paradee-8m-coreml/int8"
     case paradeeFp32 = "FluidInference/paradee-8m-coreml/fp32"
+    /// Paradee-8M v1.2: four voices (`af_heart`, `bf_isabella`, `am_puck`,
+    /// `bm_fable`) and the frame-rate decoder head from v1.1. Same repo,
+    /// `v1.2/<int8|fp32>/`, same file names, plus a `voice` input.
+    case paradeeV12Int8 = "FluidInference/paradee-8m-coreml/v1.2/int8"
+    case paradeeV12Fp32 = "FluidInference/paradee-8m-coreml/v1.2/fp32"
     /// Chatterbox Multilingual (ResembleAI, 23 languages, **beta**) — T3 Llama-520M
     /// AR speech-token generator (CFG batch 2, MLState KV decode) + S3Gen
     /// flow-matching mel decoder + HiFT vocoder. Repo root holds the
@@ -166,6 +196,10 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-ultra-coreml"
         case .phonon2:
             return "phonon-2-coreml"
+        case .phonon25:
+            return "phonon-2.5-coreml"
+        case .bark3, .bark3Clean:
+            return "bark-3.0-coreml"
         case .parakeetV2:
             return "parakeet-tdt-0.6b-v2-coreml"
         case .parakeetCtc110m:
@@ -174,6 +208,12 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-ctc-0.6b-coreml"
         case .senseVoiceSmall:
             return "sensevoice-small-coreml"
+        case .nemotron35TranscribeLite:
+            return "nemotron-3.5-transcribe-lite-coreml"
+        case .lfm3Audio:
+            return "lfm3-audio-2b-coreml"
+        case .lfm3AudioCoreAI:
+            return "lfm3-audio-2b-coreai"
         case .campPlus:
             return "campplus-coreml"
         case .fsmnVad:
@@ -226,6 +266,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "parakeet-tdt-ctc-110m-coreml"
         case .cohereTranscribeCoreml:
             return "cohere-transcribe-03-2026-coreml/q8"
+        case .nemotronUnified:
+            return "nemotron-labs-unified-asr-0.6b-coreml/coreml"
         case .canary1bV2:
             return "canary-1b-v2-coreml"
         case .styletts2:
@@ -242,6 +284,10 @@ public enum Repo: String, CaseIterable, Sendable {
             return "paradee-8m-coreml/int8"
         case .paradeeFp32:
             return "paradee-8m-coreml/fp32"
+        case .paradeeV12Int8:
+            return "paradee-8m-coreml/v1.2/int8"
+        case .paradeeV12Fp32:
+            return "paradee-8m-coreml/v1.2/fp32"
         }
     }
 
@@ -268,12 +314,18 @@ public enum Repo: String, CaseIterable, Sendable {
             return "FluidInference/parakeet-tdt-ctc-110m-coreml"
         case .cohereTranscribeCoreml:
             return "FluidInference/cohere-transcribe-03-2026-coreml"
+        case .nemotronUnified:
+            return "FluidInference/nemotron-labs-unified-asr-0.6b-coreml"
         case .styletts2:
             return "FluidInference/StyleTTS-2-coreml"
         case .inflectMicro, .inflectNano:
             return "FluidInference/inflect-v2-coreml"
-        case .paradeeInt8, .paradeeFp32:
+        case .paradeeInt8, .paradeeFp32, .paradeeV12Int8, .paradeeV12Fp32:
             return "FluidInference/paradee-8m-coreml"
+        case .bark3, .bark3Clean:
+            return "FluidInference/bark-3.0-coreml"
+        case .phonon25:
+            return rawValue
         default:
             return "FluidInference/\(name)"
         }
@@ -289,6 +341,8 @@ public enum Repo: String, CaseIterable, Sendable {
         switch self {
         case .diarizer:
             return "df2625ac79a7ac6b65ad868fee6d80f320da4232"
+        case .phonon25:
+            return "a042ef89966d289df295709b58ffdabb50bd2510"
         default:
             return "main"
         }
@@ -325,6 +379,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "optimized/dih3"
         case .cohereTranscribeCoreml:
             return "q8"
+        case .nemotronUnified:
+            return "coreml"
         case .styletts2:
             return "iteration_3/compiled"
         case .inflectMicro:
@@ -335,6 +391,14 @@ public enum Repo: String, CaseIterable, Sendable {
             return "int8"
         case .paradeeFp32:
             return "fp32"
+        case .bark3:
+            return "bark-3.0"
+        case .bark3Clean:
+            return "bark-3.0-clean"
+        case .paradeeV12Int8:
+            return "v1.2/int8"
+        case .paradeeV12Fp32:
+            return "v1.2/fp32"
         default:
             return nil
         }
@@ -410,6 +474,8 @@ public enum Repo: String, CaseIterable, Sendable {
             return "ls-eend/dih3"
         case .cohereTranscribeCoreml:
             return "cohere-transcribe/q8"
+        case .nemotronUnified:
+            return "nemotron-labs-unified-asr/coreml"
         case .styletts2:
             return "styletts2"
         case .supertonic3:
@@ -422,6 +488,15 @@ public enum Repo: String, CaseIterable, Sendable {
             return "paradee-8m-coreml/int8"
         case .paradeeFp32:
             return "paradee-8m-coreml/fp32"
+        // Single path component: AsrModels resolves `<parent>/<folderName>` from the cache directory.
+        case .bark3:
+            return "bark-3.0"
+        case .bark3Clean:
+            return "bark-3.0-clean"
+        case .paradeeV12Int8:
+            return "paradee-8m-coreml/v1.2/int8"
+        case .paradeeV12Fp32:
+            return "paradee-8m-coreml/v1.2/fp32"
         default:
             return name.replacingOccurrences(of: "-coreml", with: "")
         }
@@ -587,6 +662,88 @@ public enum ModelNames {
     ///   SenseVoiceSmall (fp16, ANE): features + lang/textnorm → CTC logits
     ///   SenseVoiceSmall_fp32 (fp32): encoder fallback for non-ANE hardware
     /// Plus `vocab.json` (25055 SentencePiece tokens, auto-fetched as a root file).
+    /// Nemotron 3.5 Transcribe Lite (`FluidInference/nemotron-3.5-transcribe-lite-coreml`).
+    /// Only the two models the windowed pipeline uses are fetched; the repo also holds
+    /// single-model `lite_ctc_*` packages and a Core AI export for other runtimes.
+    public enum NemotronTranscribeLite {
+        public static let encoder = "lite_encoder_w48"  // 48 s window: mel (1,128,4800) -> states (1,1280,600)
+        public static let ctcHead = "lite_ctc_head_w48"  // states (1,1280,600) -> token ids per 40 ms
+
+        public static let encoderFile = "coreml/" + encoder + ".mlmodelc"
+        public static let ctcHeadFile = "coreml/" + ctcHead + ".mlmodelc"
+        public static let vocabularyFile = "assets/vocab.json"
+        public static let melWindowFile = "assets/mel_window.bin"  // 400 f32le, from the checkpoint
+        public static let melFilterbankFile = "assets/mel_filterbank.bin"  // 128 x 257 f32le, from the checkpoint
+
+        public static let requiredModels: Set<String> = [
+            encoderFile, ctcHeadFile, vocabularyFile, melWindowFile, melFilterbankFile,
+        ]
+    }
+
+    /// LFM3-Audio-2B. Core ML repo layout: `coreml/` compiled models, `assets/` host tables + tokenizer.
+    public enum LFM3Audio {
+        /// Backbone pack stages (stateful multifunction: decode_q1, prefill_q256 / q64 / q16 / q13) and head.
+        public static let backboneStages = ["LFM3-A-C4160-int8b32", "LFM3-B-C4160-int8b32"]
+        public static let head = "LFM3-Head-int8b32"
+        /// Causal audio encoder (functions n12 / n96 / n375).
+        public static let encoder = "AudioEncoder-fp16"
+        /// MaskGIT depth decoder (functions depth_in, depth_pass) and LiquidCodec decoder (f1 / f4 / f25).
+        public static let depthDecoder = "DepthDecoder-fp16"
+        public static let codec = "CodecDecoder-fp16"
+
+        public static func compiledModelFile(_ name: String) -> String { "coreml/" + name + ".mlmodelc" }
+
+        public static let packConfigFile = "assets/config.json"
+        public static let tokenizerFile = "assets/tokenizer.json"
+        public static let embeddingFile = "assets/embed_tokens.f16.bin"  // [128000, 2048] fp16
+        public static let codebookFile = "assets/codebook_embedding.f16.bin"  // [24204, 2048] fp16
+        public static let depthTablesFile = "assets/depth_tables.f16.bin"  // [12, 2017, 1024] + mask row, fp16
+        public static let codecHeadFile = "assets/codec_head.f32.bin"  // lin_w, lin_b, window, fp32
+
+        /// The Core ML LM (not downloaded for the Core AI backend).
+        public static let languageModels: Set<String> = Set((backboneStages + [head]).map(compiledModelFile))
+        /// Audio encoder + host tables, used by both backends.
+        public static let sharedRecognitionModels: Set<String> = [
+            compiledModelFile(encoder), packConfigFile, tokenizerFile, embeddingFile,
+        ]
+        /// ASR and LiveASR.
+        public static let recognitionModels = languageModels.union(sharedRecognitionModels)
+        /// Codec + speech-frame tables (both backends).
+        public static let speechCodecModels: Set<String> = [compiledModelFile(codec), codebookFile, codecHeadFile]
+        /// TTS on top of recognition (Core ML depth decoder).
+        public static let speechModels = speechCodecModels.union([compiledModelFile(depthDecoder), depthTablesFile])
+        public static let requiredModels = recognitionModels.union(speechModels)
+
+        /// Download set per variant (`ModelHub` fetches exactly this set): `nil` = everything, `"recognition"` =
+        /// Core ML ASR / LiveASR, `"coreai"` = encoder, tables and codec for the Core AI backend (its LM and depth
+        /// decoder come from the Core AI repo), `"coreai-recognition"`.
+        public static func requiredModels(variant: String?) -> Set<String> {
+            switch variant {
+            case "recognition": return recognitionModels
+            case "coreai": return sharedRecognitionModels.union(speechCodecModels)
+            case "coreai-recognition": return sharedRecognitionModels
+            default: return requiredModels
+            }
+        }
+
+        /// Core AI repo (`FluidInference/lfm3-audio-2b-coreai`): the LM as a Core AI bundle in `coreai/`
+        /// (`inputs_embeds`; entrypoints prefill / main / hidden; uint8 block 32, decoder layers 20-23 fp16) and the
+        /// depth decoder (fused `depth_frame`: 3 MaskGIT passes + sampling in the graph).
+        public static let coreAILanguageModel = "LFM3-Audio-u8b32-f16L20-23"
+        public static let coreAIDepthDecoder = "DepthDecoder-fp16-gpu"
+        public static func coreAIBundleFile(_ name: String) -> String { "coreai/" + name + ".aimodel" }
+        /// A bundle's files (listed so a partial download is never taken for a complete bundle).
+        public static func coreAIBundleFiles(_ name: String) -> Set<String> {
+            Set(["main.mlirb", "main.hash", "metadata.json"].map { coreAIBundleFile(name) + "/" + $0 })
+        }
+        public static let coreAIRequiredModels = coreAIBundleFiles(coreAILanguageModel).union(
+            coreAIBundleFiles(coreAIDepthDecoder))
+        /// Core AI repo download set: `"recognition"` = the LM only, otherwise LM + depth decoder.
+        public static func coreAIRequiredModels(variant: String?) -> Set<String> {
+            variant == "recognition" ? coreAIBundleFiles(coreAILanguageModel) : coreAIRequiredModels
+        }
+    }
+
     public enum SenseVoice {
         public static let preprocessor = "SenseVoicePreprocessor"
         public static let encoder = "SenseVoiceSmall"  // fp16, runs on ANE (default)
@@ -844,6 +1001,20 @@ public enum ModelNames {
     /// One checkpoint, two encoder exports: chunked-attention streaming
     /// (default download) and full-attention offline 15 s window
     /// (variant "offline" — used for overlapping-batch long-form transcription).
+    /// nvidia/nemotron-labs-unified-asr-0.6b bundles (`coreml/` in the HF repo); names come from
+    /// `UnifiedModelFamily.nemotronMultilingual`.
+    public enum NemotronUnified {
+        public static func requiredModels(variant: String?) -> Set<String> {
+            let family = UnifiedModelFamily.nemotronMultilingual(.auto)
+            let precision: UnifiedEncoderPrecision = variant?.hasSuffix("fp16") == true ? .fp16 : .int8
+            var models: Set<String> = [family.decoderFile, family.jointDecisionFile, family.vocab, family.metadata]
+            if variant?.hasPrefix("offline") == true {
+                models.insert(family.offlineEncoderFile(precision: precision))
+            }
+            return models
+        }
+    }
+
     public enum ParakeetUnified {
         // Mel features are computed natively in Swift (`UnifiedMelExtractor` /
         // `AudioMelSpectrogram` + NeMo per_feature normalization), so the CoreML
@@ -1501,7 +1672,8 @@ public enum ModelNames {
     }
 
     /// Paradee-8M model names. File names match
-    /// `FluidInference/paradee-8m-coreml/<int8|fp32>/`.
+    /// `FluidInference/paradee-8m-coreml/<int8|fp32>/` (v1.0) and
+    /// `FluidInference/paradee-8m-coreml/v1.2/<int8|fp32>/`.
     public enum Paradee {
         public static let textFile = "ParadeeText.mlmodelc"
         public static let acousticFile = "ParadeeAcoustic.mlmodelc"
@@ -1841,7 +2013,7 @@ public enum ModelNames {
         case .parakeetV3:
             let precision = ParakeetEncoderPrecision(rawValue: variant ?? "") ?? .int8
             return ModelNames.ASR.requiredModelsV3(precision: precision)
-        case .parakeetRedux, .parakeetUltra, .phonon2:
+        case .parakeetRedux, .parakeetUltra, .phonon2, .phonon25, .bark3, .bark3Clean:
             // Single encoder build; no precision variants.
             return ModelNames.ASR.requiredModelsV3()
         case .parakeetV2:
@@ -1852,6 +2024,12 @@ public enum ModelNames {
             return ModelNames.CTC.requiredModels
         case .senseVoiceSmall:
             return ModelNames.SenseVoice.requiredModels(precision: variant)
+        case .nemotron35TranscribeLite:
+            return ModelNames.NemotronTranscribeLite.requiredModels
+        case .lfm3Audio:
+            return ModelNames.LFM3Audio.requiredModels(variant: variant)
+        case .lfm3AudioCoreAI:
+            return ModelNames.LFM3Audio.coreAIRequiredModels(variant: variant)
         case .campPlus:
             return ModelNames.CampPlus.requiredModels
         case .cuaS1Forms:
@@ -1869,6 +2047,9 @@ public enum ModelNames {
         case .parakeetUnified:
             // Variants: nil/"fp16" (streaming), "offline"/"offline-fp16" (batch).
             return ModelNames.ParakeetUnified.requiredModels(variant: variant)
+        case .nemotronUnified:
+            // Same variants as .parakeetUnified; the streaming encoder comes via additionalModelNames.
+            return ModelNames.NemotronUnified.requiredModels(variant: variant)
         case .diarizer:
             if variant == "offline" {
                 return ModelNames.OfflineDiarizer.requiredModels
@@ -1948,7 +2129,7 @@ public enum ModelNames {
             return ModelNames.LuxTts.requiredFiles(variant: variant)
         case .inflectMicro, .inflectNano:
             return ModelNames.Inflect.requiredModels
-        case .paradeeInt8, .paradeeFp32:
+        case .paradeeInt8, .paradeeFp32, .paradeeV12Int8, .paradeeV12Fp32:
             return ModelNames.Paradee.requiredModels
         }
     }

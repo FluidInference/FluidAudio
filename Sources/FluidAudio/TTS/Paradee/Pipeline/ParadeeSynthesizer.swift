@@ -11,8 +11,12 @@ import Foundation
 enum ParadeeSynthesizer {
 
     /// Synthesize one chunk of `[0, ...ids, 0]` tokens. Returns 24 kHz mono PCM.
+    ///
+    /// - Parameter voice: row of the v1.2 voice tables, fed to both graphs as
+    ///   `voice`; `nil` for v1.0, whose graphs have no voice input.
     static func synthesize(
         inputIds: [Int32],
+        voice: Int32?,
         speed: Float,
         noiseSeed: UInt64,
         text: MLModel,
@@ -27,7 +31,9 @@ enum ParadeeSynthesizer {
             throw ParadeeError.inputProcessingFailed("speed must be > 0, got \(speed)")
         }
 
-        let textOut = try predict(text, ["input_ids": try multiArray(inputIds, shape: [1, tokens])])
+        let voiceInput = try voice.map { ["voice": try multiArray([$0], shape: [1])] } ?? [:]
+        let textOut = try predict(
+            text, ["input_ids": try multiArray(inputIds, shape: [1, tokens])].merging(voiceInput) { $1 })
         let durations = try readChannelsByTime(textOut, "duration", channels: 1, time: tokens)
         let d = try readChannelsByTime(textOut, "d", channels: ParadeeConstants.prosodyChannels, time: tokens)
         let asrTok = try readChannelsByTime(
@@ -51,7 +57,7 @@ enum ParadeeSynthesizer {
                 "en": try multiArray(en, shape: [1, ParadeeConstants.prosodyChannels, frames]),
                 "asr": try multiArray(asr, shape: [1, ParadeeConstants.textChannels, frames]),
                 "noise": try multiArray(noise, shape: [1, 1, noise.count]),
-            ])
+            ].merging(voiceInput) { $1 })
         return try readChannelsByTime(acousticOut, "audio", channels: 1, time: noise.count)
     }
 

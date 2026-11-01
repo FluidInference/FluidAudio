@@ -1,5 +1,12 @@
 import Foundation
 
+/// An error from a `ModelHub.loadWithRecovery` `load` closure whose cause lies outside the downloaded files, such
+/// as the disk filling up while Core ML compiles. When `preservesModelCache` is true the cache is kept and the
+/// error rethrown; purging and re-downloading cannot fix it.
+public protocol ModelCachePreservingError: Error {
+    var preservesModelCache: Bool { get }
+}
+
 /// Errors thrown by the model-download stack: one merged, top-level error
 /// domain. Absorbs the two pre-0.16 nested enums — `DownloadUtils
 /// .HuggingFaceDownloadError` (the six download cases) and `DownloadUtils

@@ -988,6 +988,7 @@ public actor StreamingNemotronMultilingualAsrManager {
         // chunk, giving O(N²) cost for long files (3.6 GB shifted 51k times
         // for a 16h file).
         while (self.audioBuffer.count - self.audioBufferOffset) >= chunkSamples {
+            try Task.checkCancellation()
             let chunkStart = self.audioBufferOffset
             let chunkEnd = chunkStart + chunkSamples
             let chunk = Array(self.audioBuffer[chunkStart..<chunkEnd])
@@ -1017,6 +1018,8 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// final transcript text. The detected language is available via
     /// `detectedLanguage()` after this returns.
     public func finish() async throws -> String {
+        try Task.checkCancellation()
+
         let hasDecodePath =
             decoderJoint != nil || decoderJointNoEncProj != nil || decoderJointArgmax != nil
             || (decoder != nil && joint != nil)

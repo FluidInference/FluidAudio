@@ -179,9 +179,9 @@ on HuggingFace; sizes are for the English language pack.
 | `constants_bin/` | binary tensors | 144.2 MB | `v2/<lang>/constants_bin/` | Token embedding table, SentencePiece tokenizer, denormalize/quantize mean+std, per-voice prompts (`alba.safetensors`, etc.) |
 | `constants/` | metadata sidecar | 16.7 MB | `v2/<lang>/constants/` | Auxiliary constants referenced by `PocketTtsConstantsLoader` |
 
-`<lang>` is one of: `english`, `french_24l`, `german`, `german_24l`,
-`italian`, `italian_24l`, `portuguese`, `portuguese_24l`, `spanish`,
-`spanish_24l`.
+`<lang>` is the pack folder: `english_2026-10` (the default `english`), `english`
+(`english_2026-04`), `french_24l`, `german`, `german_24l`, `italian`, `italian_24l`,
+`portuguese`, `portuguese_24l`, `spanish`, `spanish_24l`.
 
 ### Totals (English, on disk)
 
@@ -264,12 +264,15 @@ PocketTtsSynthesizer.synthesize(text:voice:temperature:)
 
 ## Text Chunking
 
-Long text is split into chunks of <=50 tokens to fit the KV cache (512 positions, minus ~125 voice + ~25 overhead).
+Long text is split at sentence boundaries (`.!?`), and sentences are grouped into chunks of up to 50 tokens
+(`PocketTtsConstants.preferredTokensPerChunk`). A longer sentence stays whole as long as it fits the KV cache: the
+voice conditioning (about 125 positions for a shipped voice; a cloned voice uses its prompt length), its tokens and
+its estimated speech frames must fit in 512 positions (#938).
 
-Splitting priority:
-1. Sentence boundaries (`.!?`)
-2. Clause boundaries (`,;:`)
-3. Word boundaries (fallback)
+A sentence that does not fit is cut, and each cut restarts prosody, so cuts go where a speaker pauses anyway (#934):
+1. Clause punctuation: `, ; :`, an em dash, a spaced en dash or hyphen, an ellipsis, and the edges of a bracketed
+   aside. A bracket inside a word (`f(x)`) is not an aside.
+2. Word boundaries, as a fallback: the fewest parts that fit, balanced so no part is left as a short tail.
 
 `normalizeText()` also capitalizes, adds terminal punctuation, and pads short text with leading spaces for better prosody.
 
@@ -444,20 +447,28 @@ PocketTTS ships with multiple language packs converted from
 [kyutai/pocket-tts](https://huggingface.co/kyutai/pocket-tts). Pick the one
 that matches your input text — there is no automatic language detection.
 
-| ID | Layers | HF Path |
-|----|--------|---------|
-| `english` | 6 | repo root (legacy layout) |
-| `german` | 6 | `v2/german/` |
-| `german_24l` | 24 | `v2/german_24l/` |
-| `italian` | 6 | `v2/italian/` |
-| `italian_24l` | 24 | `v2/italian_24l/` |
-| `portuguese` | 6 | `v2/portuguese/` |
-| `portuguese_24l` | 24 | `v2/portuguese_24l/` |
-| `spanish` | 6 | `v2/spanish/` |
-| `spanish_24l` | 24 | `v2/spanish_24l/` |
-| `french_24l` | 24 | `v2/french_24l/` |
+| ID | Swift case | Layers | HF Path |
+|----|------------|--------|---------|
+| `english` | `.english` | 6 | `v2.1/english_2026-10/` |
+| `english_2026-04` | `.english2026Apr` | 6 | `v2.1/english/` |
+| `german` | `.german` | 6 | `v2.1/german/` |
+| `german_24l` | `.german24L` | 24 | `v2.1/german_24l/` |
+| `italian` | `.italian` | 6 | `v2.1/italian/` |
+| `italian_24l` | `.italian24L` | 24 | `v2.1/italian_24l/` |
+| `portuguese` | `.portuguese` | 6 | `v2.1/portuguese/` |
+| `portuguese_24l` | `.portuguese24L` | 24 | `v2.1/portuguese_24l/` |
+| `spanish` | `.spanish` | 6 | `v2.1/spanish/` |
+| `spanish_24l` | `.spanish24L` | 24 | `v2.1/spanish_24l/` |
+| `french_24l` | `.french24L` | 24 | `v2.1/french_24l/` |
 
 Notes:
+- `english` is Kyutai's current English model, `english_2026-10` (upstream's `english` id
+  serves the same weights). It reads sentence-final numbers and years, and defaults to
+  temperature 0.3, the value Kyutai's config sets for it ("human evals preferred this model
+  at 0.3"); pass `temperature:` to override. Every other pack defaults to 0.7
+  (`PocketTtsLanguage.defaultTemperature`).
+- `english_2026-04` is the English pack before #1087: same architecture and tokenizer, older
+  weights and voices. Apps that need the previous voice can pin `.english2026Apr`.
 - French only ships a 24-layer pack upstream (no 6-layer variant).
 - 24-layer packs are higher quality but slower and larger.
 - 26 voice names are shared across every language pack, but the underlying

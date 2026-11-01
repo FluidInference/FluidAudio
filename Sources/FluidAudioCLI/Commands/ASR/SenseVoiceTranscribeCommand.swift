@@ -11,6 +11,8 @@ enum SenseVoiceTranscribeCommand {
         var audioPath: String?
         var precision: SenseVoiceEncoderPrecision = .fp16
         var verbose = false
+        var showScores = false
+        var repeatCount: Int?
 
         var i = 0
         while i < arguments.count {
@@ -21,6 +23,13 @@ enum SenseVoiceTranscribeCommand {
                 precision = .fp32
             case "--verbose", "-v":
                 verbose = true
+            case "--scores":
+                showScores = true
+            case "--repeat":
+                if i + 1 < arguments.count, let n = Int(arguments[i + 1]), n > 0 {
+                    repeatCount = n
+                    i += 1
+                }
             case "--help", "-h":
                 printUsage()
                 return
@@ -45,12 +54,34 @@ enum SenseVoiceTranscribeCommand {
             logger.info("Loading SenseVoice models (encoder: \(precision.rawValue))...")
             let manager = try await SenseVoiceManager.load(precision: precision)
 
+            let samples = try AudioConverter(sampleRate: Double(SenseVoiceConfig.sampleRate))
+                .resampleAudioFile(audioURL)
             let start = Date()
-            let text = try await manager.transcribe(audioURL: audioURL)
+            var result = try await manager.transcribeDetailed(audio: samples)
             let elapsed = Date().timeIntervalSince(start)
-
             if verbose { logger.info("Transcribed in \(String(format: "%.2f", elapsed))s") }
-            print(text)
+            if let repeatCount {
+                // The first call above warms the model; time the next `repeatCount`.
+                let start = Date()
+                for _ in 0..<repeatCount { result = try await manager.transcribeDetailed(audio: samples) }
+                let average = Date().timeIntervalSince(start) / Double(repeatCount)
+                let audioSeconds = Double(samples.count) / Double(SenseVoiceConfig.sampleRate)
+                print(
+                    String(
+                        format: "Average %.1f ms per call over %d calls (RTFx %.0f)",
+                        average * 1000, repeatCount, audioSeconds / average))
+            }
+            print(result.text)
+            if showScores {
+                func line(_ name: String, _ scores: [SenseVoiceTagScore]) {
+                    let top = scores.prefix(4).map { "\($0.tag) \(String(format: "%.3f", $0.probability))" }
+                    print("\(name): \(top.joined(separator: ", "))")
+                }
+                print("tags: \(result.tags.joined(separator: " "))")
+                line("language", result.scores.language)
+                line("emotion", result.scores.emotion)
+                line("event", result.scores.event)
+            }
         } catch {
             logger.error("Transcription failed: \(error)")
         }
@@ -67,6 +98,8 @@ enum SenseVoiceTranscribeCommand {
               --int8        Use the int8 encoder (~half size, ANE, accuracy-neutral)
               --fp32        Use the fp32 encoder (for hardware without a Neural Engine)
               --verbose,-v  Print timing
+              --scores      Print language, emotion and audio-event probabilities
+              --repeat N    Warm up once, then time N transcriptions
               --help,-h     Show this help
             """
         )

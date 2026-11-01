@@ -220,8 +220,15 @@ public class ASRBenchmark {
         // Measure only inference time for accurate RTFx calculation
         let url = URL(fileURLWithPath: file.audioPath.path)
         var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
+        let silence = Int((config.leadingSilenceSeconds * 16000).rounded())
+        let padded = silence > 0 ? [Float](repeating: 0, count: silence) + audioSamples : nil
         let inferenceStartTime = Date()
-        let asrResult = try await asrManager.transcribe(url, decoderState: &decoderState)
+        let asrResult =
+            if let padded {
+                try await asrManager.transcribe(padded, decoderState: &decoderState)
+            } else {
+                try await asrManager.transcribe(url, decoderState: &decoderState)
+            }
         let processingTime = Date().timeIntervalSince(inferenceStartTime)
 
         let metrics = calculateASRMetrics(hypothesis: asrResult.text, reference: file.transcript)
@@ -655,6 +662,8 @@ extension ASRBenchmark {
         var modelVersion: AsrModelVersion = .v3  // Default to v3
         var melChunkContext: Bool?  // nil = auto (disabled on v3); see ASRConfig.melChunkContext
         var encoderComputeUnits: MLComputeUnits?  // nil = library default (ANE); see --encoder-compute-units
+        var localModelDir: String?  // compiled components loaded as-is via AsrModels.loadLocal
+        var leadingSilenceSeconds = 0.0
 
         // Check for help flag first
         if arguments.contains("--help") || arguments.contains("-h") {
@@ -721,14 +730,30 @@ extension ASRBenchmark {
                         modelVersion = .ultra
                     case "phonon2", "phonon-2":
                         modelVersion = .phonon2
+                    case "phonon25", "phonon-2.5":
+                        modelVersion = .phonon25
+                    case "bark3", "bark-3", "bark":
+                        modelVersion = .bark3
+                    case "bark3-clean", "bark-3-clean", "bark-clean":
+                        modelVersion = .bark3Clean
                     case "tdt-ctc-110m", "110m":
                         modelVersion = .tdtCtc110m
                     default:
                         logger.error(
-                            "Invalid model version: \(arguments[i + 1]). Use 'v2', 'v3', 'redux', 'ultra', 'phonon2', or 'tdt-ctc-110m'"
+                            "Invalid model version: \(arguments[i + 1]). Use 'v2', 'v3', 'redux', 'ultra', 'phonon2', 'phonon25', 'bark3', 'bark3-clean', or 'tdt-ctc-110m'"
                         )
                         exit(1)
                     }
+                    i += 1
+                }
+            case "--leading-silence":
+                if i + 1 < arguments.count, let seconds = Double(arguments[i + 1]), seconds >= 0 {
+                    leadingSilenceSeconds = seconds
+                    i += 1
+                }
+            case "--local-model-dir":
+                if i + 1 < arguments.count {
+                    localModelDir = arguments[i + 1]
                     i += 1
                 }
             case "--no-mel-context":
@@ -773,6 +798,9 @@ extension ASRBenchmark {
         case .redux: versionLabel = "redux"
         case .ultra: versionLabel = "ultra"
         case .phonon2: versionLabel = "phonon2"
+        case .phonon25: versionLabel = "phonon25"
+        case .bark3: versionLabel = "bark3"
+        case .bark3Clean: versionLabel = "bark3-clean"
         case .tdtCtc110m: versionLabel = "tdt-ctc-110m"
         case .tdtJa: versionLabel = "tdt-ja"
         }
@@ -795,7 +823,8 @@ extension ASRBenchmark {
             longAudioOnly: longAudioOnly,
             testStreaming: testStreaming,
             streamingChunkDuration: streamingChunkDuration,
-            useStreamingEou: useStreamingEou
+            useStreamingEou: useStreamingEou,
+            leadingSilenceSeconds: leadingSilenceSeconds
         )
 
         let benchmark = ASRBenchmark(config: config)
@@ -848,8 +877,15 @@ extension ASRBenchmark {
 
             logger.info("Initializing ASR system...")
             do {
-                let models = try await AsrModels.downloadAndLoad(
-                    version: modelVersion, encoderComputeUnits: encoderComputeUnits)
+                let models =
+                    if let localModelDir {
+                        try AsrModels.loadLocal(
+                            from: URL(fileURLWithPath: localModelDir), version: modelVersion,
+                            encoderComputeUnits: encoderComputeUnits)
+                    } else {
+                        try await AsrModels.downloadAndLoad(
+                            version: modelVersion, encoderComputeUnits: encoderComputeUnits)
+                    }
                 try await asrManager.loadModels(models)
                 logger.info("ASR system initialized successfully")
 
@@ -1069,7 +1105,10 @@ extension ASRBenchmark {
                 --max-files <number>       Maximum number of files to process (default: all)
                 --single-file <id>         Process only a specific file (e.g., 1089-134686-0011)
                 --output <file>            Output JSON file path (default: asr_benchmark_results.json)
-                --model-version <version>  ASR model version: v2, v3, or tdt-ctc-110m (default: v3)
+                --model-version <version>  ASR model version: v2, v3, redux, ultra, phonon2, phonon25, bark3,
+                                           bark3-clean, or tdt-ctc-110m (default: v3)
+                --local-model-dir <dir>    Load compiled components from <dir> as-is (no download)
+                --leading-silence <sec>    Prepend <sec> of silence to every file (default 0)
                 --debug                    Enable debug logging
                 --auto-download            Automatically download LibriSpeech dataset (default)
                 --no-auto-download         Disable automatic dataset download
@@ -1082,6 +1121,7 @@ extension ASRBenchmark {
                                            (default: disabled on v3, enabled otherwise)
                 --mel-context              Force-enable the mel-context prepend (v3 opt-in)
                 --encoder-compute-units <u> Encoder placement: ane (default), gpu (~+8% RTFx on Apple Silicon, WER-neutral), cpu, all
+                                           (phonon25: gpu (default) or cpu only)
                 --help, -h                Show this help message
 
             Description:
