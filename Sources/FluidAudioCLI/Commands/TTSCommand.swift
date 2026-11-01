@@ -86,7 +86,7 @@ public struct TTS {
         var pocketLanguage: PocketTtsLanguage = .english
         var pocketPlacement: PocketTtsModelPlacement = .gpu
         var pocketComputeUnits: PocketTtsComputeUnits = .default
-        var pocketTemperature: Float = PocketTtsConstants.temperature
+        var pocketTemperature: Float?
         // PocketTTS deterministic-seed mode (uses session API for fixed RNG).
         var pocketSeed: UInt64? = nil
         // PocketTTS small models (`--backend pocket-small --model 7m`).
@@ -854,7 +854,7 @@ public struct TTS {
         voiceData: PocketTtsVoiceData?,
         seed: UInt64,
         deEss: Bool,
-        temperature: Float
+        temperature: Float?
     ) async throws -> Data {
         logger.info("PocketTTS deterministic mode: seed=\(seed)")
         let session = try await makePocketSeededSession(
@@ -886,7 +886,7 @@ public struct TTS {
         voice: String,
         voiceData: PocketTtsVoiceData?,
         seed: UInt64,
-        temperature: Float
+        temperature: Float?
     ) async throws -> PocketTtsSession {
         if let voiceData = voiceData {
             return try await manager.makeSession(
@@ -961,7 +961,7 @@ public struct TTS {
         seed: UInt64? = nil,
         placement: PocketTtsModelPlacement = .gpu,
         computeUnits: PocketTtsComputeUnits = .default,
-        temperature: Float = PocketTtsConstants.temperature
+        temperature: Float? = nil
     ) async {
         do {
             let tStart = Date()
@@ -1836,7 +1836,7 @@ public struct TTS {
                                    portuguese, portuguese_24l, spanish, spanish_24l
                                    Note: French is 24-layer only (no 6-layer pack upstream)
               --seed N             Deterministic-mode seed (uses session API for fixed RNG)
-              --temperature T      Generation temperature (default 0.7)
+              --temperature T      Generation temperature (default: the pack's, 0.7; 0.3 for english_2026-10)
               --compute-units U    PocketTTS per-stage routing: default, no-ane (keep every
                                    stage off the Neural Engine, #881), all, cpu-gpu, cpu-ane, cpu-only
               --placement P        Model placement: gpu (default), ane (rank-4 ANE models),

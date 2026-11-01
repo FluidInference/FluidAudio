@@ -13,8 +13,12 @@ final class PocketTtsLanguageTests: XCTestCase {
     // MARK: - PocketTtsLanguage.repoSubdirectory
 
     func testAllLanguagesUseV21Subdirectory() {
-        // v2.1 optimized packs live under `v2.1/<rawValue>/` on the HF repo.
-        for lang in PocketTtsLanguage.allCases {
+        // v2.1 optimized packs live under `v2.1/<rawValue>/` on the HF repo, except
+        // English: `.english` follows upstream's alias to english_2026-10, and the
+        // April pack keeps the `v2.1/english/` folder it shipped in (#1087).
+        XCTAssertEqual(PocketTtsLanguage.english.repoSubdirectory, "v2.1/english_2026-10")
+        XCTAssertEqual(PocketTtsLanguage.english2026Apr.repoSubdirectory, "v2.1/english")
+        for lang in PocketTtsLanguage.allCases where !lang.isEnglish {
             XCTAssertEqual(
                 lang.repoSubdirectory, "v2.1/\(lang.rawValue)",
                 "Language \(lang.rawValue) does not follow v2.1/<rawValue> convention")
@@ -26,7 +30,7 @@ final class PocketTtsLanguageTests: XCTestCase {
     func testTransformerLayerCounts() {
         // 6L variants
         let sixLayer: [PocketTtsLanguage] = [
-            .english, .german, .italian, .portuguese, .spanish,
+            .english, .english2026Apr, .german, .italian, .portuguese, .spanish,
         ]
         for lang in sixLayer {
             XCTAssertEqual(
@@ -43,6 +47,40 @@ final class PocketTtsLanguageTests: XCTestCase {
                 lang.transformerLayers, 24,
                 "\(lang.rawValue) should be a 24-layer pack")
         }
+    }
+
+    // MARK: - English checkpoints (#1087)
+
+    func testEnglishPacks() {
+        XCTAssertEqual(PocketTtsLanguage(rawValue: "english"), .english)
+        XCTAssertEqual(PocketTtsLanguage(rawValue: "english_2026-04"), .english2026Apr)
+        for lang in [PocketTtsLanguage.english, .english2026Apr] {
+            XCTAssertTrue(lang.isEnglish)
+            XCTAssertEqual(
+                PocketTtsSynthesizer.abbreviations(for: lang),
+                PocketTtsSynthesizer.abbreviations(for: .german))
+            XCTAssertEqual(PocketTtsSynthesizer.normalizeForLanguage("« 3 h »", language: lang), "« 3 h »")
+        }
+        XCTAssertFalse(PocketTtsLanguage.german.isEnglish)
+    }
+
+    func testDefaultTemperatures() {
+        // Kyutai's english_2026-10 config sets default_temperature 0.3; every other pack keeps 0.7.
+        XCTAssertEqual(PocketTtsLanguage.english.defaultTemperature, 0.3)
+        for lang in PocketTtsLanguage.allCases where lang != .english {
+            XCTAssertEqual(
+                lang.defaultTemperature, PocketTtsConstants.temperature,
+                "\(lang.rawValue) should keep the 0.7 default")
+        }
+    }
+
+    func testPacksThatReprojectTheSharedEncoder() {
+        // `.english` shares the April codec but has its own speaker projection, so cloning
+        // with the shared encoder re-projects, like the 24-layer packs (#793, #1087).
+        XCTAssertTrue(PocketTtsLanguage.english.reprojectsSharedEncoder)
+        XCTAssertFalse(PocketTtsLanguage.english2026Apr.reprojectsSharedEncoder)
+        XCTAssertFalse(PocketTtsLanguage.german.reprojectsSharedEncoder)
+        XCTAssertTrue(PocketTtsLanguage.german24L.reprojectsSharedEncoder)
     }
 
     // MARK: - ModelNames.PocketTTS.requiredModels

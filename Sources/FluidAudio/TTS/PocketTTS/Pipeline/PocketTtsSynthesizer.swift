@@ -44,19 +44,21 @@ public struct PocketTtsSynthesizer {
     /// - Parameters:
     ///   - text: The text to synthesize.
     ///   - voice: Voice identifier (default: "alba").
-    ///   - temperature: Generation temperature (default: 0.7).
+    ///   - temperature: Generation temperature (default: the language pack's
+    ///     `defaultTemperature`, 0.7 for most packs and 0.3 for `.english`).
     ///   - seed: Random seed for reproducibility (nil for random).
     ///   - deEss: Whether to apply de-essing post-processing.
     /// - Returns: A synthesis result containing WAV audio data.
     public static func synthesize(
         text: String,
         voice: String = PocketTtsConstants.defaultVoice,
-        temperature: Float = PocketTtsConstants.temperature,
+        temperature: Float? = nil,
         seed: UInt64? = nil,
         deEss: Bool = true,
         maxTokensPerChunk: Int = PocketTtsConstants.maxTokensPerChunk,
         language: PocketTtsLanguage = .english
     ) async throws -> SynthesisResult {
+        let temperature = temperature ?? language.defaultTemperature
         let store = try currentModelStore()
         let voiceData = try await store.voiceData(for: voice)
         return try await synthesize(
@@ -77,19 +79,21 @@ public struct PocketTtsSynthesizer {
     /// - Parameters:
     ///   - text: The text to synthesize.
     ///   - voiceData: Voice conditioning data (e.g., from cloneVoice).
-    ///   - temperature: Generation temperature (default: 0.7).
+    ///   - temperature: Generation temperature (default: the language pack's
+    ///     `defaultTemperature`, 0.7 for most packs and 0.3 for `.english`).
     ///   - seed: Random seed for reproducibility (nil for random).
     ///   - deEss: Whether to apply de-essing post-processing.
     /// - Returns: A synthesis result containing WAV audio data.
     public static func synthesize(
         text: String,
         voiceData: PocketTtsVoiceData,
-        temperature: Float = PocketTtsConstants.temperature,
+        temperature: Float? = nil,
         seed: UInt64? = nil,
         deEss: Bool = true,
         maxTokensPerChunk: Int = PocketTtsConstants.maxTokensPerChunk,
         language: PocketTtsLanguage = .english
     ) async throws -> SynthesisResult {
+        let temperature = temperature ?? language.defaultTemperature
         logger.info("PocketTTS synthesizing with custom voice: '\(text)'")
         let genStart = Date()
 
@@ -169,7 +173,8 @@ public struct PocketTtsSynthesizer {
     /// - Parameters:
     ///   - text: The text to synthesize.
     ///   - voice: Voice identifier (default: "alba").
-    ///   - temperature: Generation temperature (default: 0.7).
+    ///   - temperature: Generation temperature (default: the language pack's
+    ///     `defaultTemperature`, 0.7 for most packs and 0.3 for `.english`).
     ///   - seed: Random seed for reproducibility (nil for random).
     /// - Returns: An `AsyncThrowingStream` of audio frames. Throws if a model
     ///   inference error occurs during generation.
@@ -184,11 +189,12 @@ public struct PocketTtsSynthesizer {
     public static func synthesizeStreaming(
         text: String,
         voice: String = PocketTtsConstants.defaultVoice,
-        temperature: Float = PocketTtsConstants.temperature,
+        temperature: Float? = nil,
         seed: UInt64? = nil,
         maxTokensPerChunk: Int = PocketTtsConstants.maxTokensPerChunk,
         language: PocketTtsLanguage = .english
     ) async throws -> AsyncThrowingStream<AudioFrame, Error> {
+        let temperature = temperature ?? language.defaultTemperature
         let store = try currentModelStore()
         let voiceData = try await store.voiceData(for: voice)
         return try await synthesizeStreaming(
@@ -208,18 +214,20 @@ public struct PocketTtsSynthesizer {
     /// - Parameters:
     ///   - text: The text to synthesize.
     ///   - voiceData: Voice conditioning data (e.g., from cloneVoice).
-    ///   - temperature: Generation temperature (default: 0.7).
+    ///   - temperature: Generation temperature (default: the language pack's
+    ///     `defaultTemperature`, 0.7 for most packs and 0.3 for `.english`).
     ///   - seed: Random seed for reproducibility (nil for random).
     /// - Returns: An `AsyncThrowingStream` of audio frames. Throws if a model
     ///   inference error occurs during generation.
     public static func synthesizeStreaming(
         text: String,
         voiceData: PocketTtsVoiceData,
-        temperature: Float = PocketTtsConstants.temperature,
+        temperature: Float? = nil,
         seed: UInt64? = nil,
         maxTokensPerChunk: Int = PocketTtsConstants.maxTokensPerChunk,
         language: PocketTtsLanguage = .english
     ) async throws -> AsyncThrowingStream<AudioFrame, Error> {
+        let temperature = temperature ?? language.defaultTemperature
         let store = try currentModelStore()
 
         logger.info("PocketTTS streaming synthesis with custom voice: '\(text)'")
@@ -303,10 +311,11 @@ public struct PocketTtsSynthesizer {
     /// Must be called within a `withModelStore` context.
     static func makeSession(
         voiceData: PocketTtsVoiceData,
-        temperature: Float = PocketTtsConstants.temperature,
+        temperature: Float? = nil,
         seed: UInt64? = nil,
         language: PocketTtsLanguage = .english
     ) async throws -> PocketTtsSession {
+        let temperature = temperature ?? language.defaultTemperature
         let store = try currentModelStore()
 
         // `.aneState` sessions run on the Trial 23 MLState pipeline; none of
@@ -807,7 +816,7 @@ public struct PocketTtsSynthesizer {
         _ text: String, language: PocketTtsLanguage
     ) -> String {
         switch language {
-        case .english, .german, .german24L, .italian, .italian24L,
+        case .english, .english2026Apr, .german, .german24L, .italian, .italian24L,
             .portuguese, .portuguese24L, .spanish, .spanish24L:
             return text
         case .french24L:
@@ -1324,7 +1333,7 @@ public struct PocketTtsSynthesizer {
         switch language {
         case .french24L:
             return frenchAbbreviations
-        case .english, .german, .german24L, .italian, .italian24L,
+        case .english, .english2026Apr, .german, .german24L, .italian, .italian24L,
             .portuguese, .portuguese24L, .spanish, .spanish24L:
             return abbreviations
         }

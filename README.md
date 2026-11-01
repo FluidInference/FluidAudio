@@ -662,7 +662,8 @@ FluidAudio ships two TTS backends:
 ### PocketTTS
 
 Streaming-friendly TTS with voice cloning support from short audio samples.
-Available language packs: `english` (default), `german`, `german_24l`,
+Available language packs: `english` (default, Kyutai's current `english_2026-10`),
+`english_2026-04` (the previous English pack), `german`, `german_24l`,
 `italian`, `italian_24l`, `portuguese`, `portuguese_24l`, `spanish`,
 `spanish_24l`, `french_24l` (24-layer only — no 6-layer French upstream).
 
