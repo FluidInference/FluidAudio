@@ -217,8 +217,8 @@ public struct OfflineDiarizerConfig: Sendable {
 
         /// When true, output segments are made non-overlapping by trimming later segments
         /// so that only one speaker is active at any given time: a segment that starts while an
-        /// earlier one is still active starts when that one ends, and is dropped if what is left is
-        /// shorter than `Embedding.minSegmentDurationSeconds`.
+        /// earlier one is still active starts when that one ends, and is dropped if nothing, or less
+        /// than `Embedding.minSegmentDurationSeconds`, is left.
         /// Use it when every instant needs a single speaker, for example to attribute ASR words.
         ///
         /// Defaults to false, which keeps overlapping speech like pyannote community-1's main

@@ -4,7 +4,7 @@ Hardware: 2024 MacBook Pro, 48GB RAM, M4 Pro, macOS Tahoe 26.0
 
 Dataset: AMI SDM (Single Distant Microphone), 4-meeting subset — one session per speaker group for diversity.
 
-All results use collar=0.25s, ignoreOverlap=true. That scorer drops overlapped reference speech and does not count an extra output speaker as a false alarm, so it cannot measure overlap handling, and its numbers are not comparable with pyannote's published DER (no collar, overlap scored). See [Benchmarks.md](../Benchmarks.md#offline-diarization-pipeline) for the offline pipeline under that protocol.
+All results use collar=0.25s, ignoreOverlap=true.
 
 ## Summary
 
@@ -19,7 +19,7 @@ All results use collar=0.25s, ignoreOverlap=true. That scorer drops overlapped r
 
 Pyannote segmentation + WeSpeaker embeddings + PLDA scoring + VBx clustering.
 
-Default configuration: step ratio 0.2, minSegmentDurationSeconds 1.0, clustering threshold 0.7. Measured before #1049, with `exclusiveSegments: true` (one speaker at a time); the default now keeps overlapping speech.
+Default configuration: step ratio 0.2, minSegmentDurationSeconds 1.0, clustering threshold 0.7. Measured before #1049, with `exclusiveSegments: true` (one speaker at a time); the default now keeps overlapping speech. This row's scorer (`DiarizationMetricsCalculator`) skips overlapped reference speech and never charges an extra output speaker, so it cannot penalize overlapping output, and its DER is not comparable with pyannote's published numbers (no collar, overlap scored). See [Benchmarks.md](../Benchmarks.md#offline-diarization-pipeline) for the offline pipeline under that protocol.
 
 ```bash
 Scripts/diarizer_subset_benchmark.sh
