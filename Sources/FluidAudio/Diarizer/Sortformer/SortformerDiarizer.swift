@@ -512,7 +512,9 @@ public final class SortformerDiarizer: Diarizer {
         return try _timeline.addChunk(chunk)
     }
 
-    private func makeStreamingChunkLocked() throws -> DiarizerChunkResult? {
+    /// - Parameter isFinal: Whether no more audio will arrive, so the final chunks may take whatever
+    ///   right context is left instead of waiting for a full one.
+    private func makeStreamingChunkLocked(isFinal: Bool = false) throws -> DiarizerChunkResult? {
         guard let models = _models else {
             throw SortformerError.notInitialized
         }
@@ -523,7 +525,8 @@ public final class SortformerDiarizer: Diarizer {
         var newTentativeFrameCount = 0
 
         // Step 1: Run preprocessor on available audio
-        while let (chunkFeatures, chunkLengths) = getNextChunkFeaturesLocked() {
+        while let next = getNextChunkFeaturesLocked(isFinal: isFinal) {
+            let (chunkFeatures, chunkLengths, leftOffset, rightOffset) = next
             // Cooperative cancellation: throws `CancellationError` if the enclosing Swift
             // `Task` was cancelled, before the next (expensive) inference call.
             try Task.checkCancellation()
@@ -546,13 +549,13 @@ public final class SortformerDiarizer: Diarizer {
             let embLength = output.chunkLength
             let chunkEmbs = Array(output.chunkEmbeddings.prefix(embLength * config.preEncoderDims))
 
-            // Update state with correct context values
+            // Update state with correct context values (the final chunks can have less right context)
             let updateResult = try stateUpdater.streamingUpdate(
                 state: &_state,
                 chunk: chunkEmbs,
                 preds: probabilities,
-                leftContext: diarizerChunkIndex > 0 ? config.chunkLeftContext : 0,
-                rightContext: config.chunkRightContext
+                leftContext: (leftOffset + config.subsamplingFactor / 2) / config.subsamplingFactor,
+                rightContext: (rightOffset + config.subsamplingFactor - 1) / config.subsamplingFactor
             )
 
             // Accumulate confirmed results
@@ -580,10 +583,11 @@ public final class SortformerDiarizer: Diarizer {
 
     /// Finalize the current streaming session.
     ///
-    /// Drains any remaining full-right-context chunks from the audio buffer
-    /// (matching offline mode's `SortformerFeatureLoader` gate), then absorbs
-    /// the trailing tentative predictions into the timeline as finalized —
-    /// equivalent to offline `rebuild(... isComplete: true)`.
+    /// Drains the remaining audio, giving the final chunks whatever right
+    /// context is left (matching offline mode's `SortformerFeatureLoader`), so
+    /// every frame gets a prediction, then absorbs any trailing tentative
+    /// predictions into the timeline as finalized — equivalent to offline
+    /// `rebuild(... isComplete: true)`.
     ///
     /// Idempotent: subsequent calls return `nil`.
     ///
@@ -599,12 +603,13 @@ public final class SortformerDiarizer: Diarizer {
             guard !_finalized else { return nil }
 
             // Emit the trailing mel frames (whose windows overlap the batch
-            // right pad), then drain every remaining full-rc chunk.
+            // right pad), then drain every remaining chunk, down to the last
+            // partial one.
             var aggFinalized: [Float] = []
             var aggTentative: [Float] = []
             var didDrain = false
             padAndEmitRemainingMelLocked()
-            while let chunk = try makeStreamingChunkLocked() {
+            while let chunk = try makeStreamingChunkLocked(isFinal: true) {
                 aggFinalized.append(contentsOf: chunk.finalizedPredictions)
                 aggTentative = chunk.tentativePredictions
                 _numFramesProcessed += chunk.finalizedFrameCount
@@ -916,10 +921,10 @@ public final class SortformerDiarizer: Diarizer {
     }
 
     /// Get next chunk features (for testing)
-    internal func getNextChunkFeatures() -> (mel: [Float], melLength: Int)? {
+    internal func getNextChunkFeatures(isFinal: Bool = false) -> (mel: [Float], melLength: Int)? {
         lock.lock()
         defer { lock.unlock() }
-        return getNextChunkFeaturesLocked()
+        return getNextChunkFeaturesLocked(isFinal: isFinal).map { ($0.mel, $0.melLength) }
     }
 
     /// Emit the trailing mel frames as `finalizeSession` would, without
@@ -931,7 +936,12 @@ public final class SortformerDiarizer: Diarizer {
     }
 
     /// Get next chunk features - caller must hold lock
-    private func getNextChunkFeaturesLocked() -> (mel: [Float], melLength: Int)? {
+    ///
+    /// - Parameter isFinal: Whether the session is being finalized: the mel stream is complete, so the
+    ///   final chunks take whatever right context is left (offline `SortformerFeatureLoader` chunking).
+    private func getNextChunkFeaturesLocked(
+        isFinal: Bool = false
+    ) -> (mel: [Float], melLength: Int, leftOffset: Int, rightOffset: Int)? {
         let featLength = featureBuffer.count / config.melFeatures
         let coreFrames = config.chunkLen * config.subsamplingFactor
         let leftContextFrames = config.chunkLeftContext * config.subsamplingFactor
@@ -943,17 +953,18 @@ public final class SortformerDiarizer: Diarizer {
         // Need at least one core frame
         guard endFeat > startFeat else { return nil }
 
-        // Ensure we have the full chunk context (Core + RC)
-        // This prevents issuing chunks too early with zero right context.
+        // While audio can still arrive, wait for the full chunk context (Core + RC)
+        // so chunks aren't issued too early with less right context.
         // Alignment:
         // Chunk 0: startFeat=0. Need 48+56=104 frames. (Returns 104 frames). Matches Batch.
         // Chunk 1: startFeat=8. Need 56+56=112 frames (relative). (Returns 112 frames).
-        guard endFeat + rightContextFrames <= featLength else { return nil }
+        // When finalizing, the final chunks take whatever right context is left, like offline
+        // mode, so the tail isn't dropped.
+        guard isFinal || endFeat + rightContextFrames <= featLength else { return nil }
 
         // Calculate offsets
         let leftOffset = min(leftContextFrames, startFeat)
-        // Since we guarded above, we know we have full right context
-        let rightOffset = rightContextFrames
+        let rightOffset = min(rightContextFrames, featLength - endFeat)
 
         // Extract chunk with context
         let chunkStartFrame = startFeat - leftOffset
@@ -976,7 +987,7 @@ public final class SortformerDiarizer: Diarizer {
             startFeat -= framesToRemove
         }
 
-        return (mel, chunkLength)
+        return (mel, chunkLength, leftOffset, rightOffset)
     }
 }
 #endif
