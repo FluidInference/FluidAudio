@@ -1248,8 +1248,8 @@ enum TranscribeCommand {
                                                script; Latin languages decode alike, except fr (#1063)
                 --custom-vocab <file>          Apply vocabulary boosting in batch mode
                 --no-mel-context               Disable 80ms mel-context prepend for long-form batch ASR
-                                               (default: disabled on v3, enabled otherwise)
-                --mel-context                  Force-enable the mel-context prepend (v3 opt-in)
+                                               (default: disabled on v3 and tdt-ja, enabled otherwise)
+                --mel-context                  Force-enable the mel-context prepend (v3/tdt-ja opt-in)
                 --dual-decode-arbitration      Enable v3/no-mel long-form boundary arbitration
                 --no-seam-gap-repair           Skip the post-merge re-decode of chunk-seam gaps (#758)
                 --no-seam-timing-realignment   Keep the left window's timing for seam tokens (pre-fix timings)

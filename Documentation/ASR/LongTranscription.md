@@ -71,8 +71,9 @@ phrase at the wrong point.
 
 | Path | Enabled by | Scope | Purpose |
 |---|---|---|---|
-| Mel-context | `ASRConfig.melChunkContext = true`, CLI `--mel-context` (default for non-v3 models) | Batch TDT long audio | Preserves the existing 80 ms left-context behavior for non-first chunks. |
+| Mel-context | `ASRConfig.melChunkContext = true`, CLI `--mel-context` (default for models other than v3 and tdtJa) | Batch TDT long audio | Preserves the existing 80 ms left-context behavior for non-first chunks. |
 | v3 no-mel | Default for v3 (`melChunkContext = nil`); explicit via `ASRConfig.melChunkContext = false`, CLI `--no-mel-context` | Parakeet TDT v3 batch long audio | Avoids the v3 multilingual drift introduced by prepending mel context at chunk boundaries (#594), and — via silence-aligned chunk starts — the quiet-speech drops near long mid-file silence runs (#803). |
+| tdtJa no-mel | Default for tdtJa (`melChunkContext = nil`); explicit via `ASRConfig.melChunkContext = false`, CLI `--no-mel-context` | Japanese TDT batch long audio | Fixed-stride chunk starts without the mel prepend, which loses text at Japanese long-form seams (#1031). |
 | v3 dual-decode arbitration | `ASRConfig.dualDecodeArbitration = true` on the v3 no-mel path, CLI `--dual-decode-arbitration` | Parakeet TDT v3 no-mel batch long audio | Opt-in quality mode for files where one boundary strategy is clearly safer than another. |
 | Parallel chunk workers | `ASRConfig.parallelChunkConcurrency` (default `4`, clamped to `>= 1`) | Stateless chunked batch TDT (all of the above) | Decodes independent chunks concurrently across a worker pool of cloned `AsrManager` instances. |
 | Post-merge repair pass | `ASRConfig.seamGapRepair = true` (default), CLI `--no-seam-gap-repair` | Multi-chunk batch TDT (all of the above) | Re-decodes suspicious inter-token gaps with fresh seam-free windows, splicing recovered tokens in. See "Post-Merge Repair Pass". |
@@ -714,6 +715,10 @@ window:
 - A gap inside a word — between the pieces of "1929" spoken as "mille
   novecento … ventinove", or before a lone apostrophe — is skipped: there
   is nothing to splice there.
+- Without word boundaries (`tdtJa`'s unspaced vocabulary) a gap inside a
+  word can't be told apart, and the short-window probes spliced re-heard
+  neighbour text back in ("モデルモデル"). Those vocabularies probe only gaps
+  of 1.5 s or more, whatever `seamGapRepairMinGapSeconds` says (#1031).
 - Only words inside the gap are spliced in (`spliceCandidate`), starting at
   a word-initial piece (same rule as the seam merge, #683; except `tdtJa`,
   where the guard is off). A word the gap end cuts through ("Dicev" |

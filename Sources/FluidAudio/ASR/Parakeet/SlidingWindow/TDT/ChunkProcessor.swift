@@ -1831,6 +1831,21 @@ struct ChunkProcessor {
     }
     #endif
 
+    /// The smallest inter-token gap, in encoder frames, a repair probe looks
+    /// at. The rules for gaps shorter than `seamGapFullWindowMinGapSeconds`
+    /// (skip a gap inside a word, complete a word the gap end cuts through,
+    /// drop re-heard bordering words) need word boundaries. Without a word
+    /// guard (`spliceSafeTokenIds == nil`: tdtJa's unspaced vocabulary, or
+    /// none) every piece counts as a word, and short-gap probes splice
+    /// re-heard neighbour text back in ("モデルモデル", issue #1031), so those
+    /// vocabularies probe only the longer gaps.
+    static func seamGapMinGapFrames(minGapSeconds: Double, spliceSafeTokenIds: Set<Int>?) -> Int {
+        let frameDuration = ASRConstants.secondsPerEncoderFrame
+        let minGapFrames = max(2, Int(minGapSeconds / frameDuration))
+        guard spliceSafeTokenIds == nil else { return minGapFrames }
+        return max(minGapFrames, Int(seamGapFullWindowMinGapSeconds / frameDuration))
+    }
+
     /// The window placements a gap probe tries, in order, as (start sample,
     /// length) before clamping to the audio. A multi-second gap (the
     /// seam-drop class this pass was built for) gets the full-length
@@ -1888,7 +1903,8 @@ struct ChunkProcessor {
     ) async throws -> [TokenWindow] {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
         let frameDuration = ASRConstants.secondsPerEncoderFrame
-        let minGapFrames = max(2, Int(minGapSeconds / frameDuration))
+        let minGapFrames = Self.seamGapMinGapFrames(
+            minGapSeconds: minGapSeconds, spliceSafeTokenIds: spliceSafeTokenIds)
         let fullWindowMinGapFrames = Int(Self.seamGapFullWindowMinGapSeconds / frameDuration)
         // Same frame-aligned usable window size the chunker uses (no context
         // reservation — the repair window is decoded standalone). With a
