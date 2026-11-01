@@ -12,7 +12,7 @@ enum SenseVoiceTranscribeCommand {
         var precision: SenseVoiceEncoderPrecision = .fp16
         var verbose = false
         var showScores = false
-        var repeatCount = 1
+        var repeatCount: Int?
 
         var i = 0
         while i < arguments.count {
@@ -56,9 +56,12 @@ enum SenseVoiceTranscribeCommand {
 
             let samples = try AudioConverter(sampleRate: Double(SenseVoiceConfig.sampleRate))
                 .resampleAudioFile(audioURL)
+            let start = Date()
             var result = try await manager.transcribeDetailed(audio: samples)
-            if repeatCount > 1 {
-                // The first call above warms the model; time the rest.
+            let elapsed = Date().timeIntervalSince(start)
+            if verbose { logger.info("Transcribed in \(String(format: "%.2f", elapsed))s") }
+            if let repeatCount {
+                // The first call above warms the model; time the next `repeatCount`.
                 let start = Date()
                 for _ in 0..<repeatCount { result = try await manager.transcribeDetailed(audio: samples) }
                 let average = Date().timeIntervalSince(start) / Double(repeatCount)
