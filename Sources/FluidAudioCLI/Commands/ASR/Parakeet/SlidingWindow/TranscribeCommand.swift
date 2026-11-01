@@ -1244,7 +1244,8 @@ enum TranscribeCommand {
                 --local-model-dir <path>       Exact compiled model directory; never downloads
                 --encoder-precision <int8|int8-v2|int4> Encoder quantization (default: int8;
                                                int8-v2 = int8-linear rebuild, avoids #760)
-                --language <code>              Language hint (e.g., en, de, fr, es)
+                --language <code>              Script hint (e.g., en, de, fr, es): keeps v3 to the language's
+                                               script; Latin languages decode alike, except fr (#1063)
                 --custom-vocab <file>          Apply vocabulary boosting in batch mode
                 --no-mel-context               Disable 80ms mel-context prepend for long-form batch ASR
                                                (default: disabled on v3, enabled otherwise)
