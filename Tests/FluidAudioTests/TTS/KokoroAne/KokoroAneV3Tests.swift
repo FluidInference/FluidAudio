@@ -43,6 +43,22 @@ final class KokoroAneV3Tests: XCTestCase {
         XCTAssertFalse(loaded)
     }
 
+    // #1103: a Metal-free routing (the OS 27 default) skips the fast vocoder,
+    // whose SourceGenerator only pays off on the GPU, and never fetches its assets.
+    func testMetalFreeRoutingSkipsFastVocoderAndItsAssets() {
+        XCTAssertTrue(KokoroAneV3Pipeline.usesFastVocoder(.aneTailGpu))
+        XCTAssertFalse(KokoroAneV3Pipeline.usesFastVocoder(.aneTailCpu))
+        for path in [
+            "decoder/KokoroDecoderPre_120.mlpackage/Manifest.json",
+            "fast/KokoroSourceGenerator.mlpackage/Manifest.json", "fast/native-source.json",
+        ] {
+            XCTAssertTrue(KokoroAneV3Assets.isFastVocoderFile(path), path)
+        }
+        for path in ["fast/KokoroAlbert_32.mlpackage/Manifest.json", "vocab.json", "af_heart.bin"] {
+            XCTAssertFalse(KokoroAneV3Assets.isFastVocoderFile(path), path)
+        }
+    }
+
     func testIntegrityRejectsChangedOrTruncatedContent() {
         // Standard SHA-256 test vector, independent of the implementation.
         let file = KokoroAneV3Assets.File(
@@ -145,7 +161,7 @@ final class KokoroAneV3Tests: XCTestCase {
             ProcessInfo.processInfo.environment["FLUIDAUDIO_RUN_KOKORO_V3"] == "1",
             "Explicitly enable the bounded real-model integration check")
         let directory = ProcessInfo.processInfo.environment["KOKORO_V3_TEST_CACHE"].map { URL(fileURLWithPath: $0) }
-        let english = KokoroAneManager(directory: directory, version: .v3)
+        let english = KokoroAneManager(directory: directory, computeUnits: Self.routing, version: .v3)
         let hello = "həlˈoʊ wˈɜːld"
         let fox = "ðə kwɪk bɹaʊn fɑːks dʒʌmps oʊvɚ ðə leɪzi dɑːɡ."
         var parts: [KokoroAneSynthesisResult] = []
@@ -218,7 +234,8 @@ final class KokoroAneV3Tests: XCTestCase {
         try check(try await english.synthesizeDetailed(text: "Hello world."), fast: true)
         await english.cleanup()
 
-        let japanese = KokoroAneManager(variant: .japanese, directory: directory, version: .v3)
+        let japanese = KokoroAneManager(
+            variant: .japanese, directory: directory, computeUnits: Self.routing, version: .v3)
         let ja = "koɲɲiʨiβa, sekai."
         try check(try await japanese.synthesizeFromPhonemesDetailed(ja), fast: true)
         try check(try await japanese.synthesizeFromPhonemesDetailed(ja, voice: "jm_kumo"), fast: true)
@@ -228,7 +245,8 @@ final class KokoroAneV3Tests: XCTestCase {
         XCTAssertEqual(japaneseText.normalizedText, "こんにちは、世界。")
         await japanese.cleanup()
 
-        let mandarin = KokoroAneManager(variant: .mandarin, directory: directory, version: .v3)
+        let mandarin = KokoroAneManager(
+            variant: .mandarin, directory: directory, computeUnits: Self.routing, version: .v3)
         let zh = "ㄋㄧ2ㄏㄠ3/ㄕ十4ㄐㄝ4."
         try check(try await mandarin.synthesizeFromPhonemesDetailed(zh), fast: true)
         try check(try await mandarin.synthesizeFromPhonemesDetailed(zh, voice: "zm_010"), fast: true)
@@ -241,7 +259,21 @@ final class KokoroAneV3Tests: XCTestCase {
         await mandarin.cleanup()
     }
 
+    /// The real-model test runs the OS default routing. Set
+    /// `KOKORO_V3_TEST_UNITS=aneTailGpu` or `aneTailCpu` to run the other one;
+    /// the GPU route aborts on some macOS 27.0.1 Macs (#1103).
+    private static var routing: KokoroAneComputeUnits {
+        switch ProcessInfo.processInfo.environment["KOKORO_V3_TEST_UNITS"] {
+        case "aneTailGpu": return .aneTailGpu
+        case "aneTailCpu": return .aneTailCpu
+        default: return .default
+        }
+    }
+
+    /// `fast`: the request fits a decoder bucket. The fast vocoder runs only
+    /// when the routing also allows it.
     private func check(_ result: KokoroAneSynthesisResult, fast: Bool) throws {
+        let fast = fast && KokoroAneV3Pipeline.usesFastVocoder(Self.routing)
         XCTAssertEqual(result.inputIds.count, result.encoderTokens)
         XCTAssertEqual(result.predictedDurations.count, result.inputIds.count)
         XCTAssertEqual(result.predictedDurations.reduce(0) { $0 + Int($1) }, result.acousticFrames)

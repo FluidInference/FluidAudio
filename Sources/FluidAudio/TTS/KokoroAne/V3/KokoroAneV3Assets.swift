@@ -154,7 +154,15 @@ enum KokoroAneV3Assets {
         try bytes.write(to: target, options: .atomic)
     }
 
-    static func selectedFiles(_ manifest: Manifest) throws -> [File] {
+    /// Assets only the fast vocoder uses: the masked decoder buckets, the
+    /// SourceGenerator package and its native-source parameters. A Metal-free
+    /// routing never loads them (#1103), so it neither fetches nor re-hashes them.
+    static func isFastVocoderFile(_ path: String) -> Bool {
+        path.hasPrefix("decoder/") || path.hasPrefix("fast/KokoroSourceGenerator.mlpackage/")
+            || path == "fast/native-source.json"
+    }
+
+    static func selectedFiles(_ manifest: Manifest, fastVocoder: Bool) throws -> [File] {
         guard manifest.schemaVersion == 1 else { throw KokoroAneError.downloadFailed("Unsupported v3 manifest") }
         for file in manifest.files { try validatePath(file.path) }
         let selected = manifest.files.filter {
@@ -170,10 +178,10 @@ enum KokoroAneV3Assets {
             selected.contains(where: { $0.path == "fast/native-source.json" }),
             packages.allSatisfy({ name in selected.contains(where: { $0.path == name + ".mlpackage/Manifest.json" }) })
         else { throw KokoroAneError.downloadFailed("Incomplete v3 manifest") }
-        return selected
+        return fastVocoder ? selected : selected.filter { !isFastVocoderFile($0.path) }
     }
 
-    static func ensure(variant: KokoroAneVariant, directory: URL?) async throws -> URL {
+    static func ensure(variant: KokoroAneVariant, directory: URL?, fastVocoder: Bool) async throws -> URL {
         try validateVariant(variant)
         let root = try cacheDirectory(variant: variant, directory: directory)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -198,7 +206,7 @@ enum KokoroAneV3Assets {
             manifest.base.directory == (variant == .mandarin ? "ANE-zh" : "ANE"),
             Set(manifest.base.models) == originalBaseModels
         else { throw KokoroAneError.downloadFailed("Unexpected v3 checkpoint dependencies") }
-        for file in try selectedFiles(manifest) {
+        for file in try selectedFiles(manifest, fastVocoder: fastVocoder) {
             try await ensureFile(
                 file.path, root: root,
                 fetch: { try await fetch("\(prefix(variant))/\(file.path)", revision: revision) },

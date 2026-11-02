@@ -5,7 +5,8 @@ import Foundation
 /// ANE-v3 runtime. Owned and called synchronously by KokoroAneModelStore.
 /// Supply the selected language's pinned base assets,
 /// export-fast-pipeline assets, and the masked split-decoder assets separately.
-/// Uses original models for requests outside available static buckets.
+/// Uses original models for requests outside available static buckets, and for
+/// every request on a Metal-free routing (see ``usesFastVocoder(_:)``).
 /// A pipeline serializes calls; create separate instances for independent streams.
 final class KokoroAneV3Pipeline {
     struct Result: Sendable {
@@ -17,13 +18,16 @@ final class KokoroAneV3Pipeline {
     }
     private let models: [String: MLModel]
     private let albertBuckets: [Int]
+    /// Empty when the fast vocoder is off.
     private let decoderBuckets: [Int]
-    private let source: KokoroAneV3NativeSource
+    private let source: KokoroAneV3NativeSource?
     private let lock = NSLock()
     private typealias Arrays = KokoroAneV3Arrays
 
-    init(baseDirectory: URL, fastDirectory: URL, decoderDirectory: URL) throws {
-        source = try KokoroAneV3NativeSource(parametersURL: fastDirectory.appendingPathComponent("native-source.json"))
+    init(
+        baseDirectory: URL, fastDirectory: URL, decoderDirectory: URL,
+        computeUnits: KokoroAneComputeUnits
+    ) throws {
         func open(
             _ directory: URL, _ name: String, _ units: MLComputeUnits, lowPrecision: Bool = false
         ) throws -> MLModel {
@@ -76,24 +80,42 @@ final class KokoroAneV3Pipeline {
             ).sorted()
         }
         albertBuckets = try buckets(fastDirectory, "KokoroAlbert_")
-        decoderBuckets = try buckets(decoderDirectory, "KokoroDecoderPre_")
-        guard !albertBuckets.isEmpty, !decoderBuckets.isEmpty else {
-            throw KokoroAneV3Error.missingModel("Static buckets")
-        }
+        guard !albertBuckets.isEmpty else { throw KokoroAneV3Error.missingModel("Static buckets") }
         var loaded: [String: MLModel] = [:]
-        for stage in ["Albert", "PostAlbert", "Alignment", "Prosody", "Noise", "Vocoder", "Tail"] {
-            let suffix = ["Noise", "Prosody", "Tail"].contains(stage) ? "_v2" : ""
-            let units: MLComputeUnits = ["Noise", "Tail"].contains(stage) ? .cpuAndGPU : .cpuAndNeuralEngine
-            loaded[stage] = try open(baseDirectory, "Kokoro" + stage + suffix, units, lowPrecision: true)
+        // Base stages follow the caller's routing, so the OS 27 default
+        // (`aneTailCpu`) keeps Noise and Tail off Metal like the legacy chain (#1103).
+        for stage in KokoroAneStage.allCases {
+            let name = stage.rawValue.prefix(1).uppercased() + stage.rawValue.dropFirst()
+            let suffix = [.noise, .prosody, .tail].contains(stage) ? "_v2" : ""
+            loaded[name] = try open(
+                baseDirectory, "Kokoro" + name + suffix, computeUnits.units(for: stage), lowPrecision: true)
         }
         for bucket in albertBuckets {
             loaded["Albert_\(bucket)"] = try open(fastDirectory, "KokoroAlbert_\(bucket)", .cpuAndNeuralEngine)
         }
-        for bucket in decoderBuckets {
-            loaded["Decoder_\(bucket)"] = try open(decoderDirectory, "KokoroDecoderPre_\(bucket)", .cpuAndNeuralEngine)
+        if Self.usesFastVocoder(computeUnits) {
+            source = try KokoroAneV3NativeSource(
+                parametersURL: fastDirectory.appendingPathComponent("native-source.json"))
+            decoderBuckets = try buckets(decoderDirectory, "KokoroDecoderPre_")
+            guard !decoderBuckets.isEmpty else { throw KokoroAneV3Error.missingModel("Static buckets") }
+            for bucket in decoderBuckets {
+                loaded["Decoder_\(bucket)"] = try open(
+                    decoderDirectory, "KokoroDecoderPre_\(bucket)", .cpuAndNeuralEngine)
+            }
+            loaded["SourceGenerator"] = try open(fastDirectory, "KokoroSourceGenerator", computeUnits.tail)
+        } else {
+            source = nil
+            decoderBuckets = []
         }
-        loaded["SourceGenerator"] = try open(fastDirectory, "KokoroSourceGenerator", .cpuAndGPU)
         models = loaded
+    }
+
+    /// The fast vocoder (masked decoder + SourceGenerator) only pays off when
+    /// SourceGenerator, a dynamic-shape fp32 graph, runs on the GPU. On CPU it
+    /// is ~4x slower than the base Vocoder/Noise/Tail chain (M5 Pro, #1103),
+    /// so a Metal-free routing uses the base chain at every length.
+    static func usesFastVocoder(_ computeUnits: KokoroAneComputeUnits) -> Bool {
+        computeUnits.tail == .cpuAndGPU
     }
 
     func synthesize(inputIds: [Int32], style: [Float], speed: Float = 1) throws -> Result {
@@ -170,7 +192,7 @@ final class KokoroAneV3Pipeline {
         var xPre: MLMultiArray?
         var generatedAudio: MLMultiArray?
         let bucket = decoderBuckets.first(where: { $0 >= frames })
-        if let bucket {
+        if let bucket, let source {
             let start = time()
             let har = try source.build(f0: Arrays.readFloats(f0))
             let spectrum = try Arrays.float32Array(shape: [1, 22, frames * 120 + 1], from: har)
