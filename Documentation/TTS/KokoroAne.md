@@ -19,7 +19,7 @@ fails before downloading.
 | Stage | `.aneTailGpu` (default on OS 26 and earlier) | `.aneTailCpu` (default on OS 27+) |
 | --- | --- | --- |
 | Albert, PostAlbert, Alignment, Prosody | `.cpuAndNeuralEngine` | `.cpuAndNeuralEngine` |
-| Masked decoder, native source/STFT, fast generator | ANE / Accelerate / `.cpuAndGPU` | not used |
+| Masked decoder, native source/STFT, fast generator | ANE / Accelerate / `.cpuAndGPU` | not downloaded or loaded |
 | Vocoder | `.cpuAndNeuralEngine`, above 200 frames | `.cpuAndNeuralEngine`, every length |
 | Noise, Tail | `.cpuAndGPU`, above 200 frames | `.cpuOnly`, every length |
 
@@ -102,13 +102,14 @@ All downloaded model files are verified against the pinned tree's content hashes
 Albert uses 32/64-token buckets, including boundary tokens, then the dynamic
 Albert model for longer requests. Decoder buckets cover 120/200 acoustic
 frames. Above 200 frames (five seconds of generated audio), synthesis uses
-the original vocoder and tail. The overall input limit remains 510 phonemes;
+the original vocoder and tail; on a Metal-free routing (the OS 27 default)
+every request does. The overall input limit remains 510 phonemes;
 V3 also rejects requests exceeding 2,000 predicted acoustic frames.
-Chunk longer speech upstream to benefit from the fast path.
+On the GPU routing, chunk longer speech upstream to benefit from the fast path.
 
 ```swift
 let result = try await english.synthesizeDetailed(text: "Hello world.")
-print(result.usedFastVocoder) // True only when every chunk used the fast vocoder.
+print(result.usedFastVocoder) // True only when every chunk used the fast vocoder (never on `.aneTailCpu`).
 print(result.timings.nativeSource, result.timings.decoder, result.timings.generator)
 print(result.timings.totalMs) // Sum of timed stages, excluding downloads and text processing.
 ```
@@ -126,8 +127,10 @@ swift run -c release fluidaudiocli tts "こんにちは、世界。" \
 
 The bounded real-model integration test is opt-in with
 `FLUIDAUDIO_RUN_KOKORO_V3=1 swift test --filter KokoroAneV3Tests`.
-Set `KOKORO_V3_TEST_CACHE` to override its model cache root. It covers both
-fast decoder sizes, dynamic/long-input fallback, alternate voices, reload,
+Set `KOKORO_V3_TEST_CACHE` to override its model cache root. It runs the OS
+default routing; set `KOKORO_V3_TEST_UNITS=aneTailGpu` or `aneTailCpu` to run
+the other one (the GPU route aborts on some macOS 27.0.1 Macs, #1103). It covers
+both fast decoder sizes (GPU routing), dynamic/long-input fallback, alternate voices, reload,
 English, Mandarin and Japanese text, and explicit phoneme input. Local Apple Silicon
 checks are development evidence. The dedicated workflow builds for iOS devices
 and runs API/frontend tests in an iPhone simulator. Neither simulator tests nor

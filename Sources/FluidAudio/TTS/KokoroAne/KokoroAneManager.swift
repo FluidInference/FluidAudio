@@ -56,7 +56,7 @@ public actor KokoroAneManager {
     /// BART G2P fallback bound to the store's models root (#1023).
     nonisolated let englishG2P: G2PModel
 
-    /// Select `.v3` for the pinned hybrid ANE/GPU pipeline (macOS 15 / iOS 18+).
+    /// Select `.v3` for the pinned static-bucket pipeline (macOS 15 / iOS 18+).
     /// A supplied model store owns the runtime version and compute policy.
     public init(
         variant: KokoroAneVariant = .english,
@@ -124,7 +124,8 @@ public actor KokoroAneManager {
     /// in libBNNS (`vadd_fp16_sme_internal`) on the Metal-free route that is
     /// the 27 default, while the Metal route aborts in MPSGraph (#843, #889).
     /// So on non-macOS everything from 26.4 on stays flagged until a build is
-    /// shown to be safe. macOS 27 has no report and is not flagged.
+    /// shown to be safe. macOS 27 has no BNNS report and is not flagged; its
+    /// MPSGraph abort (#1103) is on the GPU route, which the 27 default avoids.
     static func isBnnsCrashProneOS(
         _ version: OperatingSystemVersion, onMacOS: Bool = runningOnMacOS
     ) -> Bool {

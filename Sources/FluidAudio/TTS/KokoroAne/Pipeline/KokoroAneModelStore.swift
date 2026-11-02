@@ -227,7 +227,9 @@ public actor KokoroAneModelStore {
                 throw KokoroAneError.inputProcessingFailed(
                     "ANE-v3 supports the default, aneTailGpu or aneTailCpu routing only")
             }
-            let root = try await KokoroAneV3Assets.ensure(variant: variant, directory: directory)
+            let root = try await KokoroAneV3Assets.ensure(
+                variant: variant, directory: directory,
+                fastVocoder: KokoroAneV3Pipeline.usesFastVocoder(computeUnits))
             let loadedVocab = try KokoroAneVocab.load(from: root.appendingPathComponent("vocab.json"))
             let voiceURL = try await KokoroAneV3Assets.ensureVoice(variant.defaultVoice, variant: variant, root: root)
             let defaultPack = try KokoroAneVoicePack.load(from: voiceURL)
