@@ -43,6 +43,22 @@ final class KokoroAneV3Tests: XCTestCase {
         XCTAssertFalse(loaded)
     }
 
+    // #1103: v3 follows the caller's noise/tail routing, so the OS 27 default
+    // stays off Metal. A Metal-free routing also skips the fast vocoder, whose
+    // SourceGenerator only pays off on the GPU.
+    func testRoutingFollowsNoiseAndTailUnits() {
+        XCTAssertEqual(KokoroAneV3Pipeline.units(for: "Noise", .aneTailCpu), .cpuOnly)
+        XCTAssertEqual(KokoroAneV3Pipeline.units(for: "Tail", .aneTailCpu), .cpuOnly)
+        XCTAssertEqual(KokoroAneV3Pipeline.units(for: "Noise", .aneTailGpu), .cpuAndGPU)
+        XCTAssertEqual(KokoroAneV3Pipeline.units(for: "Tail", .aneTailGpu), .cpuAndGPU)
+        for stage in ["Albert", "PostAlbert", "Alignment", "Prosody", "Vocoder"] {
+            XCTAssertEqual(KokoroAneV3Pipeline.units(for: stage, .aneTailCpu), .cpuAndNeuralEngine)
+            XCTAssertEqual(KokoroAneV3Pipeline.units(for: stage, .aneTailGpu), .cpuAndNeuralEngine)
+        }
+        XCTAssertTrue(KokoroAneV3Pipeline.usesFastVocoder(.aneTailGpu))
+        XCTAssertFalse(KokoroAneV3Pipeline.usesFastVocoder(.aneTailCpu))
+    }
+
     func testIntegrityRejectsChangedOrTruncatedContent() {
         // Standard SHA-256 test vector, independent of the implementation.
         let file = KokoroAneV3Assets.File(
@@ -217,6 +233,12 @@ final class KokoroAneV3Tests: XCTestCase {
         try await english.initialize()
         try check(try await english.synthesizeDetailed(text: "Hello world."), fast: true)
         await english.cleanup()
+        // The default skips the fast vocoder on OS 27 (#1103); `.aneTailGpu`
+        // keeps it on every OS.
+        let gpu = KokoroAneManager(directory: directory, computeUnits: .aneTailGpu, version: .v3)
+        try check(try await gpu.synthesizeFromPhonemesDetailed(hello), fast: true, units: .aneTailGpu)
+        try check(try await gpu.synthesizeFromPhonemesDetailed(fox), fast: true, units: .aneTailGpu)
+        await gpu.cleanup()
 
         let japanese = KokoroAneManager(variant: .japanese, directory: directory, version: .v3)
         let ja = "koɲɲiʨiβa, sekai."
@@ -241,7 +263,12 @@ final class KokoroAneV3Tests: XCTestCase {
         await mandarin.cleanup()
     }
 
-    private func check(_ result: KokoroAneSynthesisResult, fast: Bool) throws {
+    /// `fast`: the request fits a decoder bucket. The fast vocoder runs only
+    /// when `units` also allows it.
+    private func check(
+        _ result: KokoroAneSynthesisResult, fast: Bool, units: KokoroAneComputeUnits = .default
+    ) throws {
+        let fast = fast && KokoroAneV3Pipeline.usesFastVocoder(units)
         XCTAssertEqual(result.inputIds.count, result.encoderTokens)
         XCTAssertEqual(result.predictedDurations.count, result.inputIds.count)
         XCTAssertEqual(result.predictedDurations.reduce(0) { $0 + Int($1) }, result.acousticFrames)

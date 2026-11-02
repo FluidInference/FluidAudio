@@ -8,22 +8,41 @@ Albert and masked decoder graphs on CPU/ANE, native Accelerate source/STFT
 processing, and a CPU/GPU generator adapted from
 [mattmireles/kokoro-coreml](https://github.com/mattmireles/kokoro-coreml).
 Core ML chooses hardware within each requested compute-unit policy; this
-is not an ANE-only runtime. V3 currently accepts only the default compute
-policy (or `.aneTailGpu`). The v3 route is fixed and includes GPU execution,
-even when the legacy OS-dependent default would select CPU. Spanish and French
-remain supported by `.legacy`; requesting them with `.v3` fails before downloading.
+is not an ANE-only runtime. V3 accepts the default compute policy,
+`.aneTailGpu` or `.aneTailCpu`, and follows the same OS-dependent default as
+the legacy chain: GPU on OS 26 and earlier, Metal-free on OS 27+ (#1103).
+Spanish and French remain supported by `.legacy`; requesting them with `.v3`
+fails before downloading.
 
 ### Compute routing and measured latency
 
-| Stage | Requested policy |
-| --- | --- |
-| Albert, PostAlbert, Alignment, Prosody, masked decoder | `.cpuAndNeuralEngine` |
-| Fast generator; fallback Noise/Tail | `.cpuAndGPU` |
-| Fallback Vocoder | `.cpuAndNeuralEngine` |
-| Native source/STFT | CPU / Accelerate |
+| Stage | `.aneTailGpu` (default on OS 26 and earlier) | `.aneTailCpu` (default on OS 27+) |
+| --- | --- | --- |
+| Albert, PostAlbert, Alignment, Prosody | `.cpuAndNeuralEngine` | `.cpuAndNeuralEngine` |
+| Masked decoder, native source/STFT, fast generator | ANE / Accelerate / `.cpuAndGPU` | not used |
+| Vocoder | `.cpuAndNeuralEngine`, above 200 frames | `.cpuAndNeuralEngine`, every length |
+| Noise, Tail | `.cpuAndGPU`, above 200 frames | `.cpuOnly`, every length |
+
+The fast generator is a dynamic-shape fp32 graph that only pays off on the
+GPU. On a macOS 27.0.1 Mac16,5, v3 aborted inside MPSGraph on its first
+synthesis while the legacy `.aneTailCpu` chain ran (#1103), so OS 27 keeps v3
+off Metal. Without Metal the fast generator would run on CPU at about 4× the
+cost of the base chain, so `.aneTailCpu` uses the Vocoder/Noise/Tail chain at
+every length. Warm model time on M5 Pro / macOS 27.0, English, `af_heart`:
+
+| Audio | `.aneTailGpu` | `.aneTailCpu` | Fast generator forced to CPU |
+| --- | --- | --- | --- |
+| 1.35 s | 19.8 ms | 46.0 ms | 174.7 ms |
+| 3.35 s | 38.8 ms | 97.9 ms | 425.3 ms |
+| 13.05 s (base chain on both) | 691.6 ms | 537.6 ms | n/a |
+
+Twenty Harvard sentences round-trip through Parakeet at 0% WER on both
+routes. `.aneTailCpu` output matches the legacy chain's level; the fast
+generator's output is about 3.5 dB louder. Pass `computeUnits: .aneTailGpu`
+to keep the GPU route on OS 27.
 
 Hybrid does not mean `.all`, and CPU+ANE still allows CPU fallback. Selected
-M5 Pro / macOS 27.0 runs measured 49.45 / 35.85 / 53.97 ms median for the English /
+M5 Pro / macOS 27.0 runs on the `.aneTailGpu` route measured 49.45 / 35.85 / 53.97 ms median for the English /
 Japanese / Mandarin demo inputs, excluding G2P and loading. CPU+ANE throughout
 was 10–13× slower; `.all` and CPU+GPU throughout aborted in the GPU RNN path.
 Those overrides were tested in a local harness, not exposed by the v3 public API.
@@ -132,7 +151,7 @@ used with the author's permission. Conversion lives in
 
 | Aspect           | `KokoroAneManager`                              |
 |------------------|-------------------------------------------------|
-| Compute          | Per-stage policies; OS-dependent legacy routing, fixed hybrid v3 routing |
+| Compute          | Per-stage policies; OS-dependent routing (legacy and v3) |
 | Voices           | Variant catalogs (54 en / 103 zh / 5 ja / 3 es / 1 fr) |
 | Input length     | ≤ 510 phoneme characters / utterance             |
 | Custom lexicon   | No                                              |
@@ -600,6 +619,7 @@ The following OS/runtime constraints affect the 7-stage chain:
 | BNNS CPU segfault | `EXC_BAD_ACCESS` in `libBNNS.dylib` (`BNNSGraphContextExecute_v2` → `BnnsCpuInferenceOperation::ExecuteSync`, queue `com.apple.e5rt.concurrentExecutionQueue`) | iOS/macOS **26.4 – 26.5.x** | **Fixed in the 26.6 line.** Verified on M5/macOS 26.6: the #667 repro (repeated synthesis) passes under `cpuOnly` and `allAne`, both of which segfaulted every time on 26.5. |
 | GPU RNN JIT assert | `GPURNNOps.mm: failed assertion 'JIT not supported'` (SIGABRT) | macOS 26.5+, incl. **26.6** (M5-class) | **Still live.** Avoided by the default routing (#671/#677), which keeps RNN-bearing stages off the GPU. Do not route Prosody/Vocoder to `.cpuAndGPU`. |
 | MPSGraph abort (Metal route) | `SIGABRT` in MetalPerformanceShadersGraph while a GPU stage (noise / tail) runs under Core ML | iOS/iPadOS **27.0 through beta 8** (24A5430a), iPad17,2 and iPad16,2 | **Still live.** The default routing on OS 27 (`aneTailCpu`, #849) keeps Metal out of the chain. |
+| MPSGraph abort (v3 GPU route) | `SIGABRT` (`MTLReportFailure` in `GPURegionRuntime::allocateTensorDataForValue`, `ExpandDimsOp` reshape) on the first v3 synthesis, before any audio | macOS **27.0.1** (26A434), Mac16,5, every launch; not seen on M5 Pro / macOS 27.0 | **Avoided by default.** v3 now follows the OS 27 default (`aneTailCpu`) and skips the GPU-only fast generator (#1103). Passing `.aneTailGpu` re-arms it. |
 | BNNS input overread | `SIGSEGV` in `libBNNS` (`BnnsCpuInferenceOperation::ExecuteSync`) inside the Vocoder, or a full-scale (clipped) waveform when the overread does not fault | macOS **27.0**, M5 Pro, deterministic for certain lengths | **Fixed in FluidAudio.** A CPU kernel reads a few bytes past the end of the fp16 `x_source_0` input. That buffer (10,240·T bytes) fills whole 16 KB pages at T = 416, 440, … 584 (every 24 frames), so the overread hits an unmapped page, depending on heap layout. Chain inputs are now allocated with a zeroed one-page tail (`KokoroAneArrays.makeArray`), which turns the overread into a harmless read. Output is otherwise unchanged. |
 | BNNS `vadd_fp16_sme` segfault (Metal-free route) | `SIGSEGV` in `libBNNS` `vadd_fp16_sme_internal` on the OS-27 default route (noise + tail on CPU) | iOS **27.0** (24A5418b), iPhone18,1, ~54 min into a session | **Probably the input overread above; unverified on iOS** (#889). Same shape on macOS 27: an fp16 binary-op kernel under `dispatch_apply`, faulting on a page-aligned address. The rare trigger (a bad frame count plus an unmapped next page) explains the long, variable time to crash. The model, phonemizer and voice packs are not at fault: the same Kokoro-82M v1.0 graph ran 2 h 34 min on ONNX Runtime's CPU provider on the same OS line. `initialize()` keeps the iOS 27 advisory until a device soak confirms the fix. |
 
