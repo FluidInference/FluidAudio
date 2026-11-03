@@ -214,7 +214,7 @@ public actor KokoroAneManager {
     /// applies.
     public func englishPhonemes(for text: String) async throws -> String {
         try await prepareEnglishFrontend()
-        return try await phonemize(text: EnglishTextNormalizer.normalizeForFrontend(text))
+        return try await phonemize(text: EnglishTextNormalizer.normalizeForFrontend(text)).phonemes
     }
 
     /// Fetch (if missing) and load the English G2P assets that
@@ -276,8 +276,10 @@ public actor KokoroAneManager {
         let chunks = PhonemeChunker.chunk(
             frontend.phonemes, maxLength: KokoroAneConstants.maxPhonemeLength, countsUnicodeScalars: true)
         guard chunks.count > 1 else {
-            return try await runChain(
+            var result = try await runChain(
                 phonemes: frontend.phonemes, normalizedText: frontend.normalizedText, voice: voice, speed: speed)
+            result.englishSegments = frontend.englishSegments
+            return result
         }
         var parts: [KokoroAneSynthesisResult] = []
         for chunk in chunks {
@@ -287,6 +289,7 @@ public actor KokoroAneManager {
         var result = KokoroAneSynthesisResult.concatenating(parts)
         result.normalizedText = frontend.normalizedText
         result.phonemes = frontend.phonemes
+        result.englishSegments = frontend.englishSegments
         return result
     }
 
@@ -314,14 +317,17 @@ public actor KokoroAneManager {
     /// ``synthesizeDetailed(text:voice:speed:)`` can report the normalized
     /// text it actually spoke (issue #943). `normalizedText` is `nil` when the
     /// input was treated as pre-computed phonemes.
-    func resolveFrontend(for text: String) async throws -> (normalizedText: String?, phonemes: String) {
+    func resolveFrontend(
+        for text: String
+    ) async throws -> (normalizedText: String?, phonemes: String, englishSegments: [KokoroAneSpokenSegment]) {
         switch variant {
         case .english:
             // Byte-exact NeMo TN before G2P via the shared frontend entry
             // point: "$5" → "five dollars", "2024" → "twenty twenty four".
             // No-op for plain prose.
             let normalized = EnglishTextNormalizer.normalizeForFrontend(text)
-            return (normalized, try await phonemize(text: normalized))
+            let spoken = try await phonemize(text: normalized)
+            return (normalized, spoken.phonemes, spoken.englishSegments)
         case .mandarin:
             try await store.loadIfNeeded()
             // Normalize written forms to their Mandarin reading before
@@ -337,25 +343,25 @@ public actor KokoroAneManager {
             }
             if MandarinG2P.looksLikeHanzi(normalized) {
                 let g2p = try await store.mandarinG2PPipeline()
-                return (normalized, try await g2p.phonemize(normalized))
+                return (normalized, try await g2p.phonemize(normalized), [])
             } else {
                 // No Hanzi present → caller already supplied bopomofo /
                 // ASCII punctuation. Pass through so power users can
                 // still override pronunciation manually.
-                return (nil, normalized)
+                return (nil, normalized, [])
             }
         case .japanese:
             // Pre-computed IPA (issue #698) passes through untouched: NFKC
             // would fold its modifier letters (ʲ → j). Anything outside the
             // phoneme alphabet — kana, kanji, half-width kana, digits — is
             // text and goes through normalization and the frontend.
-            guard !Self.looksLikePrecomputedJapaneseIPA(text) else { return (nil, text) }
+            guard !Self.looksLikePrecomputedJapaneseIPA(text) else { return (nil, text, []) }
             // The NeMo FST drops half-width dakuten (ｶﾞ → カ) and reads the
             // full-width tilde as a symbol, so fold both before it runs.
             let folded = JapaneseCutlet.foldingHalfWidthForms(text)
             let normalized = NemoTextNormalizer.normalize(folded, language: .japanese)
             let g2p = try await store.japaneseG2PPipeline()
-            return (normalized, try await g2p.phonemize(normalized))
+            return (normalized, try await g2p.phonemize(normalized), [])
         case .spanish:
             var normalized = NemoTextNormalizer.normalize(text, language: .spanish)
             // Without the engine linked, read numbers here rather than let the
@@ -364,14 +370,14 @@ public actor KokoroAneManager {
                 normalized = RomanceNumberNormalizer.normalize(normalized, language: .spanish)
             }
             let lexicon = await store.spanishLexicon()
-            return (normalized, try Self.nonEmpty(SpanishG2P.phonemize(normalized, lexicon: lexicon), for: text))
+            return (normalized, try Self.nonEmpty(SpanishG2P.phonemize(normalized, lexicon: lexicon), for: text), [])
         case .french:
             var normalized = NemoTextNormalizer.normalize(text, language: .french)
             if !NemoTextNormalizer.isAvailable {
                 normalized = RomanceNumberNormalizer.normalize(normalized, language: .french)
             }
             let g2p = try await store.frenchG2PPipeline()
-            return (normalized, try Self.nonEmpty(await g2p.phonemize(normalized), for: text))
+            return (normalized, try Self.nonEmpty(await g2p.phonemize(normalized), for: text), [])
         }
     }
 
@@ -441,12 +447,21 @@ public actor KokoroAneManager {
     /// function-word forms — `to` → `tu`, not the stressed BART citation
     /// form `tˈO`, issue #691), per-word BART G2P fallback for OOV words,
     /// and vocab-supported punctuation kept as prosody/pause tokens.
-    private func phonemize(text: String) async throws -> String {
+    private func phonemize(
+        text: String
+    ) async throws -> (phonemes: String, englishSegments: [KokoroAneSpokenSegment]) {
         let phonemizer = await ensureEnglishPhonemizer()
-        let raw = try await phonemizer.phonemize(text) { [englishG2P] word in
+        let raw = try await phonemizer.segment(text) { [englishG2P] word in
             try await englishG2P.phonemize(word: word)
         }
-        return Self.misakiOutputForm(raw)
+        // `ɾ` and `T` are one scalar each, so the ranges recorded above stay put.
+        let segments = raw.segments.map { segment in
+            var rewritten = segment
+            rewritten.phonemes = Self.misakiOutputForm(segment.phonemes)
+            return rewritten
+        }
+        let phonemes = Self.misakiOutputForm(raw.phonemes)
+        return (phonemes, segments)
     }
 
     /// misaki's flap step for Kokoro v1.0 (`G2P.__call__`): `ɾ` → `T`. The

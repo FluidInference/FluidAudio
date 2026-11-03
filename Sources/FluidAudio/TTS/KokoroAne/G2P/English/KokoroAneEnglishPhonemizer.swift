@@ -81,6 +81,20 @@ struct KokoroAneEnglishPhonemizer: Sendable {
         _ text: String,
         fallback: (String) async throws -> [String]?
     ) async throws -> String {
+        try await segment(text, fallback: fallback).phonemes
+    }
+
+    /// ``phonemize(_:fallback:)`` plus one segment per splitter token.
+    ///
+    /// The walk that fills `parts` is unchanged. Each append records a segment,
+    /// punctuation that glues onto the previous part extends that segment, and
+    /// a skipped word or a dropped mark records an empty segment. Offsets are
+    /// character distances into `text`: apostrophe folding is one-for-one, then
+    /// the trimmed prefix is added back.
+    func segment(
+        _ text: String,
+        fallback: (String) async throws -> [String]?
+    ) async throws -> KokoroAneEnglishSegmentation {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             throw KokoroAneError.inputProcessingFailed("(empty input)")
@@ -89,37 +103,109 @@ struct KokoroAneEnglishPhonemizer: Sendable {
         // Fold typographic apostrophes to ASCII so in-word smart-quote
         // contractions (`we’re`) survive tokenization intact (issue #774).
         let prepared = Self.normalizeApostrophes(trimmed)
+        let origin = Self.leadingTrimCount(text)
 
         var parts: [String] = []
+        var segments: [KokoroAneSpokenSegment] = []
+        var partSegment: Int?
+        var searchFrom = prepared.startIndex
 
         for token in Self.splitWords(prepared) {
             if token.isEmpty { continue }
+            guard let found = prepared.range(of: token, range: searchFrom..<prepared.endIndex) else {
+                throw KokoroAneError.inputProcessingFailed(
+                    "could not locate token '\(token)' while segmenting")
+            }
+            let surface = Self.surface(of: found, in: prepared, origin: origin)
+            searchFrom = found.upperBound
 
             // Punctuation token (single non-word char from the splitter).
             if token.count == 1, let ch = token.first, !ch.isLetter, !ch.isNumber {
-                guard allowedPunctuation.contains(ch) else { continue }
+                guard allowedPunctuation.contains(ch) else {
+                    segments.append(KokoroAneSpokenSegment(surface: surface, phonemes: "", scalars: nil))
+                    continue
+                }
                 // Attach to the preceding word — Kokoro's vocab encodes
                 // punctuation as its own prosody token, but Misaki output
                 // never puts a space before it.
                 if parts.isEmpty {
                     parts.append(String(ch))
+                    segments.append(
+                        KokoroAneSpokenSegment(surface: surface, phonemes: String(ch), scalars: nil))
+                    partSegment = segments.count - 1
                 } else {
+                    guard let owner = partSegment else {
+                        throw KokoroAneError.inputProcessingFailed(
+                            "punctuation '\(ch)' had no phoneme segment to attach to")
+                    }
                     parts[parts.count - 1].append(ch)
+                    segments[owner].phonemes.append(ch)
+                    segments[owner].surface = Self.extending(segments[owner].surface, through: surface)
                 }
                 continue
             }
 
             if let ipa = try await resolveWord(token, fallback: fallback) {
                 parts.append(ipa)
+                segments.append(KokoroAneSpokenSegment(surface: surface, phonemes: ipa, scalars: nil))
+                partSegment = segments.count - 1
+            } else {
+                segments.append(KokoroAneSpokenSegment(surface: surface, phonemes: "", scalars: nil))
             }
         }
 
+        Self.assignScalarRanges(&segments)
         let joined = parts.joined(separator: " ")
         if joined.isEmpty {
             throw KokoroAneError.inputProcessingFailed(
                 "produced no phonemes for input '\(trimmed)'")
         }
-        return joined
+        return KokoroAneEnglishSegmentation(phonemes: joined, segments: segments)
+    }
+
+    /// Character offsets of `range` in `text`, shifted by the trim prefix.
+    private static func surface(of range: Range<String.Index>, in text: String, origin: Int) -> Range<Int> {
+        let lower = text.distance(from: text.startIndex, to: range.lowerBound) + origin
+        let upper = text.distance(from: text.startIndex, to: range.upperBound) + origin
+        return lower..<upper
+    }
+
+    private static func extending(_ range: Range<Int>, through other: Range<Int>) -> Range<Int> {
+        min(range.lowerBound, other.lowerBound)..<max(range.upperBound, other.upperBound)
+    }
+
+    /// Characters ``trimmingCharacters(in: .whitespacesAndNewlines)`` removes
+    /// from the front. Apostrophe folding does not change this count.
+    private static func leadingTrimCount(_ text: String) -> Int {
+        let set = CharacterSet.whitespacesAndNewlines
+        let scalars = text.unicodeScalars
+        var index = scalars.startIndex
+        while index < scalars.endIndex, set.contains(scalars[index]) {
+            index = scalars.index(after: index)
+        }
+        return text.distance(from: text.startIndex, to: index)
+    }
+
+    /// Separator spaces belong to the previous kept segment, matching
+    /// `parts.joined(separator: " ")`. Skipped tokens stay `nil`.
+    private static func assignScalarRanges(_ segments: inout [KokoroAneSpokenSegment]) {
+        var cursor = 0
+        var previousKept: Int?
+        for index in segments.indices {
+            if segments[index].phonemes.isEmpty {
+                segments[index].scalars = nil
+                continue
+            }
+            if let previousKept {
+                cursor += 1
+                let lower = segments[previousKept].scalars?.lowerBound ?? (cursor - 1)
+                segments[previousKept].scalars = lower..<cursor
+            }
+            let count = segments[index].phonemes.unicodeScalars.count
+            segments[index].scalars = cursor..<(cursor + count)
+            cursor += count
+            previousKept = index
+        }
     }
 
     // MARK: - Word resolution

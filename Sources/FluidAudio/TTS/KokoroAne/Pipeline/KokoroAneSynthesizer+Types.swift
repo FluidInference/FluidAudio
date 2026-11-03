@@ -80,6 +80,13 @@ public struct KokoroAneSynthesisResult: Sendable {
     /// For chunked text input this is the full resolved string; the chunks
     /// drop the whitespace at each split and add one BOS/EOS pair per chunk.
     public internal(set) var phonemes: String
+    /// Tokens recorded by the English phonemize walk behind ``phonemes``.
+    ///
+    /// Empty for other languages, for phoneme input, and on the value
+    /// ``concatenating(_:)`` returns until the caller assigns the full string.
+    /// A skipped token has empty `phonemes` and nil `scalars`. The separator
+    /// space between kept tokens sits on the previous segment.
+    public internal(set) var englishSegments: [KokoroAneSpokenSegment]
     /// Per-stage timings.
     public let timings: KokoroAneStageTimings
 
@@ -101,6 +108,7 @@ public struct KokoroAneSynthesisResult: Sendable {
         predictedDurations: [Int32] = [],
         normalizedText: String? = nil,
         phonemes: String = "",
+        englishSegments: [KokoroAneSpokenSegment] = [],
         usedFastVocoder: Bool = false
     ) {
         self.samples = samples
@@ -111,14 +119,15 @@ public struct KokoroAneSynthesisResult: Sendable {
         self.predictedDurations = predictedDurations
         self.normalizedText = normalizedText
         self.phonemes = phonemes
+        self.englishSegments = englishSegments
         self.timings = timings
         self.usedFastVocoder = usedFastVocoder
     }
 
     /// Join per-chunk results in order: samples, ids and durations are
     /// concatenated; token/frame counts and stage timings are summed. Level is
-    /// left untouched (no per-chunk normalization). Text fields are left empty
-    /// for the caller to set.
+    /// left untouched (no per-chunk normalization). Text fields and
+    /// ``englishSegments`` are left empty for the caller to set.
     static func concatenating(_ parts: [KokoroAneSynthesisResult]) -> KokoroAneSynthesisResult {
         var timings = KokoroAneStageTimings()
         for part in parts { timings.add(part.timings) }
