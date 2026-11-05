@@ -65,6 +65,15 @@ public actor StreamingNemotronAsrManager {
     // Callbacks
     internal var partialCallback: NemotronPartialCallback?
 
+    /// Raw encoder-outputs hook for feature consumers (e.g. an intermediate-tap
+    /// consumer like a turn-decision model): each streaming encoder prediction's
+    /// outputs (including any extra outputs a re-exported encoder declares, such
+    /// as `tap_*` layer taps) plus the step's local frame range and the global
+    /// frame origin (global = origin + local).
+    internal var onEncoderOutput: (@Sendable ([String: MLMultiArray], Range<Int>, Int) -> Void)?
+    /// Global encoder-frame origin of the next chunk (drives `onEncoderOutput`).
+    internal var tapFrameOrigin: Int = 0
+
     /// Chunk size for auto-download. Set by `StreamingModelVariant.createManager()`
     /// to determine which HuggingFace repo to download from in `loadModels()`.
     internal var requestedChunkSize: NemotronChunkSize?
@@ -233,6 +242,7 @@ public actor StreamingNemotronAsrManager {
         decoderJoint = nil
         tokenizer = nil
         cacheChannel = nil
+        tapFrameOrigin = 0
         cacheTime = nil
         cacheLen = nil
         melCache = nil
@@ -386,5 +396,12 @@ extension StreamingNemotronAsrManager: StreamingAsrManager {
 
     public func setPartialTranscriptCallback(_ callback: @escaping @Sendable (String) -> Void) {
         self.partialCallback = callback
+    }
+
+    /// Register a raw encoder-outputs hook (see `onEncoderOutput`). Pass nil to remove.
+    public func setEncoderOutputCallback(
+        _ callback: (@Sendable ([String: MLMultiArray], Range<Int>, Int) -> Void)?
+    ) {
+        self.onEncoderOutput = callback
     }
 }
