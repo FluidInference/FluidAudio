@@ -540,6 +540,51 @@ which only the V3 decoder implements — v3 and tdtJa models get the
 end-aligned window; v2/tdtCtc110m keep the zero-padded layout
 (`supportsSuppressedPrefix`).
 
+## Pending-Token Flush on Pause-Ending Windows (issue #1110)
+
+The TDT model emits a sentence-final mark late: not with the word it
+closes but at the next speech onset, or at the end of the audio. Measured
+on English narration, the mark sits a median 0.32 s after its word and up
+to 3.3 s after it, always just before the next piece. Inside a window that
+is harmless. At a window boundary it loses the mark: a window that ends in
+the pause after a sentence never reaches the next onset, so the mark is
+still pending when its frames run out, and the next window starts past
+the sentence with nothing to attach a mark to. The transcript reads
+`…let me just go into one here So this is a classic…` — the same loss on
+both long-form paths and on every V3-family model.
+
+`TdtDecoderV3` already handles the end-of-audio case: the **last** window's
+decode ends with a flush that runs a few extra decoder steps at the final
+frames and emits whatever the model was holding. The fix extends that flush
+to an interior window **whose tail is a pause** (`flushesPendingTokens` /
+`hasQuietTail`): the last six encoder frames (0.48 s) all below the
+recording's adaptive speech threshold. Windows that end mid-speech do not
+flush. Measured without that gate, the flushed pieces land in the overlap,
+where a new match moves the splice and the gap rule (longer side wins)
+changes which window's words survive: on a 36-minute interview, three
+periods gained and one word lost plus two word-choice flips at mid-speech
+seams. With the gate the same file changes only by the periods. The gate
+is strict about the last frames too: allowing a frame or two of the next
+onset at the very end recovered one more period on that interview but also
+admitted a window ending in soft trailing speech on a quiet narration
+(0.001–0.003 RMS against a 0.0046 gate), which moved a splice.
+
+The flushed mark carries the window's last frame as its timestamp, as a
+late in-window mark already does, so the closing word's span runs to the
+window end. The merge needs no change: a flushed piece at the window's last
+frame survives only when the right window has nothing before the left
+window ends — the pause — and is dropped whenever the right window heard
+the same stretch (`FlushedSeamTokenTests`). The flush is V3-family only;
+`TdtDecoderV2` has none.
+
+What it does not recover: a window that ends less than 0.48 s after the
+word (the mark may still be pending, but the tail is too short to tell a
+pause from an inter-word gap); a window that ends a frame or two into the
+next onset (one such seam on the interview above); and the cases where the
+model declines to close the sentence at an audio end that is seconds past
+the word — v3 on one narration seam kept `here` open with a 2 s tail where
+ultra closed it.
+
 ## Streaming Windows (issues #855, #897)
 
 `SlidingWindowAsrManager` decodes overlapping windows (`[left 2 s | chunk |
@@ -834,6 +879,9 @@ RMS exceeds `0.008 / 0.3 ≈ 0.027`.
   trailing silence. The v3 no-mel path's silence-aligned starts avoid the
   class (validated on the LibriVox case), which is why v3 now defaults to
   no-mel; the mel-context path retains the limitation.
+- A sentence-final mark pending at a window that ends less than 0.48 s
+  after its word is still lost (issue #1110's flush only runs on a tail
+  long enough to be a pause); the pause-ending case is handled.
 - Repair validation corpora are English conference and quiet dictation
   audio; multilingual and music-heavy content is less exercised.
 
@@ -948,6 +996,9 @@ The rules that follow from that:
   - the final window is never zero-pad-dominated: a short last chunk
     backfills with real audio decoded as a suppressed prefix
     (`lastChunkWarmupSamples`, issue #747)
+  - a piece flushed at an interior window's last frame survives the merge
+    only across a pause — never when the right window heard the same
+    stretch (`FlushedSeamTokenTests`, issue #1110)
 
 ## How This Path Evolved
 
@@ -970,6 +1021,7 @@ authoritative record; the milestones:
 | 2026-10 | Short-window gap probes | phrases dropped mid-window in 0.5–1.4 s gaps, mostly non-English (Italian 16 per ten minutes, German 5–14), that the 1.5 s threshold never probed and a full-length probe window re-dropped. |
 | 2026-07 (#759) | Bound-safe fallbacks in merge repairs | three residual paths that dropped content when no splice-safe token existed. |
 | 2026-07 (#747) | End-aligned final window + adaptive speech gate | final-window blank-out on quiet audio — a short last chunk zero-padded to the model window is a degenerate input; fixed structurally by backfilling with real audio. The adaptive gate replaced an absolute energy gate that was structurally dead on the quiet-audio class. |
+| 2026-11 (#1110) | Pending-token flush on pause-ending interior windows | sentence-final marks lost at seams: the model emits them at the next speech onset, which a window ending inside the pause never reaches; the last window's flush now runs on any V3-family window whose tail is a pause. |
 | 2026-07 (#825 → #830) | Merge order authoritative; clamp timestamps instead of re-sorting | subwords/words reordered across a seam ("im Frühjahr" → "imüh Frjahr", "Für die" → "die Für") — a final global timestamp sort scrambled the order the splice logic had built, because frame timestamps are coarse and don't co-register across a seam. |
 
 Two recurring lessons in that table:
@@ -1013,6 +1065,8 @@ Two recurring lessons in that table:
     case-folded matching and seam word-duplicate collapse (issue #706)
   - `repairSeamGaps(...)` — post-merge gap re-decode pass (issue #758)
   - `lastChunkWarmupSamples(...)` — end-aligned final window (issue #747)
+  - `flushesPendingTokens(...)` / `hasQuietTail(...)` — pending-token flush
+    on pause-ending interior windows (issue #1110)
   - `spliceCandidate(...)` / `speechLikeSeconds(...)` /
     `adaptiveSpeechRmsThreshold(...)` — repair-pass machinery
   - `makeWorkerPool(...)` and the static `transcribeChunk(...)` task body
@@ -1040,6 +1094,7 @@ swift test --filter ChunkProcessorSeamResidualTests   # PR #759 drop-path fallba
 swift test --filter SeamGapRepairTests                # issue #758 gap splice + energy gate
 swift test --filter ChunkProcessorUnspacedScriptTests # tdtJa: splice guard off
 swift test --filter EndAlignedFinalWindowTests        # issue #747 final-window backfill
+swift test --filter FlushedSeamTokenTests             # issue #1110 flush gate + merge of a flushed piece
 swift test --filter TdtRefactoredComponentsTests
 swift test --filter TdtDecoderV2Tests
 swift test --filter ASRConfigTests   # covers parallelChunkConcurrency default, clamping, override

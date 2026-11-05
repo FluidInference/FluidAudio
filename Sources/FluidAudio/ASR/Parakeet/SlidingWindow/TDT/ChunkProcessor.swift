@@ -279,6 +279,53 @@ struct ChunkProcessor {
         return totalSamples
     }
 
+    /// Whether a window's decode ends with the pending-token flush. The last
+    /// window always flushes. An interior window flushes too, on the V3
+    /// family, when its tail is a pause (issue #1110): the model holds a
+    /// sentence-final mark until the next speech onset, so a window that
+    /// ends inside the pause after a sentence never reaches that onset and
+    /// would drop the mark — and the next window, starting past the
+    /// sentence, has nothing to attach it to. The flush gives the deferred
+    /// mark the audio end it needs. A window that ends mid-speech does not
+    /// flush: the flushed pieces land in the overlap, where a new match
+    /// can move the splice and change which window's words survive, and
+    /// the right window hears that stretch in full anyway. `TdtDecoderV2`
+    /// has no flush, so V2-family windows are unchanged.
+    static func flushesPendingTokens(isLastChunk: Bool, modelVersion: AsrModelVersion?, quietTail: Bool) -> Bool {
+        isLastChunk || (quietTail && supportsSuppressedPrefix(modelVersion))
+    }
+
+    /// Frames of sub-threshold audio a window must end with to count as
+    /// ending in a pause. Six frames (0.48 s) is longer than the model's
+    /// usual mark latency after a word (median 0.32 s on English narration)
+    /// and well past an inter-word gap, so a mid-phrase window keeps
+    /// today's decode.
+    static let quietTailFrames = 6
+
+    /// Whether the last `quietTailFrames` encoder frames of `samples` all sit
+    /// below `rmsThreshold`. Strict on purpose: admitting a frame or two of
+    /// the next onset at the very end would also admit a window whose tail
+    /// is soft trailing speech on a quiet recording (measured: a mumbled
+    /// "twenty-five years" at 0.001–0.003 RMS against a 0.0046 gate), and
+    /// that is a mid-speech seam, where a flushed piece moves the splice.
+    static func hasQuietTail(_ samples: [Float], rmsThreshold: Float) -> Bool {
+        let frameSamples = ASRConstants.samplesPerEncoderFrame
+        guard samples.count >= quietTailFrames * frameSamples else { return false }
+        var end = samples.count
+        for _ in 0..<quietTailFrames {
+            let start = end - frameSamples
+            var sum: Float = 0
+            for sample in samples[start..<end] {
+                sum += sample * sample
+            }
+            if sqrt(sum / Float(frameSamples)) >= rmsThreshold {
+                return false
+            }
+            end = start
+        }
+        return true
+    }
+
     /// Prefix suppression (`emitTokensAfterGlobalFrame`) is a V3-decoder
     /// feature; `TdtDecoderV2` ignores it, which would emit the backfilled
     /// prefix twice. V2-family models keep the zero-padded final window.
@@ -787,6 +834,10 @@ struct ChunkProcessor {
         // The final window must end at the last speech-bearing frame, not
         // EOF — see `speechEndSamples()`.
         let speechEnd = endAligned ? try speechEndSamples() : totalSamples
+        // An interior window whose tail is a pause flushes its pending
+        // tokens like the last window (issue #1110); the gate is the
+        // recording-level speech threshold the repair pass uses.
+        let flushRmsThreshold = endAligned ? try adaptiveSpeechRmsThreshold() : nil
         // Fixed before any task starts, so `windowCount` is the number of
         // windows that decode rather than the number of planned starts.
         let plan = Self.planWindows(
@@ -851,6 +902,12 @@ struct ChunkProcessor {
                             contextSamples: window.contextSamples,
                             chunkStart: window.chunkStartOffset,
                             isLastChunk: window.isLastChunk,
+                            flushPendingTokens: Self.flushesPendingTokens(
+                                isLastChunk: window.isLastChunk,
+                                modelVersion: modelVersion,
+                                quietTail: flushRmsThreshold.map {
+                                    Self.hasQuietTail(chunkSamplesArray, rmsThreshold: $0)
+                                } ?? false),
                             using: worker,
                             decoderState: &decoderState,
                             maxModelSamples: maxModelSamples,
@@ -950,7 +1007,8 @@ struct ChunkProcessor {
             let vocabulary = await manager.vocabulary
             let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary, modelVersion: modelVersion)
             let minGapSeconds = await manager.seamGapRepairMinGapSeconds
-            let speechRmsThreshold = try adaptiveSpeechRmsThreshold()
+            // Already measured for the pause-ending flush gate on the V3 family.
+            let speechRmsThreshold = try flushRmsThreshold ?? adaptiveSpeechRmsThreshold()
 
             mergedTokens = try await repairSeamGaps(
                 in: mergedTokens,
@@ -1011,6 +1069,7 @@ struct ChunkProcessor {
         contextSamples: Int,
         chunkStart: Int,
         isLastChunk: Bool,
+        flushPendingTokens: Bool? = nil,
         using manager: AsrManager,
         decoderState: inout TdtDecoderState,
         maxModelSamples: Int,
@@ -1039,6 +1098,7 @@ struct ChunkProcessor {
             decoderState: &decoderState,
             contextFrameAdjustment: contextFrames,  // Skip context frames in decoder
             isLastChunk: isLastChunk,
+            flushPendingTokens: flushPendingTokens,
             globalFrameOffset: globalFrameOffset,
             language: language,
             emitTokensAfterGlobalFrame: emitTokensAfterFrame,

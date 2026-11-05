@@ -148,11 +148,18 @@ ChunkProcessor
         ↓
 TdtDecoder.decodeWithTimings(isLastChunk: true)
     ├─ Main decoding loop
-    └─ Last chunk finalization (if isLastChunk=true)
+    └─ Pending-token flush (if flushPendingTokens ?? isLastChunk)
         ├─ Continue beyond encoder frames
         ├─ Use consecutive blank detection
         └─ Natural termination
 ```
+
+The batch chunker also requests the flush on an interior V3-family window
+whose tail is a pause (`flushPendingTokens: true`), so a sentence-final
+mark the model is holding for the next speech onset is emitted before the
+window ends — see "Pending-Token Flush on Pause-Ending Windows" in
+`LongTranscription.md` (issue #1110). `isLastChunk` itself is unchanged
+and still drives the streaming `timeJump`.
 
 ## Code Locations
 - `Sources/FluidAudio/ASR/Parakeet/ChunkProcessor.swift`: Chunk detection logic
