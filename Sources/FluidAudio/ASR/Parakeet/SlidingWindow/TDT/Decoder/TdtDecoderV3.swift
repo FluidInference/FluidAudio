@@ -109,6 +109,7 @@ internal struct TdtDecoderV3: Sendable {
         decoderState: inout TdtDecoderState,
         contextFrameAdjustment: Int = 0,
         isLastChunk: Bool = false,
+        flushPendingTokens: Bool? = nil,
         globalFrameOffset: Int = 0,
         language: Language? = nil,
         vocabulary: [Int: String]? = nil,
@@ -470,10 +471,15 @@ internal struct TdtDecoderV3: Sendable {
             activeMask = timeIndices < effectiveSequenceLength
         }
 
-        // ===== LAST CHUNK FINALIZATION =====
-        // For the last chunk, ensure we force emission of any pending tokens
-        // Continue processing even after encoder frames are exhausted
-        if isLastChunk {
+        // ===== PENDING-TOKEN FLUSH =====
+        // Force emission of any pending tokens once the encoder frames are
+        // exhausted. Always on for the last chunk. The batch chunker also
+        // asks for it on an interior window whose tail is a pause: the model
+        // emits a sentence-final mark at the next speech onset, so a window
+        // that ends inside the pause after a sentence would otherwise never
+        // emit it, and the next window starts past the sentence and cannot
+        // (issue #1110, `ChunkProcessor.flushesPendingTokens`).
+        if flushPendingTokens ?? isLastChunk {
 
             var additionalSteps = 0
             var consecutiveBlanks = 0
