@@ -115,6 +115,11 @@ decoder falls back to its unfiltered argmax.
   forms like `e` + U+0301 in case a vocab export doesn't precompose
 - Latin Extended Additional (`0x1E00`–`0x1EFF`) — Vietnamese, etc.
 
+**Currency symbols** (Unicode category `Sc`, such as `€` and `£`) are
+script-neutral and pass for every script, like ASCII digits and punctuation.
+Parakeet v3's `€` token is in no script block, so without this a language hint
+replaced it with another candidate.
+
 **Cyrillic-compatible characters:**
 - Cyrillic block (`0x0400`–`0x04FF`)
 - Script-neutral ASCII (digits, punctuation, whitespace) — but **ASCII
