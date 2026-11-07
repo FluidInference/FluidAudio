@@ -89,13 +89,23 @@ public struct MandarinG2P: Sendable {
     /// `KokoroAneVocab.encode`. Empty input is rejected with `throws`
     /// to match the existing English path's behaviour.
     public func phonemize(_ text: String) async throws -> String {
+        try await phonemizeTracingPunctuation(text).phonemes
+    }
+
+    /// ``phonemize(_:)``, plus the mark as written for each punctuation
+    /// mark from the input (`、` for the `,` it became), keyed by its
+    /// Unicode-scalar offset in `phonemes`. Marks the frontend adds (the
+    /// `/` between words, spaces) have no entry.
+    func phonemizeTracingPunctuation(
+        _ text: String
+    ) async throws -> (phonemes: String, punctuationSources: [Int: Character]) {
         let verbalized = MandarinNumberNormalizer.normalize(text)
-        let normalized = Self.normalizeText(verbalized)
-        guard !normalized.isEmpty else {
+        let traced = Self.normalizeTracingPunctuation(verbalized)
+        guard !traced.isEmpty else {
             throw KokoroAneError.inputProcessingFailed("(empty input)")
         }
-        let normalizedChars = Array(normalized)
-        let result = segment(chars: normalizedChars)
+        let normalizedChars = traced.map(\.char)
+        let result = segment(chars: normalizedChars, punctuationSources: traced.map(\.source))
         var segments = result.segments
         // From the dict readings, before g2pW, as misaki merges words on
         // pypinyin's.
@@ -130,6 +140,7 @@ public struct MandarinG2P: Sendable {
         }
 
         var output = ""
+        var punctuationSources: [Int: Character] = [:]
         var pendingSyllables: [MandarinPinyinNormalizer.Syllable] = []
         // Parallel to `pendingSyllables`: a `/` goes before this syllable.
         var pendingSlash: [Bool] = []
@@ -197,10 +208,13 @@ public struct MandarinG2P: Sendable {
                 // to fold by.
                 appendPending(list, slash: slash)
                 pendingHanzi.removeAll(keepingCapacity: true)
-            case .punctuation(let s):
+            case .punctuation(let s, let source):
                 // Sandhi never crosses punctuation; emit accumulated
                 // syllables first.
                 flushPending()
+                if let mark = s.first, !mark.isWhitespace {
+                    punctuationSources[output.unicodeScalars.count] = source ?? mark
+                }
                 output.append(s)
             case .literal(let s):
                 // ASCII letters / digits / unmapped Bopomofo: pass
@@ -226,7 +240,7 @@ public struct MandarinG2P: Sendable {
             throw KokoroAneError.inputProcessingFailed(
                 "Mandarin G2P produced no phonemes for input '\(text)'")
         }
-        return output
+        return (output, punctuationSources)
     }
 
     /// Quick predicate: should this string be routed through the
@@ -261,7 +275,9 @@ public struct MandarinG2P: Sendable {
         /// Pre-parsed syllables (user-lexicon source). `word` is the Hanzi
         /// the lexicon hit consumed, on the hit's first segment only.
         case syllables([MandarinPinyinNormalizer.Syllable], word: String)
-        case punctuation(String)  // ASCII punctuation passthrough.
+        /// ASCII punctuation passthrough; `source` is the fullwidth mark
+        /// it was normalized from.
+        case punctuation(String, source: Character?)
         case literal(String)  // Anything else (ASCII letters, digits,
         // already-phonemised bopomofo, etc.)
         /// Single-char reading chosen by the polyphone disambiguator,
@@ -288,7 +304,9 @@ public struct MandarinG2P: Sendable {
         let charPos: Int
     }
 
-    func segment(chars: [Character]) -> SegmentResult {
+    /// `punctuationSources`, when given, runs parallel to `chars` (see
+    /// ``normalizeTracingPunctuation(_:)``).
+    func segment(chars: [Character], punctuationSources: [Character?] = []) -> SegmentResult {
         var segments: [Segment] = []
         var wordStarts: [Bool] = []
         var polyphoneTargets: [PolyphoneTarget] = []
@@ -370,7 +388,8 @@ public struct MandarinG2P: Sendable {
                 flushHanziRun()
                 if MandarinBopomofoMap.allowedPunctuation.contains(ch) {
                     flushLiteral()
-                    emit(.punctuation(String(ch)), startsWord: false)
+                    let source = i < punctuationSources.count ? punctuationSources[i] : nil
+                    emit(.punctuation(String(ch), source: source), startsWord: false)
                 } else {
                     // ASCII letter / digit / etc. — buffer for a single
                     // literal segment so the output stays compact.
@@ -534,23 +553,30 @@ public struct MandarinG2P: Sendable {
     /// both spaces where two mapped marks meet, as in `：「`.) Anything not
     /// handled here falls through to the segmenter.
     static func normalizeText(_ text: String) -> String {
-        var out = ""
+        String(normalizeTracingPunctuation(text).map(\.char))
+    }
+
+    /// ``normalizeText(_:)`` per character, with the fullwidth mark each
+    /// mapped mark came from.
+    static func normalizeTracingPunctuation(_ text: String) -> [(char: Character, source: Character?)] {
+        var out: [(char: Character, source: Character?)] = []
         out.reserveCapacity(text.count)
         func appendSpace() {
-            if let last = out.last, !last.isWhitespace { out.append(" ") }
+            if let last = out.last, !last.char.isWhitespace { out.append((" ", nil)) }
         }
         for ch in text {
             if let mapped = punctuationMap[ch] {
                 for m in mapped {
-                    if m == " " { appendSpace() } else { out.append(m) }
+                    if m == " " { appendSpace() } else { out.append((m, ch)) }
                 }
             } else if ch.isWhitespace {
                 appendSpace()
             } else {
-                out.append(ch)
+                out.append((ch, nil))
             }
         }
-        return out.trimmingCharacters(in: .whitespacesAndNewlines)
+        while out.last?.char.isWhitespace == true { out.removeLast() }
+        return out
     }
 }
 #endif

@@ -337,6 +337,33 @@ drops a word the G2P fallback cannot resolve, and emits leading punctuation as
 its own group. `inputIds` also omits characters absent from `vocab.json`, so
 its length can be shorter than `phonemes.count + 2`.
 
+### Punctuation pauses
+
+Kokoro's pause at a punctuation mark is the duration it predicts for that
+token; Mandarin `、` and `，` get only 50–125 ms. `setPunctuationPauses`
+replaces it per mark (#1105):
+
+```swift
+let mandarin = KokoroAneManager(variant: .mandarin)
+await mandarin.setPunctuationPauses(["、": .milliseconds(300), "，": .milliseconds(400)])
+let wav = try await mandarin.synthesize(text: "苹果、香蕉、橙子，都很好吃。")
+```
+
+Keys are marks as written. Mandarin keeps `、` and `，` apart although both
+reach the model as `,`; phoneme input and the other languages match the
+marks in the phoneme string, and a mark without its own entry uses the entry
+for the mark the model sees (`","` also covers `，` and `、`). Marks the
+frontend adds (the Mandarin `/` between words) and whitespace are not keys.
+Durations round to the 25 ms acoustic frame and do not scale with `speed`;
+when the pauses make one pass longer than its 2000-frame (50 s) cap, the text
+is split at a pause and rendered in parts. A longer pause is
+rendered as silence: the mark's tokens are stretched and, since stretching
+alone makes Prosody keep predicting voiced F0 (a hum, not a pause), the
+stretched frames get F0 0 and the energy of the utterance edges, keeping one
+predicted frame on each side. A shorter pause trims the predicted one.
+`predictedDurations` reports the rewritten durations. The CLI takes
+`--pause 、=300` (repeatable).
+
 ### Bypass G2P
 
 ```swift

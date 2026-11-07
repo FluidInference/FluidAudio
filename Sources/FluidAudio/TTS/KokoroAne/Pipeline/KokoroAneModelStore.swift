@@ -289,10 +289,12 @@ public actor KokoroAneModelStore {
     }
 
     func synthesizeV3(
-        inputIds: [Int32], styleS: [Float], styleTimbre: [Float], speed: Float
+        inputIds: [Int32], styleS: [Float], styleTimbre: [Float], speed: Float,
+        pauses: [KokoroAnePauses.Span] = []
     ) throws -> KokoroAneSynthesisResult {
         guard let pipeline = v3Pipeline else { throw KokoroAneError.modelNotLoaded("ANE-v3") }
-        let result = try pipeline.synthesize(inputIds: inputIds, style: styleTimbre + styleS, speed: speed)
+        let result = try pipeline.synthesize(
+            inputIds: inputIds, style: styleTimbre + styleS, speed: speed, pauses: pauses)
         let stages = result.stageMilliseconds
         var timings = KokoroAneStageTimings()
         timings.albert = stages.filter { $0.key == "Albert" || $0.key.hasPrefix("Albert_") }.values.reduce(0, +)
