@@ -1308,7 +1308,7 @@ public struct PocketTtsSynthesizer {
         "dr", "mr", "mrs", "ms", "prof", "sr", "jr", "st", "vs", "etc",
         "inc", "ltd", "co", "corp", "dept", "univ", "govt", "approx",
         "avg", "est", "gen", "gov", "hon", "sgt", "cpl", "pvt", "capt",
-        "lt", "col", "maj", "cmdr", "adm", "rev", "sen", "rep",
+        "lt", "col", "maj", "cmdr", "adm", "rev", "sen", "rep", "e.g", "i.e",
     ]
 
     /// French abbreviations that end with a period but don't end a sentence.
@@ -1382,8 +1382,9 @@ public struct PocketTtsSynthesizer {
                     continue
                 }
 
-                // Skip if followed by a digit (e.g., "3.5")
-                if i + 1 < chars.count, chars[i + 1].isNumber {
+                // Skip if followed by a letter or digit without a space: a decimal,
+                // an address or a dotted abbreviation ("3.5", "www.kyutai.org", "p.m.")
+                if i + 1 < chars.count, chars[i + 1].isLetter || chars[i + 1].isNumber {
                     continue
                 }
             }
