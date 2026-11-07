@@ -227,7 +227,9 @@ public actor StreamingUnifiedAsrManager {
     /// - Parameters:
     ///   - vocabulary: Custom vocabulary context with terms to detect
     ///     (tokenize via `CustomVocabularyContext.loadWithCtcTokens`)
-    ///   - ctcModels: Pre-loaded CTC models for keyword spotting
+    ///   - ctcModels: Pre-loaded CTC models for keyword spotting;
+    ///     `tokenizer.json` is read from `ctcModels.directory` (or
+    ///     `CtcModels.defaultCacheDirectory(for:)` when `nil`)
     ///   - config: Optional rescorer configuration (default:
     ///     `VocabularyBoostingSession.itnDefaultConfig` — this engine's ITN
     ///     output needs the #702 spotter-rescue similarity floors)

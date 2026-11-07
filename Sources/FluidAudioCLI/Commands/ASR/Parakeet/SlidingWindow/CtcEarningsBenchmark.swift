@@ -612,7 +612,7 @@ public enum CtcEarningsBenchmark {
                 ? VocabularyBoostingSession.itnDefaultConfig
                 : VocabularyRescorer.Config.default
 
-            let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
+            let ctcModelDir = ctcModels.directory ?? CtcModels.defaultCacheDirectory(for: ctcModels.variant)
             let rescorer = try await VocabularyRescorer.create(
                 spotter: spotter,
                 vocabulary: customVocab,
