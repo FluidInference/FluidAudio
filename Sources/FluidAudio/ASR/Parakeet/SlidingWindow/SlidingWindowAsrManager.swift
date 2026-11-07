@@ -167,7 +167,8 @@ public actor SlidingWindowAsrManager {
     ///
     /// - Parameters:
     ///   - vocabulary: Custom vocabulary context with terms to detect
-    ///   - ctcModels: Pre-loaded CTC models for keyword spotting
+    ///   - ctcModels: Pre-loaded CTC models for keyword spotting; `tokenizer.json` is read from
+    ///     `ctcModels.directory` (or `CtcModels.defaultCacheDirectory(for:)` when `nil`)
     ///   - config: Optional rescorer configuration (default: vocabulary-size-aware config)
     ///   - thresholds: Rescoring thresholds (default: vocabulary-size defaults)
     /// - Throws: Error if rescorer initialization fails
