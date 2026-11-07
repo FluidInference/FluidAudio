@@ -38,11 +38,20 @@ public enum MandarinErhua {
     /// Mutates `syllables` in place; the merged-into syllable gains
     /// `erhua = true`, the trailing `er` is removed.
     public static func merge(_ syllables: inout [MandarinPinyinNormalizer.Syllable]) {
-        guard syllables.count >= 2 else { return }
+        mergeReportingRemovals(&syllables)
+    }
+
+    /// ``merge(_:)``, returning the indices (into the input) of the
+    /// removed `er` syllables in descending order, so a caller can drop
+    /// the matching entries from an array kept parallel to `syllables`.
+    @discardableResult
+    static func mergeReportingRemovals(_ syllables: inout [MandarinPinyinNormalizer.Syllable]) -> [Int] {
+        guard syllables.count >= 2 else { return [] }
 
         // Walk back-to-front so removals don't shift unprocessed indices,
         // and skip past the merged-into slot once a merge fires (chained
         // `er er` patterns shouldn't double-merge).
+        var removed: [Int] = []
         var i = syllables.count - 1
         while i >= 1 {
             let cur = syllables[i]
@@ -50,6 +59,7 @@ public enum MandarinErhua {
             if cur.base == "er" && cur.isErhuaSuffix && shouldMergeInto(prev: prev) {
                 syllables[i - 1].erhua = true
                 syllables.remove(at: i)
+                removed.append(i)
                 // Advance past the now-merged anchor so an immediately
                 // preceding `er` (rare but possible across word seams)
                 // isn't itself folded into something further back.
@@ -58,6 +68,7 @@ public enum MandarinErhua {
                 i -= 1
             }
         }
+        return removed
     }
 
     /// Whether the last character of `word` is an erhua suffix that may

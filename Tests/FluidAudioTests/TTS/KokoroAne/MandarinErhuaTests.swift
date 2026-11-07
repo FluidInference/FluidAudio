@@ -186,15 +186,28 @@ final class MandarinErhuaTests: XCTestCase {
         let erhua = MandarinBopomofoMap.encode(syllable: "xiao", tone: 3, erhua: true)
         XCTAssertNotNil(nonErhua)
         XCTAssertNotNil(erhua)
-        // Erhua form contains an extra ㄦ before the tone digit.
-        XCTAssertEqual(erhua, (nonErhua ?? "").replacingOccurrences(of: "3", with: "ㄦ3"))
+        // Erhua form carries misaki's R before the tone digit.
+        XCTAssertEqual(erhua, (nonErhua ?? "").replacingOccurrences(of: "3", with: "R3"))
     }
 
     func testEncodeErhuaOnSimpleFinal() {
-        // hai2 + erhua → ㄏㄞㄦ2.
+        // hai2 + erhua → ㄏㄞR2, as misaki's ZHFrontend writes 小孩儿.
         XCTAssertEqual(
             MandarinBopomofoMap.encode(syllable: "hai", tone: 2, erhua: true),
-            "ㄏㄞㄦ2")
+            "ㄏㄞR2")
+        XCTAssertEqual(
+            MandarinBopomofoMap.encode(syllable: "shi", tone: 4, erhua: true),
+            "ㄕ十R4")
+    }
+
+    func testEncodeErhuaOnBareEFinalBecomesEr() {
+        // misaki rewrites `<initial> e` + R to the er final: 歌儿 → ㄍㄦ1.
+        XCTAssertEqual(
+            MandarinBopomofoMap.encode(syllable: "ge", tone: 1, erhua: true),
+            "ㄍㄦ1")
+        XCTAssertEqual(
+            MandarinBopomofoMap.encode(syllable: "zhe", tone: 4, erhua: true),
+            "ㄓㄦ4")
     }
 
     // MARK: - End-to-end through MandarinG2P
@@ -264,7 +277,7 @@ final class MandarinErhuaTests: XCTestCase {
         // 小孩儿 as a dict phrase: the word-final 儿 still folds.
         let g2p = MandarinG2P(dict: Self.miniDict(phrases: ["小孩儿": ["xiǎo", "hái", "ér"]]))
         let phon = try await g2p.phonemize("小孩儿")
-        XCTAssertTrue(phon.hasSuffix("ㄏㄞㄦ2"), "expected erhua on 孩; got '\(phon)'")
+        XCTAssertTrue(phon.hasSuffix("ㄏㄞR2"), "expected erhua on 孩; got '\(phon)'")
     }
 
     // MARK: - Test fixtures

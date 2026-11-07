@@ -11,8 +11,9 @@ import Foundation
 ///      currency expressions into Hanzi the rest of the pipeline can
 ///      speak directly (`2025年5月3日` → `二零二五年五月三日`).
 ///   2. **Punctuation normalization** — fullwidth → ASCII for the
-///      characters the v1.1-zh vocab actually carries (`，` → `,`,
-///      `。` → `.`, …).
+///      characters the v1.1-zh vocab actually carries, with the spaces
+///      misaki's `map_punctuation` adds (`，` → `, `, `。` → `. `,
+///      `（` → ` (`, …).
 ///   3. **Segmentation** — forward maximum-matching against
 ///      `MandarinPinyinDict.phrases`, falling back to single-char
 ///      lookups in `singles`. When a `MandarinJiebaHmm` is wired in,
@@ -31,15 +32,16 @@ import Foundation
 ///      `(base, tone)` via `MandarinPinyinNormalizer`.
 ///   6. **Erhua merge** — `MandarinErhua.merge` folds a word-final `儿`
 ///      into the previous syllable so `小孩儿` emits a single
-///      r-coloured token (`ㄒㄧㄠ3ㄏㄞㄦ2`). Other characters read `er`
+///      r-coloured syllable (`ㄒ要3ㄏㄞR2`). Other characters read `er`
 ///      (`二`, `而`, `耳`, `尔`) keep their own syllable.
 ///   7. **Tone sandhi** — 3+3 → 2+3, 不 / 一 contextual rules
 ///      (`MandarinToneSandhi`).
 ///   8. **Pinyin → Bopomofo** — `MandarinBopomofoMap.encode` produces
 ///      the final `<initial><final><digit>` string per syllable.
-///   9. **Concatenation** — syllables joined with no separator,
-///      punctuation interleaved verbatim. The output is fed straight
-///      into `KokoroAneVocab.encode`.
+///   9. **Concatenation** — syllables of one word joined with no
+///      separator, adjacent words joined with misaki's `/`
+///      (`MandarinWordBoundaries`), punctuation interleaved verbatim.
+///      The output is fed straight into `KokoroAneVocab.encode`.
 ///
 /// User overrides:
 ///
@@ -95,6 +97,9 @@ public struct MandarinG2P: Sendable {
         let normalizedChars = Array(normalized)
         let result = segment(chars: normalizedChars)
         var segments = result.segments
+        // From the dict readings, before g2pW, as misaki merges words on
+        // pypinyin's.
+        let slashBefore = Self.wordSeparators(segments: segments, wordStarts: result.wordStarts)
 
         // Polyphone disambiguation: when a g2pW model is wired and the
         // segmenter flagged candidate Hanzi, run the classifier and
@@ -126,9 +131,16 @@ public struct MandarinG2P: Sendable {
 
         var output = ""
         var pendingSyllables: [MandarinPinyinNormalizer.Syllable] = []
+        // Parallel to `pendingSyllables`: a `/` goes before this syllable.
+        var pendingSlash: [Bool] = []
         // The Hanzi behind `pendingSyllables`, so the erhua pass can tell
         // `儿` from `二` / `而` / `耳` / `尔`, which all read `er`.
         var pendingHanzi: [Character] = []
+
+        func appendPending(_ syllables: [MandarinPinyinNormalizer.Syllable], slash: Bool) {
+            pendingSlash.append(contentsOf: syllables.indices.map { $0 == 0 && slash })
+            pendingSyllables.append(contentsOf: syllables)
+        }
 
         func flushPending() {
             defer { pendingHanzi.removeAll(keepingCapacity: true) }
@@ -136,22 +148,32 @@ public struct MandarinG2P: Sendable {
             // Order: erhua first (it shrinks the buffer), then sandhi
             // operates on the merged result so 3+3 promotion sees the
             // r-coloured syllable as a single tonal unit.
-            MandarinErhua.merge(&pendingSyllables)
+            for removed in MandarinErhua.mergeReportingRemovals(&pendingSyllables) {
+                pendingSlash.remove(at: removed)
+            }
             MandarinToneSandhi.apply(&pendingSyllables)
-            for syl in pendingSyllables {
+            var emitted = false
+            var slash = false
+            for (syl, slashBefore) in zip(pendingSyllables, pendingSlash) {
+                slash = slash || slashBefore
                 if let bo = MandarinBopomofoMap.encode(
                     syllable: syl.base, tone: syl.tone, erhua: syl.erhua)
                 {
+                    if slash && emitted { output.append("/") }
                     output.append(bo)
+                    emitted = true
+                    slash = false
                 } else {
                     Self.logger.warning(
                         "Mandarin G2P dropped untranslatable syllable '\(syl.base)\(syl.tone)'")
                 }
             }
             pendingSyllables.removeAll(keepingCapacity: true)
+            pendingSlash.removeAll(keepingCapacity: true)
         }
 
-        for seg in segments {
+        for (index, seg) in segments.enumerated() {
+            let slash = slashBefore[index]
             switch seg {
             case .pinyin(let list, let word):
                 var syllables = list.map(MandarinPinyinNormalizer.normalize)
@@ -164,9 +186,9 @@ public struct MandarinG2P: Sendable {
                 {
                     syllables[last].isErhuaSuffix = true
                 }
-                pendingSyllables.append(contentsOf: syllables)
+                appendPending(syllables, slash: slash)
                 pendingHanzi.append(contentsOf: chars)
-            case .syllables(let list):
+            case .syllables(let list, _):
                 // User-lexicon pinyin tokens — already in
                 // (base, tone) form. They join the same syllable buffer
                 // so sandhi runs across user/dict boundaries naturally
@@ -175,7 +197,7 @@ public struct MandarinG2P: Sendable {
                 // taken literally for erhua: their `er` tokens stay
                 // unflagged, and a `儿` after them has no Hanzi context
                 // to fold by.
-                pendingSyllables.append(contentsOf: list)
+                appendPending(list, slash: slash)
                 pendingHanzi.removeAll(keepingCapacity: true)
             case .punctuation(let s):
                 // Sandhi never crosses punctuation; emit accumulated
@@ -196,7 +218,7 @@ public struct MandarinG2P: Sendable {
                 {
                     syllable.isErhuaSuffix = true
                 }
-                pendingSyllables.append(syllable)
+                appendPending([syllable], slash: slash)
                 pendingHanzi.append(hanzi)
             }
         }
@@ -238,8 +260,9 @@ public struct MandarinG2P: Sendable {
         /// which the dict already context-disambiguated. The text itself
         /// is what lets the erhua pass tell `儿` from other `er` readings.
         case pinyin([String], word: String)
-        /// Pre-parsed syllables (user-lexicon source).
-        case syllables([MandarinPinyinNormalizer.Syllable])
+        /// Pre-parsed syllables (user-lexicon source). `word` is the Hanzi
+        /// the lexicon hit consumed, on the hit's first segment only.
+        case syllables([MandarinPinyinNormalizer.Syllable], word: String)
         case punctuation(String)  // ASCII punctuation passthrough.
         case literal(String)  // Anything else (ASCII letters, digits,
         // already-phonemised bopomofo, etc.)
@@ -256,6 +279,10 @@ public struct MandarinG2P: Sendable {
     struct SegmentResult {
         let segments: [Segment]
         let polyphoneTargets: [PolyphoneTarget]
+        /// Parallel to `segments`: the segment starts a word. The
+        /// per-character fallbacks of one jieba-HMM word, and the
+        /// segments of one lexicon hit, are one word.
+        let wordStarts: [Bool]
     }
 
     struct PolyphoneTarget {
@@ -265,6 +292,7 @@ public struct MandarinG2P: Sendable {
 
     func segment(chars: [Character]) -> SegmentResult {
         var segments: [Segment] = []
+        var wordStarts: [Bool] = []
         var polyphoneTargets: [PolyphoneTarget] = []
         var i = 0
         let upperBound = max(2, dict.maxPhraseCharCount)
@@ -272,9 +300,14 @@ public struct MandarinG2P: Sendable {
         var hanziFallbackRun: [Character] = []
         var hanziFallbackStart = 0
 
+        func emit(_ segment: Segment, startsWord: Bool) {
+            segments.append(segment)
+            wordStarts.append(startsWord)
+        }
+
         func flushLiteral() {
             if !literalBuffer.isEmpty {
-                segments.append(.literal(literalBuffer))
+                emit(.literal(literalBuffer), startsWord: false)
                 literalBuffer.removeAll(keepingCapacity: true)
             }
         }
@@ -300,7 +333,7 @@ public struct MandarinG2P: Sendable {
             for word in words {
                 let wordCharCount = word.count
                 if wordCharCount >= 2, let pinyin = dict.phrases[word] {
-                    segments.append(.pinyin(pinyin, word: word))
+                    emit(.pinyin(pinyin, word: word), startsWord: true)
                     offsetInRun += wordCharCount
                     continue
                 }
@@ -318,7 +351,7 @@ public struct MandarinG2P: Sendable {
                                 PolyphoneTarget(
                                     segmentIdx: segments.count, charPos: absPos))
                         }
-                        segments.append(.pinyin([pinyin[0]], word: String(ch)))
+                        emit(.pinyin([pinyin[0]], word: String(ch)), startsWord: offsetInWord == 0)
                     } else {
                         // Unknown char — fall through as literal so
                         // KokoroAneVocab can have a shot at it.
@@ -339,7 +372,7 @@ public struct MandarinG2P: Sendable {
                 flushHanziRun()
                 if MandarinBopomofoMap.allowedPunctuation.contains(ch) {
                     flushLiteral()
-                    segments.append(.punctuation(String(ch)))
+                    emit(.punctuation(String(ch)), startsWord: false)
                 } else {
                     // ASCII letter / digit / etc. — buffer for a single
                     // literal segment so the output stays compact.
@@ -356,7 +389,10 @@ public struct MandarinG2P: Sendable {
             if let hit = customLexicon.longestMatch(in: chars, from: i) {
                 flushHanziRun()
                 flushLiteral()
-                emitLexiconHit(hit.tokens, into: &segments)
+                let word = String(chars[i..<(i + hit.length)])
+                for (k, hitSegment) in lexiconSegments(hit.tokens, word: word).enumerated() {
+                    emit(hitSegment, startsWord: k == 0)
+                }
                 i += hit.length
                 continue
             }
@@ -372,7 +408,7 @@ public struct MandarinG2P: Sendable {
                         if let pinyin = dict.phrases[candidate] {
                             flushHanziRun()
                             flushLiteral()
-                            segments.append(.pinyin(pinyin, word: candidate))
+                            emit(.pinyin(pinyin, word: candidate), startsWord: true)
                             i += len
                             matched = true
                             break
@@ -394,24 +430,22 @@ public struct MandarinG2P: Sendable {
         }
         flushHanziRun()
         flushLiteral()
-        return SegmentResult(segments: segments, polyphoneTargets: polyphoneTargets)
+        return SegmentResult(segments: segments, polyphoneTargets: polyphoneTargets, wordStarts: wordStarts)
     }
 
-    /// Emit a user-lexicon hit as a single segment when possible
+    /// A user-lexicon hit as a single segment when possible
     /// (consecutive run of one token kind), or as separate segments
     /// when the hit mixes pinyin + bopomofo tokens. Preserving order
     /// matters because sandhi accumulates across `.syllables` segments
     /// but resets at `.literal` segments (matching the existing
     /// punctuation/dict contract).
-    private func emitLexiconHit(
-        _ tokens: [MandarinCustomLexicon.Token],
-        into segments: inout [Segment]
-    ) {
+    private func lexiconSegments(_ tokens: [MandarinCustomLexicon.Token], word: String) -> [Segment] {
+        var segments: [Segment] = []
         var pendingSyls: [MandarinPinyinNormalizer.Syllable] = []
         var pendingBopo = ""
         func flushSyls() {
             if !pendingSyls.isEmpty {
-                segments.append(.syllables(pendingSyls))
+                segments.append(.syllables(pendingSyls, word: segments.isEmpty ? word : ""))
                 pendingSyls.removeAll(keepingCapacity: true)
             }
         }
@@ -433,45 +467,90 @@ public struct MandarinG2P: Sendable {
         }
         flushSyls()
         flushBopo()
+        return segments
+    }
+
+    /// Parallel to `segments`: whether a `/` goes before the segment.
+    /// Words are grouped per `wordStarts`; punctuation and literals end a
+    /// run, so no `/` is written next to them (misaki writes none next to
+    /// punctuation, and literal bopomofo carries no tones to merge on).
+    static func wordSeparators(segments: [Segment], wordStarts: [Bool]) -> [Bool] {
+        var separators = [Bool](repeating: false, count: segments.count)
+        var words: [MandarinWordBoundaries.Word] = []
+        var firstSegments: [Int] = []
+        var text: [Character] = []
+        var tones: [Int] = []
+
+        func closeWord() {
+            guard !text.isEmpty || !tones.isEmpty else { return }
+            words.append(MandarinWordBoundaries.Word(text: text, tones: tones))
+            text.removeAll()
+            tones.removeAll()
+        }
+        func closeRun() {
+            closeWord()
+            for (k, separator) in MandarinWordBoundaries.separators(for: words).enumerated() where separator {
+                separators[firstSegments[k]] = true
+            }
+            words.removeAll()
+            firstSegments.removeAll()
+        }
+        func add(_ index: Int, text segmentText: String, tones segmentTones: [Int]) {
+            if wordStarts[index] || firstSegments.count == words.count {
+                closeWord()
+                firstSegments.append(index)
+            }
+            text.append(contentsOf: segmentText)
+            tones.append(contentsOf: segmentTones)
+        }
+
+        for (index, segment) in segments.enumerated() {
+            switch segment {
+            case .pinyin(let list, let word):
+                add(index, text: word, tones: list.map { MandarinPinyinNormalizer.normalize($0).tone })
+            case .syllables(let list, let word):
+                add(index, text: word, tones: list.map(\.tone))
+            case .disambiguated(let syllable, let hanzi):
+                add(index, text: String(hanzi), tones: [syllable.tone])
+            case .punctuation, .literal:
+                closeRun()
+            }
+        }
+        closeRun()
+        return separators
     }
 
     // MARK: - Text normalization
 
-    /// Map fullwidth punctuation to the ASCII forms the v1.1-zh vocab
-    /// actually carries, and collapse whitespace to a single space.
-    /// Anything not handled here falls through to the segmenter.
+    /// misaki's `ZHG2P.map_punctuation`: fullwidth marks → the ASCII marks
+    /// the v1.1-zh vocab carries, with the spaces misaki puts around them.
+    static let punctuationMap: [Character: String] = [
+        "，": ", ", "、": ", ", "。": ". ", "．": ". ", "！": "! ", "？": "? ",
+        "；": "; ", "：": ": ", "（": " (", "）": ") ", "／": "/",
+        "«": " “", "《": " “", "「": " “", "『": " “", "【": " “",
+        "»": "” ", "》": "” ", "」": "” ", "』": "” ", "】": "” ",
+    ]
+
+    /// Map fullwidth punctuation per ``punctuationMap`` and collapse
+    /// whitespace runs to a single space, trimming the ends. (misaki keeps
+    /// both spaces where two mapped marks meet, as in `：「`.) Anything not
+    /// handled here falls through to the segmenter.
     static func normalizeText(_ text: String) -> String {
         var out = ""
         out.reserveCapacity(text.count)
-        var lastWasSpace = false
+        func appendSpace() {
+            if let last = out.last, !last.isWhitespace { out.append(" ") }
+        }
         for ch in text {
-            let mapped: Character?
-            switch ch {
-            case "，", "、": mapped = ","
-            case "。": mapped = "."
-            case "！": mapped = "!"
-            case "？": mapped = "?"
-            case "；": mapped = ";"
-            case "：": mapped = ":"
-            case "（": mapped = "("
-            case "）": mapped = ")"
-            case "／": mapped = "/"
-            case "「", "『": mapped = "“"
-            case "」", "』": mapped = "”"
-            default: mapped = nil
+            if let mapped = punctuationMap[ch] {
+                for m in mapped {
+                    if m == " " { appendSpace() } else { out.append(m) }
+                }
+            } else if ch.isWhitespace {
+                appendSpace()
+            } else {
+                out.append(ch)
             }
-            if let m = mapped {
-                out.append(m)
-                lastWasSpace = false
-                continue
-            }
-            if ch.isWhitespace {
-                if !lastWasSpace && !out.isEmpty { out.append(" ") }
-                lastWasSpace = true
-                continue
-            }
-            out.append(ch)
-            lastWasSpace = false
         }
         return out.trimmingCharacters(in: .whitespacesAndNewlines)
     }
