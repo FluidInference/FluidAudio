@@ -181,7 +181,10 @@ final class KokoroAneV3Pipeline {
         var durations = values.map { max(1, Int32($0.rounded())) }
         let silentFrames = KokoroAnePauses.apply(pauses, to: &durations)
         let frames = durations.reduce(0) { $0 + Int($1) }
-        guard frames >= 2, frames <= 2000 else { throw KokoroAneV3Error.invalidInput("Audio exceeds 2000-frame limit") }
+        guard frames <= KokoroAneConstants.maxAcousticFrames else {
+            throw KokoroAneError.acousticFramesExceedCap(have: frames, cap: KokoroAneConstants.maxAcousticFrames)
+        }
+        guard frames >= 2 else { throw KokoroAneV3Error.invalidInput("Expected at least 2 acoustic frames") }
         let alignment = try predict(
             "Alignment",
             [

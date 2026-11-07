@@ -65,11 +65,16 @@ enum PhonemeChunker {
         let count = characters.count
         var ranges: [Range<Int>] = []
 
+        // Chunks are trimmed like `trimmingCharacters(in: .whitespacesAndNewlines)`,
+        // which also strips U+200B.
+        func isTrimmed(_ character: Character) -> Bool {
+            character.unicodeScalars.allSatisfy(CharacterSet.whitespacesAndNewlines.contains)
+        }
         func appendChunk(_ range: Range<Int>) {
             var lower = range.lowerBound
             var upper = range.upperBound
-            while lower < upper, characters[lower].isWhitespace { lower += 1 }
-            while upper > lower, characters[upper - 1].isWhitespace { upper -= 1 }
+            while lower < upper, isTrimmed(characters[lower]) { lower += 1 }
+            while upper > lower, isTrimmed(characters[upper - 1]) { upper -= 1 }
             if lower < upper { ranges.append(lower..<upper) }
         }
 

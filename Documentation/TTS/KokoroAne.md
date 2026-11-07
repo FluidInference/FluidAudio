@@ -352,8 +352,11 @@ let wav = try await mandarin.synthesize(text: "苹果、香蕉、橙子，都很
 Keys are marks as written. Mandarin keeps `、` and `，` apart although both
 reach the model as `,`; phoneme input and the other languages match the
 marks in the phoneme string, and a mark without its own entry uses the entry
-for the mark the model sees (`","` also covers `，` and `、`). Durations round
-to the 25 ms acoustic frame and do not scale with `speed`. A longer pause is
+for the mark the model sees (`","` also covers `，` and `、`). Marks the
+frontend adds (the Mandarin `/` between words) and whitespace are not keys.
+Durations round to the 25 ms acoustic frame and do not scale with `speed`;
+when the pauses make one pass longer than its 2000-frame (50 s) cap, the text
+is split at a pause and rendered in parts. A longer pause is
 rendered as silence: the mark's tokens are stretched and, since stretching
 alone makes Prosody keep predicting voiced F0 (a hum, not a pause), the
 stretched frames get F0 0 and the energy of the utterance edges, keeping one

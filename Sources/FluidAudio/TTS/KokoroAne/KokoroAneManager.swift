@@ -196,11 +196,15 @@ public actor KokoroAneManager {
     /// for the mark the model sees, so `","` also covers `，` and `、`.
     /// Consecutive marks share the longest of their pauses.
     ///
+    /// Marks the frontend adds (the Mandarin `/` between words) and
+    /// whitespace are not keys.
+    ///
     /// The duration is rounded to Kokoro's 25 ms acoustic frame and is not
     /// scaled by `speed`. A longer pause than the predicted one is rendered
-    /// as silence; a shorter one trims the predicted pause. Applies to all
-    /// later synthesis on this manager; pass `[:]` to restore the predicted
-    /// pauses.
+    /// as silence; a shorter one trims the predicted pause. When the pauses
+    /// make a pass longer than its 2000-frame (50 s) cap, the text is split
+    /// at a pause and rendered in parts. Applies to all later synthesis on
+    /// this manager; pass `[:]` to restore the predicted pauses.
     public func setPunctuationPauses(_ pauses: [Character: Duration]) {
         punctuationPauses = pauses.mapValues(KokoroAnePauses.frames(for:))
     }
@@ -295,8 +299,7 @@ public actor KokoroAneManager {
         let frontend = try await resolveFrontend(for: text)
         // Chunk after normalization / G2P so written forms are never split; the
         // cap is in Unicode scalars, as the vocab encoder counts it (#712, #940).
-        let scalars = frontend.phonemes.unicodeScalars.map(Character.init)
-        let chunks = PhonemeChunker.chunkRanges(scalars, maxLength: KokoroAneConstants.maxPhonemeLength)
+        let chunks = Self.chunks(of: frontend.phonemes, sources: frontend.punctuationSources)
         guard chunks.count > 1 else {
             return try await runChain(
                 phonemes: frontend.phonemes, normalizedText: frontend.normalizedText, voice: voice, speed: speed,
@@ -305,17 +308,26 @@ public actor KokoroAneManager {
         var parts: [KokoroAneSynthesisResult] = []
         for chunk in chunks {
             try Task.checkCancellation()
-            let sources = frontend.punctuationSources.filter { chunk.contains($0.key) }
             parts.append(
                 try await runChain(
-                    phonemes: String(scalars[chunk]), normalizedText: nil, voice: voice, speed: speed,
-                    punctuationSources: Dictionary(
-                        uniqueKeysWithValues: sources.map { ($0.key - chunk.lowerBound, $0.value) })))
+                    phonemes: chunk.phonemes, normalizedText: nil, voice: voice, speed: speed,
+                    punctuationSources: chunk.sources))
         }
         var result = KokoroAneSynthesisResult.concatenating(parts)
         result.normalizedText = frontend.normalizedText
         result.phonemes = frontend.phonemes
         return result
+    }
+
+    /// `phonemes` split to the per-pass cap, each chunk with the
+    /// `sources` inside it rebased to the chunk.
+    static func chunks(
+        of phonemes: String, sources: [Int: Character]?
+    ) -> [(phonemes: String, sources: [Int: Character]?)] {
+        let scalars = phonemes.unicodeScalars.map(Character.init)
+        return PhonemeChunker.chunkRanges(scalars, maxLength: KokoroAneConstants.maxPhonemeLength).map {
+            KokoroAnePauses.piece(of: scalars, $0, sources: sources)
+        }
     }
 
     /// Resolve the exact phoneme string ``synthesize(text:voice:speed:)``
@@ -343,18 +355,19 @@ public actor KokoroAneManager {
     /// text it actually spoke (issue #943). `normalizedText` is `nil` when the
     /// input was treated as pre-computed phonemes.
     ///
-    /// `punctuationSources` maps the Unicode-scalar offset of a punctuation
-    /// mark the frontend rewrote to the mark as written (Mandarin only).
+    /// `punctuationSources` maps the Unicode-scalar offset of each
+    /// punctuation mark from the input to the mark as written (Mandarin
+    /// text only; `nil` elsewhere, see ``KokoroAnePauses/spans``).
     func resolveFrontend(
         for text: String
-    ) async throws -> (normalizedText: String?, phonemes: String, punctuationSources: [Int: Character]) {
+    ) async throws -> (normalizedText: String?, phonemes: String, punctuationSources: [Int: Character]?) {
         switch variant {
         case .english:
             // Byte-exact NeMo TN before G2P via the shared frontend entry
             // point: "$5" → "five dollars", "2024" → "twenty twenty four".
             // No-op for plain prose.
             let normalized = EnglishTextNormalizer.normalizeForFrontend(text)
-            return (normalized, try await phonemize(text: normalized), [:])
+            return (normalized, try await phonemize(text: normalized), nil)
         case .mandarin:
             try await store.loadIfNeeded()
             // Normalize written forms to their Mandarin reading before
@@ -376,20 +389,20 @@ public actor KokoroAneManager {
                 // No Hanzi present → caller already supplied bopomofo /
                 // ASCII punctuation. Pass through so power users can
                 // still override pronunciation manually.
-                return (nil, normalized, [:])
+                return (nil, normalized, nil)
             }
         case .japanese:
             // Pre-computed IPA (issue #698) passes through untouched: NFKC
             // would fold its modifier letters (ʲ → j). Anything outside the
             // phoneme alphabet — kana, kanji, half-width kana, digits — is
             // text and goes through normalization and the frontend.
-            guard !Self.looksLikePrecomputedJapaneseIPA(text) else { return (nil, text, [:]) }
+            guard !Self.looksLikePrecomputedJapaneseIPA(text) else { return (nil, text, nil) }
             // The NeMo FST drops half-width dakuten (ｶﾞ → カ) and reads the
             // full-width tilde as a symbol, so fold both before it runs.
             let folded = JapaneseCutlet.foldingHalfWidthForms(text)
             let normalized = NemoTextNormalizer.normalize(folded, language: .japanese)
             let g2p = try await store.japaneseG2PPipeline()
-            return (normalized, try await g2p.phonemize(normalized), [:])
+            return (normalized, try await g2p.phonemize(normalized), nil)
         case .spanish:
             var normalized = NemoTextNormalizer.normalize(text, language: .spanish)
             // Without the engine linked, read numbers here rather than let the
@@ -398,14 +411,14 @@ public actor KokoroAneManager {
                 normalized = RomanceNumberNormalizer.normalize(normalized, language: .spanish)
             }
             let lexicon = await store.spanishLexicon()
-            return (normalized, try Self.nonEmpty(SpanishG2P.phonemize(normalized, lexicon: lexicon), for: text), [:])
+            return (normalized, try Self.nonEmpty(SpanishG2P.phonemize(normalized, lexicon: lexicon), for: text), nil)
         case .french:
             var normalized = NemoTextNormalizer.normalize(text, language: .french)
             if !NemoTextNormalizer.isAvailable {
                 normalized = RomanceNumberNormalizer.normalize(normalized, language: .french)
             }
             let g2p = try await store.frenchG2PPipeline()
-            return (normalized, try Self.nonEmpty(await g2p.phonemize(normalized), for: text), [:])
+            return (normalized, try Self.nonEmpty(await g2p.phonemize(normalized), for: text), nil)
         }
     }
 
@@ -446,7 +459,7 @@ public actor KokoroAneManager {
         normalizedText: String?,
         voice: String?,
         speed: Float,
-        punctuationSources: [Int: Character] = [:]
+        punctuationSources: [Int: Character]? = nil
     ) async throws -> KokoroAneSynthesisResult {
         try await store.loadIfNeeded()
         let vocab = try await store.vocabulary()
@@ -462,13 +475,30 @@ public actor KokoroAneManager {
             phonemes: phonemes, vocab: vocab, sources: punctuationSources, pauses: punctuationPauses)
 
         var result: KokoroAneSynthesisResult
-        if store.version == .v3 {
-            result = try await store.synthesizeV3(
-                inputIds: inputIds, styleS: styleS, styleTimbre: styleTimbre, speed: speed, pauses: pauses)
-        } else {
-            result = try await KokoroAneSynthesizer.synthesize(
-                inputIds: inputIds, styleS: styleS, styleTimbre: styleTimbre, speed: speed, pauses: pauses,
-                store: store)
+        do {
+            if store.version == .v3 {
+                result = try await store.synthesizeV3(
+                    inputIds: inputIds, styleS: styleS, styleTimbre: styleTimbre, speed: speed, pauses: pauses)
+            } else {
+                result = try await KokoroAneSynthesizer.synthesize(
+                    inputIds: inputIds, styleS: styleS, styleTimbre: styleTimbre, speed: speed, pauses: pauses,
+                    store: store)
+            }
+        } catch let error as KokoroAneError {
+            // Long pauses can push a pass past the frame cap; render the
+            // halves on either side of a pause separately.
+            guard case .acousticFramesExceedCap = error,
+                let pieces = KokoroAnePauses.split(phonemes, atPauseNearestMiddle: pauses, sources: punctuationSources)
+            else { throw error }
+            var parts: [KokoroAneSynthesisResult] = []
+            for piece in pieces {
+                try Task.checkCancellation()
+                parts.append(
+                    try await runChain(
+                        phonemes: piece.phonemes, normalizedText: nil, voice: voice, speed: speed,
+                        punctuationSources: piece.sources))
+            }
+            result = KokoroAneSynthesisResult.concatenating(parts)
         }
         result.normalizedText = normalizedText
         result.phonemes = phonemes

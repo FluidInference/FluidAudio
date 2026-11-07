@@ -28,8 +28,8 @@ final class KokoroAnePausesTests: XCTestCase {
 
     func testSpanCoversMarkAndTrailingSpace() {
         // Tokens: BOS 0, a 1, `,` 2, ` ` 3, b 4, `.` 5.
-        let spans = KokoroAnePauses.spans(phonemes: "a, b.", vocab: vocab, sources: [:], pauses: [",": 8])
-        XCTAssertEqual(spans, [.init(tokens: 2..<4, frames: 8)])
+        let spans = KokoroAnePauses.spans(phonemes: "a, b.", vocab: vocab, sources: nil, pauses: [",": 8])
+        XCTAssertEqual(spans, [.init(tokens: 2..<4, frames: 8, scalars: 1..<3)])
     }
 
     func testSourceMarkWinsAndFallsBackToTheModelMark() {
@@ -37,26 +37,73 @@ final class KokoroAnePausesTests: XCTestCase {
         let sources: [Int: Character] = [1: "、", 4: "，"]
         let spans = KokoroAnePauses.spans(
             phonemes: "a, b, a", vocab: vocab, sources: sources, pauses: ["、": 12, ",": 6])
-        XCTAssertEqual(spans, [.init(tokens: 2..<4, frames: 12), .init(tokens: 5..<7, frames: 6)])
+        XCTAssertEqual(
+            spans,
+            [.init(tokens: 2..<4, frames: 12, scalars: 1..<3), .init(tokens: 5..<7, frames: 6, scalars: 4..<6)])
         let dunOnly = KokoroAnePauses.spans(
             phonemes: "a, b, a", vocab: vocab, sources: sources, pauses: ["、": 12])
-        XCTAssertEqual(dunOnly, [.init(tokens: 2..<4, frames: 12)])
+        XCTAssertEqual(dunOnly, [.init(tokens: 2..<4, frames: 12, scalars: 1..<3)])
+    }
+
+    func testMarksTheFrontendAddedAreNotKeys() {
+        // Mandarin `/` between words has no source; a typed `／` does.
+        let vocab = KokoroAneVocab(map: ["a": 43, "b": 44, ",": 3, "/": 7, " ": 16])
+        let generated = KokoroAnePauses.spans(
+            phonemes: "a/b, a", vocab: vocab, sources: [3: ","], pauses: ["/": 9, ",": 4])
+        XCTAssertEqual(generated, [.init(tokens: 4..<6, frames: 4, scalars: 3..<5)])
+        let typed = KokoroAnePauses.spans(
+            phonemes: "a/b", vocab: vocab, sources: [1: "／"], pauses: ["/": 9])
+        XCTAssertEqual(typed, [.init(tokens: 2..<3, frames: 9, scalars: 1..<2)])
     }
 
     func testConsecutiveMarksShareTheLongestPause() {
         let spans = KokoroAnePauses.spans(
-            phonemes: "a?! b", vocab: vocab, sources: [:], pauses: ["?": 10, "!": 6])
-        XCTAssertEqual(spans, [.init(tokens: 2..<5, frames: 10)])
+            phonemes: "a?! b", vocab: vocab, sources: nil, pauses: ["?": 10, "!": 6])
+        XCTAssertEqual(spans, [.init(tokens: 2..<5, frames: 10, scalars: 1..<4)])
     }
 
     func testScalarsOutsideTheVocabDoNotShiftTokens() {
         // ❓ is dropped by the encoder, so `,` is still token 2.
-        let spans = KokoroAnePauses.spans(phonemes: "a❓,b", vocab: vocab, sources: [:], pauses: [",": 4])
-        XCTAssertEqual(spans, [.init(tokens: 2..<3, frames: 4)])
+        let spans = KokoroAnePauses.spans(phonemes: "a❓,b", vocab: vocab, sources: nil, pauses: [",": 4])
+        XCTAssertEqual(spans, [.init(tokens: 2..<3, frames: 4, scalars: 2..<3)])
     }
 
     func testNoPausesNoSpans() {
-        XCTAssertEqual(KokoroAnePauses.spans(phonemes: "a, b.", vocab: vocab, sources: [:], pauses: [:]), [])
+        XCTAssertEqual(KokoroAnePauses.spans(phonemes: "a, b.", vocab: vocab, sources: nil, pauses: [:]), [])
+    }
+
+    // MARK: - Splitting
+
+    func testSplitCutsAfterThePauseNearestTheMiddle() throws {
+        let phonemes = "aa, bb, aa, bb"
+        let spans = KokoroAnePauses.spans(phonemes: phonemes, vocab: vocab, sources: nil, pauses: [",": 4])
+        let pieces = try XCTUnwrap(
+            KokoroAnePauses.split(phonemes, atPauseNearestMiddle: spans, sources: [2: "、", 6: "、", 10: "，"]))
+        XCTAssertEqual(pieces.map(\.phonemes), ["aa, bb, ", "aa, bb"])
+        XCTAssertEqual(pieces.map(\.sources), [[2: "、", 6: "、"], [2: "，"]])
+        // No pause inside the string: nothing to cut at.
+        XCTAssertNil(KokoroAnePauses.split("aa bb", atPauseNearestMiddle: [], sources: nil))
+    }
+
+    func testChunksRebaseSourcesPastTheCap() throws {
+        // 120 × "ㄋㄧ2, " is 600 scalars: two chunks, each comma still sourced.
+        let phonemes = String(repeating: "ㄋㄧ2, ", count: 120)
+        let sources = Dictionary(uniqueKeysWithValues: (0..<120).map { ($0 * 5 + 3, Character("、")) })
+        let chunks = KokoroAneManager.chunks(of: phonemes, sources: sources)
+        XCTAssertEqual(chunks.count, 2)
+        var total = 0
+        for chunk in chunks {
+            let scalars = Array(chunk.phonemes.unicodeScalars)
+            let chunkSources = try XCTUnwrap(chunk.sources)
+            XCTAssertEqual(chunkSources.count, scalars.filter { $0 == "," }.count)
+            for (offset, mark) in chunkSources {
+                XCTAssertEqual(scalars[offset], ",")
+                XCTAssertEqual(mark, "、")
+            }
+            total += chunkSources.count
+        }
+        XCTAssertEqual(total, 120)
+        XCTAssertNil(KokoroAneManager.chunks(of: phonemes, sources: nil).first?.sources)
     }
 
     // MARK: - Durations
@@ -124,12 +171,16 @@ final class KokoroAnePausesTests: XCTestCase {
         let traced = try await MandarinG2P(dict: dict).phonemizeTracingPunctuation("你好、世界，你好")
         XCTAssertEqual(traced.phonemes, "ㄋㄧ2ㄏㄠ3, ㄕ十4ㄐㄝ4, ㄋㄧ2ㄏㄠ3")
         XCTAssertEqual(traced.punctuationSources, [6: "、", 14: "，"])
+        // Input marks map to themselves; the `/` between words has no entry.
+        let ascii = try await MandarinG2P(dict: dict).phonemizeTracingPunctuation("你好世界,你好")
+        XCTAssertEqual(ascii.phonemes, "ㄋㄧ2ㄏㄠ3/ㄕ十4ㄐㄝ4,ㄋㄧ2ㄏㄠ3")
+        XCTAssertEqual(ascii.punctuationSources, [13: ","])
     }
 
     // MARK: - End to end
 
-    /// Runs the shipped Mandarin chain when it is cached.
-    func testMandarinPauseIsRenderedAsSilence() async throws {
+    /// The shipped Mandarin chain, when it is cached.
+    private func mandarinManager() throws -> KokoroAneManager {
         let repoDirectory = try KokoroAneResourceDownloader.repositoryDirectory(variant: .mandarin)
         let cached = ModelNames.KokoroAne.requiredModelsZh.allSatisfy {
             FileManager.default.fileExists(atPath: repoDirectory.appendingPathComponent($0).path)
@@ -137,7 +188,25 @@ final class KokoroAnePausesTests: XCTestCase {
         try XCTSkipUnless(
             cached || ProcessInfo.processInfo.environment["FLUIDAUDIO_RUN_TTS_E2E"] == "1",
             "Mandarin bundle not cached; set FLUIDAUDIO_RUN_TTS_E2E=1")
-        let manager = KokoroAneManager(variant: .mandarin)
+        return KokoroAneManager(variant: .mandarin)
+    }
+
+    func testPausesPastTheFrameCapRenderInParts() async throws {
+        // Five 10 s pauses (2000 frames) exceed one pass with the speech.
+        let manager = try mandarinManager()
+        await manager.setPunctuationPauses(["、": .seconds(10)])
+        let result = try await manager.synthesizeDetailed(text: "苹果、香蕉、橙子、葡萄、西瓜、桃子。")
+        XCTAssertGreaterThan(result.acousticFrames, KokoroAneConstants.maxAcousticFrames)
+        XCTAssertEqual(result.samples.count, result.acousticFrames * 600)
+        var pauseFrames: Int32 = 0
+        for (index, id) in result.inputIds.enumerated() where id == 3 {
+            pauseFrames += result.predictedDurations[index] + result.predictedDurations[index + 1]
+        }
+        XCTAssertEqual(pauseFrames, 5 * 400)
+    }
+
+    func testMandarinPauseIsRenderedAsSilence() async throws {
+        let manager = try mandarinManager()
         let text = "苹果、香蕉，橙子。"
         let natural = try await manager.synthesizeDetailed(text: text)
         await manager.setPunctuationPauses(["、": .milliseconds(400)])

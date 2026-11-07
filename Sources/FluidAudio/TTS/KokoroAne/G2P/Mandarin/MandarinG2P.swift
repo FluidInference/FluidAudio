@@ -93,8 +93,9 @@ public struct MandarinG2P: Sendable {
     }
 
     /// ``phonemize(_:)``, plus the mark as written for each punctuation
-    /// mark the frontend rewrote (`、` → `,`), keyed by the rewritten
-    /// mark's Unicode-scalar offset in `phonemes`.
+    /// mark from the input (`、` for the `,` it became), keyed by its
+    /// Unicode-scalar offset in `phonemes`. Marks the frontend adds (the
+    /// `/` between words, spaces) have no entry.
     func phonemizeTracingPunctuation(
         _ text: String
     ) async throws -> (phonemes: String, punctuationSources: [Int: Character]) {
@@ -211,7 +212,9 @@ public struct MandarinG2P: Sendable {
                 // Sandhi never crosses punctuation; emit accumulated
                 // syllables first.
                 flushPending()
-                if let source { punctuationSources[output.unicodeScalars.count] = source }
+                if let mark = s.first, !mark.isWhitespace {
+                    punctuationSources[output.unicodeScalars.count] = source ?? mark
+                }
                 output.append(s)
             case .literal(let s):
                 // ASCII letters / digits / unmapped Bopomofo: pass

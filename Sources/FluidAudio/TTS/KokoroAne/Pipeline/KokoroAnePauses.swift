@@ -16,10 +16,12 @@ enum KokoroAnePauses {
     static let frameMilliseconds = 25.0
 
     /// Tokens (indices into the chain's input ids, BOS = 0) whose summed
-    /// duration becomes `frames`.
+    /// duration becomes `frames`; `scalars` is where they sit in the
+    /// phoneme string (Unicode-scalar offsets).
     struct Span: Equatable, Sendable {
         let tokens: Range<Int>
         let frames: Int32
+        var scalars: Range<Int> = 0..<0
     }
 
     /// `duration` in acoustic frames, rounded, at least 1.
@@ -30,37 +32,77 @@ enum KokoroAnePauses {
         return Int32(min(max(frames, 1), Double(KokoroAneConstants.maxAcousticFrames)))
     }
 
-    /// The spans `pauses` asks for in `phonemes`. A mark is looked up by its
-    /// entry in `sources` (the mark as written, keyed by Unicode-scalar
-    /// offset) and then by itself. Consecutive marks and the whitespace
-    /// after them form one span that takes the longest of their pauses.
-    /// Scalars the vocab drops are skipped, as `KokoroAneVocab.encode` does.
+    /// The spans `pauses` asks for in `phonemes`. `sources` maps the
+    /// Unicode-scalar offset of each mark that came from the input text to
+    /// the mark as written; given it, a mark the frontend added (the
+    /// Mandarin `/` between words) is never paused, and `nil` treats every
+    /// mark as written. A mark is looked up as written, then as itself.
+    /// Whitespace extends a span but is not a key. Consecutive marks and the
+    /// whitespace after them form one span that takes the longest of their
+    /// pauses. Scalars the vocab drops are skipped, as `KokoroAneVocab.encode`
+    /// does.
     static func spans(
-        phonemes: String, vocab: KokoroAneVocab, sources: [Int: Character], pauses: [Character: Int32]
+        phonemes: String, vocab: KokoroAneVocab, sources: [Int: Character]?, pauses: [Character: Int32]
     ) -> [Span] {
         guard !pauses.isEmpty else { return [] }
         var spans: [Span] = []
-        var open: (start: Int, end: Int, frames: Int32)?
+        var open: (start: Int, end: Int, frames: Int32, scalars: Range<Int>)?
+        func close() {
+            if let run = open {
+                spans.append(Span(tokens: run.start..<run.end, frames: run.frames, scalars: run.scalars))
+            }
+            open = nil
+        }
         var token = 0
         for (offset, scalar) in phonemes.unicodeScalars.enumerated() {
             let mark = Character(scalar)
             guard vocab.map[mark] != nil else { continue }
             token += 1
-            if let frames = sources[offset].flatMap({ pauses[$0] }) ?? pauses[mark] {
-                open = (open?.start ?? token, token + 1, max(open?.frames ?? 0, frames))
-            } else if let run = open {
-                if mark.isWhitespace {
-                    open = (run.start, token + 1, run.frames)
-                } else {
-                    spans.append(Span(tokens: run.start..<run.end, frames: run.frames))
-                    open = nil
+            if mark.isWhitespace {
+                if let run = open {
+                    open = (run.start, token + 1, run.frames, run.scalars.lowerBound..<(offset + 1))
                 }
+                continue
+            }
+            let written = sources == nil ? mark : sources?[offset]
+            if let written, let frames = pauses[written] ?? pauses[mark] {
+                open = (
+                    open?.start ?? token, token + 1, max(open?.frames ?? 0, frames),
+                    (open?.scalars.lowerBound ?? offset)..<(offset + 1)
+                )
+            } else {
+                close()
             }
         }
-        if let run = open {
-            spans.append(Span(tokens: run.start..<run.end, frames: run.frames))
-        }
+        close()
         return spans
+    }
+
+    /// `phonemes` cut after the pause span nearest its middle, each part with
+    /// its `sources` rebased: a pass is capped at
+    /// ``KokoroAneConstants/maxAcousticFrames``, and a cut at a pause falls
+    /// in silence. `nil` when no span ends inside the string.
+    static func split(
+        _ phonemes: String, atPauseNearestMiddle spans: [Span], sources: [Int: Character]?
+    ) -> [(phonemes: String, sources: [Int: Character]?)]? {
+        let scalars = phonemes.unicodeScalars.map(Character.init)
+        let middle = scalars.count / 2
+        let cuts = spans.map(\.scalars.upperBound).filter { $0 > 0 && $0 < scalars.count }
+        guard let cut = cuts.min(by: { abs($0 - middle) < abs($1 - middle) }) else { return nil }
+        return [0..<cut, cut..<scalars.count].map { piece(of: scalars, $0, sources: sources) }
+    }
+
+    /// `scalars[range]` as a string, with the `sources` inside it rebased.
+    static func piece(
+        of scalars: [Character], _ range: Range<Int>, sources: [Int: Character]?
+    ) -> (phonemes: String, sources: [Int: Character]?) {
+        let rebased = sources.map { all in
+            Dictionary(
+                uniqueKeysWithValues: all.compactMap {
+                    range.contains($0.key) ? ($0.key - range.lowerBound, $0.value) : nil
+                })
+        }
+        return (String(scalars[range]), rebased)
     }
 
     /// Rewrite `durations` so each span sums to its frame count (every token
