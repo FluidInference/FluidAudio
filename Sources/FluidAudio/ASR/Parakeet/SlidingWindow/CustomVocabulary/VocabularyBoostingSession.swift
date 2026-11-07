@@ -81,7 +81,9 @@ public struct VocabularyBoostingSession: Sendable {
     ///     shipped alongside `ctcModels` (#851); pre-tokenized terms (e.g. via
     ///     `CustomVocabularyContext.loadWithCtcTokens(from:ctcVariant:)`) are
     ///     used as-is.
-    ///   - ctcModels: Pre-loaded CTC models for keyword spotting
+    ///   - ctcModels: Pre-loaded CTC models for keyword spotting. The CTC
+    ///     tokenizer is read from their `directory`, or from
+    ///     `CtcModels.defaultCacheDirectory(for:)` when that is `nil`.
     ///   - config: Optional rescorer configuration (default: `.default`)
     ///   - thresholds: Rescoring thresholds (default: vocabulary-size defaults)
     /// - Throws: Error if the CTC tokenizer cannot be loaded for untokenized
@@ -93,7 +95,7 @@ public struct VocabularyBoostingSession: Sendable {
         thresholds: Thresholds = .default
     ) async throws {
         self.thresholds = thresholds
-        let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
+        let ctcModelDir = CtcModels.tokenizerDirectory(loadedFrom: ctcModels.directory, variant: ctcModels.variant)
 
         // Terms built in code arrive without CTC token IDs, and every consumer
         // (spotter, rescorer) skips such terms without a word — the documented

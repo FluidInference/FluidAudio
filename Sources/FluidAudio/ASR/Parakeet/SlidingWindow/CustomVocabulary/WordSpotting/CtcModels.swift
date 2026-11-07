@@ -40,6 +40,10 @@ public struct CtcModels: Sendable {
     public let configuration: MLModelConfiguration
     public let vocabulary: [Int: String]
     public let variant: CtcModelVariant
+    /// Directory the models were loaded from, which also holds their `vocab.json` and `tokenizer.json`.
+    /// Set by `load(from:)`, `loadDirect(from:)` and `downloadAndLoad(to:)`. When `nil`, vocabulary boosting
+    /// reads the tokenizer from `defaultCacheDirectory(for:)`.
+    public let directory: URL?
 
     private static let logger = AppLogger(category: "CtcModels")
 
@@ -48,13 +52,15 @@ public struct CtcModels: Sendable {
         encoder: MLModel,
         configuration: MLModelConfiguration,
         vocabulary: [Int: String],
-        variant: CtcModelVariant = .ctc110m
+        variant: CtcModelVariant = .ctc110m,
+        directory: URL? = nil
     ) {
         self.melSpectrogram = melSpectrogram
         self.encoder = encoder
         self.configuration = configuration
         self.vocabulary = vocabulary
         self.variant = variant
+        self.directory = directory
     }
 }
 
@@ -134,7 +140,8 @@ extension CtcModels {
             encoder: encoderModel,
             configuration: config,
             vocabulary: vocab,
-            variant: variant
+            variant: variant,
+            directory: directory
         )
     }
 
@@ -184,7 +191,8 @@ extension CtcModels {
             encoder: encoderModel,
             configuration: config,
             vocabulary: vocab,
-            variant: variant
+            variant: variant,
+            directory: directory
         )
     }
 
@@ -293,6 +301,12 @@ extension CtcModels {
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
             .appendingPathComponent(variant.repo.folderName, isDirectory: true)
+    }
+
+    /// Directory holding the `tokenizer.json` that matches CTC models loaded from `directory`: that directory,
+    /// or `defaultCacheDirectory(for:)` when it is unknown (#1114).
+    static func tokenizerDirectory(loadedFrom directory: URL?, variant: CtcModelVariant) -> URL {
+        directory ?? defaultCacheDirectory(for: variant)
     }
 
     /// Load vocabulary from vocab.json in the given directory.
