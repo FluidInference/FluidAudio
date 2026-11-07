@@ -1,7 +1,6 @@
 @preconcurrency import AVFoundation
 import Foundation
 import OSLog
-import os
 
 public struct AudioSourceFactory {
     private let logger = AppLogger(category: "AudioSourceFactory")
@@ -47,22 +46,18 @@ public struct AudioSourceFactory {
                 try? handle.close()
             }
 
-            guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
-                throw AudioSourceError.processingFailed(
-                    "Unsupported audio format \(inputFormat); failed to create converter")
-            }
-
             logger.debug(
                 "Streaming conversion \(inputFormat.sampleRate)Hz×\(inputFormat.channelCount)ch → \(targetFormat.sampleRate)Hz×\(targetFormat.channelCount)ch"
             )
 
-            let totalSamples: Int
+            // The same conversion resampleAudioFile runs, so transcribe(url)
+            // and transcribe(samples) see the same samples (#1112).
+            var totalSamples = 0
             do {
-                totalSamples = try streamConvert(
-                    audioFile: audioFile,
-                    converter: converter,
-                    handle: handle
-                )
+                try AudioConverter(targetFormat: targetFormat).convertFile(audioFile) { chunk in
+                    try handle.write(contentsOf: Data(buffer: chunk))
+                    totalSamples += chunk.count
+                }
             } catch {
                 logger.error("Streaming conversion failed before file mapping: \(error.localizedDescription)")
                 throw error
@@ -103,115 +98,6 @@ public struct AudioSourceFactory {
         let identifier = UUID().uuidString
         return tempDirectory.appendingPathComponent("fluidaudio-streaming-\(identifier).raw")
     }
-
-    private func streamConvert(
-        audioFile: AVAudioFile,
-        converter: AVAudioConverter,
-        handle: FileHandle
-    ) throws -> Int {
-        let inputFormat = audioFile.processingFormat
-        let targetFormat = converter.outputFormat
-
-        let inputCapacity: AVAudioFrameCount = 16_384
-        guard
-            let inputBuffer = AVAudioPCMBuffer(
-                pcmFormat: inputFormat,
-                frameCapacity: inputCapacity
-            )
-        else {
-            throw AudioSourceError.failedToAllocateBuffer("Input", requestedFrames: Int(inputCapacity))
-        }
-
-        let estimatedOutputFrames = AVAudioFrameCount(
-            (Double(inputCapacity) * targetFormat.sampleRate / inputFormat.sampleRate).rounded(.up)
-        )
-        guard
-            let outputBuffer = AVAudioPCMBuffer(
-                pcmFormat: targetFormat,
-                frameCapacity: max(1024, estimatedOutputFrames)
-            )
-        else {
-            throw AudioSourceError.failedToAllocateBuffer("Output", requestedFrames: Int(estimatedOutputFrames))
-        }
-
-        var totalSamples = 0
-        let inputComplete = OSAllocatedUnfairLock(initialState: false)
-        let readError = OSAllocatedUnfairLock<Error?>(initialState: nil)
-
-        // Buffer is only accessed synchronously by AVAudioConverter's input block callback
-        nonisolated(unsafe) let capturedInputBuffer = inputBuffer
-
-        let inputBlock: AVAudioConverterInputBlock = { _, status in
-            if inputComplete.withLock({ $0 }) {
-                status.pointee = .endOfStream
-                return nil
-            }
-
-            do {
-                // Clamp to AVAudioFrameCount.max to prevent overflow when casting from Int64
-                let remainingFramesInt64 = audioFile.length - audioFile.framePosition
-                let remainingFrames = AVAudioFrameCount(min(remainingFramesInt64, Int64(AVAudioFrameCount.max)))
-                let framesToRead = min(inputCapacity, remainingFrames)
-                if framesToRead > 0 {
-                    try audioFile.read(into: capturedInputBuffer, frameCount: framesToRead)
-                } else {
-                    capturedInputBuffer.frameLength = 0
-                }
-            } catch {
-                readError.withLock { $0 = error }
-                capturedInputBuffer.frameLength = 0
-            }
-
-            guard capturedInputBuffer.frameLength > 0 else {
-                inputComplete.withLock { $0 = true }
-                status.pointee = .endOfStream
-                return nil
-            }
-
-            status.pointee = .haveData
-            return capturedInputBuffer
-        }
-
-        while true {
-            outputBuffer.frameLength = 0
-            var conversionError: NSError?
-            let status = converter.convert(
-                to: outputBuffer,
-                error: &conversionError,
-                withInputFrom: inputBlock
-            )
-
-            if let conversionError {
-                throw AudioSourceError.processingFailed(
-                    "Audio conversion failed: \(conversionError.localizedDescription)"
-                )
-            }
-
-            if let error = readError.withLock({ $0 }) {
-                throw AudioSourceError.processingFailed(
-                    "Failed while reading audio: \(error.localizedDescription)"
-                )
-            }
-
-            let producedFrames = Int(outputBuffer.frameLength)
-            if producedFrames > 0 {
-                guard let channelData = outputBuffer.floatChannelData?.pointee else {
-                    throw AudioSourceError.processingFailed("Missing channel data during conversion")
-                }
-                let byteCount = producedFrames * MemoryLayout<Float>.stride
-                let baseAddress = UnsafeRawPointer(channelData)
-                let data = Data(bytes: baseAddress, count: byteCount)
-                try handle.write(contentsOf: data)
-                totalSamples += producedFrames
-            }
-
-            if status == .endOfStream {
-                break
-            }
-        }
-
-        return totalSamples
-    }
 }
 
 public enum AudioSourceError: Error, LocalizedError {
@@ -222,11 +108,5 @@ public enum AudioSourceError: Error, LocalizedError {
         case .processingFailed(let message):
             return "Processing failed: \(message)"
         }
-    }
-}
-
-extension AudioSourceError {
-    fileprivate static func failedToAllocateBuffer(_ name: String, requestedFrames: Int) -> AudioSourceError {
-        .processingFailed("Failed to allocate \(name.lowercased()) buffer (\(requestedFrames) frames)")
     }
 }

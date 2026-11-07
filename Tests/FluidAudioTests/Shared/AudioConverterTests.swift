@@ -411,6 +411,45 @@ final class AudioConverterTests: XCTestCase {
         XCTAssertLessThan(maxDiff, 1e-5, "streaming changed the samples")
     }
 
+    /// `transcribe(url)` converts files past `streamingThreshold` to disk,
+    /// `transcribe(samples)` hosts read them with `resampleAudioFile`, and
+    /// `transcribe(buffer)` resamples a decoded buffer. All three must hand the
+    /// model the same samples, or one file gets several transcripts (#1112).
+    func testFileBufferAndDiskBackedConversionsMatch() async throws {
+        let rate = 48_000.0
+        let count = Int(rate * 3.7)
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 2, interleaved: false)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count))!
+        for i in 0..<count {
+            let t = Double(i) / rate
+            buffer.floatChannelData![0][i] = Float(0.4 * sin(2 * .pi * 220 * t) + 0.2 * sin(2 * .pi * 5_100 * t))
+            buffer.floatChannelData![1][i] = Float(0.3 * sin(2 * .pi * 330 * t) + 0.2 * sin(2 * .pi * 6_700 * t))
+        }
+        buffer.frameLength = AVAudioFrameCount(count)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("fluidaudio-paths-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+        do {
+            let file = try AVAudioFile(forWriting: url, settings: format.settings)
+            try file.write(from: buffer)
+        }
+
+        let inMemory = try audioConverter.resampleAudioFile(url)
+        let (source, _) = try AudioSourceFactory().makeDiskBackedSource(from: url, targetSampleRate: 16_000)
+        defer { source.cleanup() }
+        var diskBacked = [Float](repeating: 0, count: source.sampleCount)
+        try diskBacked.withUnsafeMutableBufferPointer {
+            try source.copySamples(into: $0.baseAddress!, offset: 0, count: $0.count)
+        }
+        let fromBuffer = try audioConverter.resampleBuffer(buffer)
+        for (name, other) in [("disk-backed", diskBacked), ("buffer", fromBuffer)] {
+            XCTAssertEqual(other.count, inMemory.count, "\(name) conversion gave a different length")
+            var maxDiff: Float = 0
+            for (a, b) in zip(other, inMemory) { maxDiff = max(maxDiff, abs(a - b)) }
+            XCTAssertLessThan(maxDiff, 1e-5, "\(name) conversion gave different samples")
+        }
+    }
+
     /// A buffer is converted through one output buffer of bounded size,
     /// drained until the end, rather than one sized to the whole result (which
     /// carries the same 4 GiB cap). A small cap must give the same samples.
