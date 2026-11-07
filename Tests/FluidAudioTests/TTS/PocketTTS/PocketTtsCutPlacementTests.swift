@@ -117,6 +117,47 @@ final class PocketTtsCutPlacementTests: XCTestCase {
             ["back from the lab...", "and then it failed.", "Did it matter?!", "Yes."])
     }
 
+    // MARK: - Closing quotes and brackets
+
+    func testClosingQuotesAndBracketsStayWithTheirSentence() {
+        XCTAssertEqual(
+            PocketTtsSynthesizer.splitSentences(
+                "\"Stop!\" She ran. He said 'go.' Then (quietly.) \"Is it over?\" \"Yes.\""),
+            ["\"Stop!\"", "She ran.", "He said 'go.'", "Then (quietly.)", "\"Is it over?\"", "\"Yes.\""])
+    }
+
+    func testSentenceEndingBeforeAClosingQuoteGetsNoExtraPeriod() {
+        XCTAssertEqual(
+            PocketTtsSynthesizer.normalizeText("he told them all, \"Stop right there!\"").text,
+            "He told them all, \"Stop right there!\"")
+        XCTAssertEqual(
+            PocketTtsSynthesizer.normalizeText("she checked the room one last time (just in case.)").text,
+            "She checked the room one last time (just in case.)")
+        XCTAssertEqual(
+            PocketTtsSynthesizer.normalizeText("she waited for the answer that never came\u{2026}").text,
+            "She waited for the answer that never came\u{2026}")
+    }
+
+    func testClauseMarkBeforeAClosingQuoteBecomesAPeriod() {
+        XCTAssertEqual(
+            PocketTtsSynthesizer.normalizeText("the note on the door said \"back in five minutes,\"").text,
+            "The note on the door said \"back in five minutes.\"")
+        XCTAssertEqual(
+            PocketTtsSynthesizer.normalizeText("the last word in the old book was \"goodbye\"").text,
+            "The last word in the old book was \"goodbye\".")
+    }
+
+    func testDialogueChunksKeepTheirClosingQuotes() throws {
+        let tokenizer = try makeEnglishTokenizer()
+        let text =
+            "\"We should leave before the storm reaches the valley tonight.\" She looked at the dark "
+            + "clouds over the hills. \"I know,\" he said, and he packed the last of the supplies into "
+            + "the old truck. \"Then hurry.\""
+        let parts = try chunks(text, tokenizer: tokenizer, voiceCachePosition: 126)
+        XCTAssertGreaterThan(parts.count, 1)
+        XCTAssertEqual(parts.joined(separator: " "), text)
+    }
+
     // MARK: - Balanced word-boundary splitting
 
     func testWordSplitUsesTheFewestPartsAndBalancesThem() throws {
