@@ -40,9 +40,9 @@ public struct CtcModels: Sendable {
     public let configuration: MLModelConfiguration
     public let vocabulary: [Int: String]
     public let variant: CtcModelVariant
-    /// Directory the models were loaded from, which also holds their `vocab.json` and `tokenizer.json`.
-    /// Set by `load(from:)`, `loadDirect(from:)` and `downloadAndLoad(to:)`. When `nil`, vocabulary boosting
-    /// reads the tokenizer from `defaultCacheDirectory(for:)`.
+    /// Folder the Core ML models were loaded from, set by `load(from:)`, `loadDirect(from:)` and
+    /// `downloadAndLoad(to:)`. Vocabulary boosting reads `tokenizer.json` from this folder, or from
+    /// `defaultCacheDirectory(for:)` when it is `nil`.
     public let directory: URL?
 
     private static let logger = AppLogger(category: "CtcModels")
@@ -75,6 +75,7 @@ extension CtcModels {
     /// - MelSpectrogram.mlmodelc/
     /// - AudioEncoder.mlmodelc/
     /// - vocab.json
+    /// - tokenizer.json (required for vocabulary boosting, which reads it from this directory)
     ///
     /// - Parameters:
     ///   - directory: Directory containing the CoreML bundles and vocab.json
@@ -147,6 +148,10 @@ extension CtcModels {
 
     /// Load CTC models from a directory.
     ///
+    /// The models load through ModelHub from `<parent of directory>/<variant.repo.folderName>`, which is
+    /// `directory` itself when it has the repo's folder name, and missing ones are downloaded there. That
+    /// folder is recorded in `CtcModels.directory`; `vocab.json` is read from `directory`.
+    ///
     /// - Parameters:
     ///   - directory: Directory containing the downloaded CoreML bundles.
     ///   - variant: Which CTC model variant to load (default: .ctc110m).
@@ -158,6 +163,7 @@ extension CtcModels {
         logger.info("Loading CTC models (\(variant.displayName)) from: \(directory.path)")
 
         let parentDirectory = directory.deletingLastPathComponent()
+        let modelDirectory = parentDirectory.appendingPathComponent(variant.repo.folderName, isDirectory: true)
         let config = defaultConfiguration()
 
         // ModelHub expects the base directory (without the repo folder) and
@@ -192,7 +198,7 @@ extension CtcModels {
             configuration: config,
             vocabulary: vocab,
             variant: variant,
-            directory: directory
+            directory: modelDirectory
         )
     }
 
