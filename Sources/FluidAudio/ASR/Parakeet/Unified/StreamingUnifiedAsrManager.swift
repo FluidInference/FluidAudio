@@ -62,6 +62,13 @@ public actor StreamingUnifiedAsrManager {
     private var pendingTokenTimings: [TokenTiming] = []
 
     private var partialCallback: (@Sendable (String) -> Void)?
+
+    /// Raw encoder-outputs hook for feature consumers (e.g. an intermediate-tap
+    /// consumer like a turn-decision model): receives each streaming encoder
+    /// prediction's outputs — including any extra outputs a re-exported encoder
+    /// declares, such as `tap_*` layer taps — plus the local frame range this step
+    /// decodes and the window's global frame origin (global = origin + local).
+    private var onEncoderOutput: (@Sendable ([String: MLMultiArray], Range<Int>, Int) -> Void)?
     private var processedChunks: Int = 0
 
     // Vocabulary boosting (issue #851). The CTC spotter needs the segment's
@@ -392,6 +399,19 @@ public actor StreamingUnifiedAsrManager {
             processedChunks += 1
             return
         }
+
+        // Feature-consumer hook: hand over the raw outputs and their frame mapping
+        // so intermediate features cost no second encoder pass.
+        if let onEncoderOutput {
+            var outputs: [String: MLMultiArray] = [:]
+            for name in encoderOutput.featureNames {
+                if let value = encoderOutput.featureValue(for: name)?.multiArrayValue {
+                    outputs[name] = value
+                }
+            }
+            onEncoderOutput(outputs, range, plan.bufferStartFrame)
+        }
+
         let emissions = try rnntDecoder.decode(
             encoded: encoded, frameRange: range, globalFrameOffset: plan.bufferStartFrame
         )
@@ -591,5 +611,12 @@ extension StreamingUnifiedAsrManager: StreamingAsrManager {
 
     public func setPartialTranscriptCallback(_ callback: @escaping @Sendable (String) -> Void) {
         self.partialCallback = callback
+    }
+
+    /// Register a raw encoder-outputs hook (see `onEncoderOutput`). Pass nil to remove.
+    public func setEncoderOutputCallback(
+        _ callback: (@Sendable ([String: MLMultiArray], Range<Int>, Int) -> Void)?
+    ) {
+        self.onEncoderOutput = callback
     }
 }

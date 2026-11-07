@@ -66,6 +66,20 @@ extension StreamingNemotronAsrManager {
 
         // 4. RNNT decode loop for each encoder frame
         let numEncoderFrames = encoded.shape[2].intValue
+
+        // Feature-consumer hook: raw outputs + frame mapping (global = origin + local)
+        // so intermediate features cost no second encoder pass.
+        if let onEncoderOutput {
+            var outputs: [String: MLMultiArray] = [:]
+            for name in encoderOutput.featureNames {
+                if let value = encoderOutput.featureValue(for: name)?.multiArrayValue {
+                    outputs[name] = value
+                }
+            }
+            onEncoderOutput(outputs, 0..<numEncoderFrames, tapFrameOrigin)
+        }
+        tapFrameOrigin += numEncoderFrames
+
         var newTokens: [Int] = []
 
         for t in 0..<numEncoderFrames {
