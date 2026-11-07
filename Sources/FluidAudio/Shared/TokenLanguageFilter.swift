@@ -81,6 +81,11 @@ internal struct TokenLanguageFilter: Sendable {
     /// checks — carries no script information.
     private static let sentencePieceBoundary: Unicode.Scalar = "\u{2581}"
 
+    /// Currency symbols such as `€` and `£` are script-neutral, like ASCII punctuation and digits.
+    private static func isCurrencySymbol(_ scalar: Unicode.Scalar) -> Bool {
+        scalar.properties.generalCategory == .currencySymbol
+    }
+
     /// Whether every character in `text` is compatible with `script`.
     ///
     /// The Latin path has no "reject Cyrillic" guard because the Cyrillic
@@ -104,11 +109,13 @@ internal struct TokenLanguageFilter: Sendable {
                     || ($0.value >= 0x0180 && $0.value <= 0x024F)  // Latin Extended-B
                     || ($0.value >= 0x0300 && $0.value <= 0x036F)  // Combining Diacritical Marks (NFD)
                     || ($0.value >= 0x1E00 && $0.value <= 0x1EFF)  // Latin Extended Additional
+                    || isCurrencySymbol($0)
             }
         case .cyrillic:
             return chars.allSatisfy { char in
                 let value = char.value
                 if value >= 0x0400 && value <= 0x04FF { return true }
+                if isCurrencySymbol(char) { return true }
                 // ASCII is script-neutral except for letters A-Z/a-z, which
                 // must be rejected (see function doc).
                 if value >= 0x0020 && value <= 0x007F {
@@ -128,6 +135,7 @@ internal struct TokenLanguageFilter: Sendable {
                 if value >= 0x1F00 && value <= 0x1FFF { return true }
                 // Combining Diacritical Marks (NFD)
                 if value >= 0x0300 && value <= 0x036F { return true }
+                if isCurrencySymbol(char) { return true }
                 // Allow ASCII punctuation, digits, spaces (script-neutral)
                 if value >= 0x0020 && value <= 0x007F {
                     // Reject Latin letters A-Z/a-z

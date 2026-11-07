@@ -175,6 +175,28 @@ final class TokenLanguageFilterTests: XCTestCase {
         XCTAssertTrue(TokenLanguageFilter.matches("привет, мир!", script: .cyrillic))
     }
 
+    func testCurrencySymbolsAreScriptNeutral() {
+        // Parakeet v3 has "€" and "£" tokens, and Greek and Bulgarian text uses € too.
+        for script: Script in [.latin, .cyrillic, .greek] {
+            XCTAssertTrue(TokenLanguageFilter.matches("€", script: script))
+            XCTAssertTrue(TokenLanguageFilter.matches("\u{2581}€", script: script))
+            XCTAssertTrue(TokenLanguageFilter.matches("£", script: script))
+        }
+        XCTAssertTrue(TokenLanguageFilter.matches("5€", script: .greek))
+        XCTAssertFalse(TokenLanguageFilter.matches("€5x", script: .cyrillic))
+    }
+
+    func testFilterTopKKeepsTopCurrencySymbol() {
+        let result = TokenLanguageFilter.filterTopK(
+            topKIds: [8185, 1],
+            topKLogits: [2.0, 1.0],
+            vocabulary: [8185: "€", 1: "\u{2581}ευρώ"],
+            preferredScript: .greek
+        )
+
+        XCTAssertEqual(result?.tokenId, 8185)
+    }
+
     func testSpacesAndWhitespace() {
         XCTAssertTrue(TokenLanguageFilter.matches("hello world", script: .latin))
         XCTAssertTrue(TokenLanguageFilter.matches("  hello  ", script: .latin))
