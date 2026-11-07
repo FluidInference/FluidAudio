@@ -1114,6 +1114,10 @@ swift run -c release fluidaudiocli ja-benchmark --decoder tdt --dataset jsut --s
 
 **Note:** CER calculation includes number normalization (full-width digits → half-width, kanji numbers → Arabic) matching NVIDIA's evaluation methodology. NVIDIA reports 6.4% CER for the same model on JSUT-basic5000.
 
+### Known limitation: multi-sentence windows
+
+When a window holds several sentences from the same speaker, the model can transcribe only one of them and output blank for the rest. It is most likely when the window has a long stretch of silence before or after the speech: leading silence tends to keep only the last sentence, trailing silence only the first. NVIDIA's original NeMo checkpoint gives the same output, so this is model behavior, not a conversion issue ([#1117](https://github.com/FluidInference/FluidAudio/issues/1117)). On the FLEURS ja_jp test set it affects 14 of 116 multi-sentence clips and none of the 534 single-sentence clips. `SlidingWindowAsrManager` transcribes the clip from #1117 in full, but it runs the same model, so it is not a guaranteed workaround.
+
 ## CUA-S1-FORMS decision scoring
 
 Apple M5 Pro, 24 GB, macOS 27.0. Full published synthetic test: **24,370 decisions**,
