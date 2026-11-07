@@ -354,6 +354,7 @@ public struct MandarinG2P: Sendable {
             // single-char overrides too (`maxKeyCharCount` may be 1).
             var matched = false
             if let hit = customLexicon.longestMatch(in: chars, from: i) {
+                flushHanziRun()
                 flushLiteral()
                 emitLexiconHit(hit.tokens, into: &segments)
                 i += hit.length

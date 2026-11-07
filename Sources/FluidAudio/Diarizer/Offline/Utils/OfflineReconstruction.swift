@@ -170,6 +170,11 @@ struct OfflineReconstruction {
             let required = speakerCountPerFrame[frame]
             guard required > 0 else { continue }
             let ranked = activationSums[frame].enumerated().sorted { $0.element > $1.element }
+            // Take as many clusters as the frame has speakers, as pyannote does, even when a
+            // second one has no votes (its local speaker had too little clean speech for an
+            // embedding). In a real overlap a guess never scores worse than leaving the
+            // speaker out: wrong turns a miss into confusion, right removes it. Requiring votes
+            // raised DER on the AMI test set from 20.3% to 21.2% (#1049).
             let selected = ranked.prefix(required).map { $0.offset }
             perFrameClusters[frame] = selected
         }
@@ -429,13 +434,20 @@ struct OfflineReconstruction {
         output.append(segment)
     }
 
+    /// Start order. Segments that start in the same frame come out of a dictionary in
+    /// per-process order, so ties go by end, then speaker, to keep the output deterministic.
+    private static func startsBefore(_ lhs: TimedSpeakerSegment, _ rhs: TimedSpeakerSegment) -> Bool {
+        (lhs.startTimeSeconds, lhs.endTimeSeconds, lhs.speakerId)
+            < (rhs.startTimeSeconds, rhs.endTimeSeconds, rhs.speakerId)
+    }
+
     private func mergeSegments(
         _ segments: [TimedSpeakerSegment],
         gapThreshold: Double
     ) -> [TimedSpeakerSegment] {
         guard !segments.isEmpty else { return [] }
 
-        let sorted = segments.sorted { $0.startTimeSeconds < $1.startTimeSeconds }
+        let sorted = segments.sorted(by: Self.startsBefore)
         var merged: [TimedSpeakerSegment] = []
         var current = sorted[0]
 
@@ -480,7 +492,7 @@ struct OfflineReconstruction {
     }
 
     private func sanitize(segments: [TimedSpeakerSegment]) -> [TimedSpeakerSegment] {
-        var ordered = segments.sorted { $0.startTimeSeconds < $1.startTimeSeconds }
+        var ordered = segments.sorted(by: Self.startsBefore)
         let minimumDuration = max(
             Float(config.minSegmentDuration),
             Float(config.segmentationMinDurationOn)

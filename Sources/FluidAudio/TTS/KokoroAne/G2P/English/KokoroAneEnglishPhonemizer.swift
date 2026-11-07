@@ -50,16 +50,22 @@ struct KokoroAneEnglishPhonemizer: Sendable {
     /// skipped at `KokoroAneVocab.encode` anyway).
     let allowedPunctuation: Set<Character>
 
+    /// British phonology for the rules this frontend derives itself (the
+    /// `-s` clitic's `ɪz`); the lexicon maps must then be the British ones.
+    let british: Bool
+
     init(
         wordToPhonemes: [String: [String]] = [:],
         caseSensitiveWordToPhonemes: [String: [String]] = [:],
         customLexicon: [String: String] = [:],
-        allowedPunctuation: Set<Character> = []
+        allowedPunctuation: Set<Character> = [],
+        british: Bool = false
     ) {
         self.wordToPhonemes = wordToPhonemes
         self.caseSensitiveWordToPhonemes = caseSensitiveWordToPhonemes
         self.customLexicon = customLexicon
         self.allowedPunctuation = allowedPunctuation
+        self.british = british
     }
 
     /// Convert text to a Misaki-style IPA string. Words are joined with
@@ -248,7 +254,7 @@ struct KokoroAneEnglishPhonemizer: Sendable {
         else {
             return nil
         }
-        return stemIPA + Self.clitic(after: stemIPA)
+        return stemIPA + Self.clitic(after: stemIPA, british: british)
     }
 
     /// Resolve a hyphenated compound that missed the lexicon by splitting on
@@ -316,7 +322,7 @@ struct KokoroAneEnglishPhonemizer: Sendable {
         else {
             return nil
         }
-        return stemIPA + Self.clitic(after: stemIPA)
+        return stemIPA + Self.clitic(after: stemIPA, british: british)
     }
 
     /// Voiceless non-sibilant obstruents — the `-s` clitic devoices after
@@ -329,13 +335,12 @@ struct KokoroAneEnglishPhonemizer: Sendable {
     private static let sibilants: Set<Character> = ["s", "z", "ʃ", "ʒ", "ʧ", "ʤ"]
 
     /// The `-s` clitic phoneme for a stem, by English phonology — a direct
-    /// port of Misaki's `Lexicon._s`. The US form of the epenthetic vowel is
-    /// `ᵻ` (Misaki uses `ɪ` only when `british`); this frontend loads the US
-    /// lexicon, and `ᵻ` is in the chain's `vocab.json`.
-    static func clitic(after stemIPA: String) -> String {
+    /// port of Misaki's `Lexicon._s`. The epenthetic vowel is `ᵻ` in the US
+    /// lexicon and `ɪ` in the British one, as in Misaki.
+    static func clitic(after stemIPA: String, british: Bool = false) -> String {
         guard let last = stemIPA.last else { return "z" }
         if voicelessNonSibilants.contains(last) { return "s" }
-        if sibilants.contains(last) { return "ᵻz" }
+        if sibilants.contains(last) { return british ? "ɪz" : "ᵻz" }
         return "z"
     }
 

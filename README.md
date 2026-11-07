@@ -26,15 +26,15 @@ Below are some featured local AI apps using Fluid Audio models on macOS and iOS:
 
 <p align="left">
   <a href="https://github.com/Beingpax/VoiceInk/"><img src="Documentation/assets/voiceink.png" height="40" alt="Voice Ink"></a>
+  <a href="https://altic.dev/fluid"><img src="Documentation/assets/fluidvoice.png" height="40" alt="Fluid Voice"></a>
+  <a href="https://github.com/anomalyco/hex"><img src="Documentation/assets/hex.png" height="40" alt="Hex"></a>
   <a href="https://spokenly.app/"><img src="Documentation/assets/spokenly.png" height="40" alt="Spokenly"></a>
-  <a href="https://slipbox.ai/"><img src="Documentation/assets/slipbox.png" height="40" alt="Slipbox"></a>
-  <a href="https://hex.kitlangton.com/"><img src="Documentation/assets/hex.png" height="40" alt="Hex"></a>
   <a href="https://boltai.com/"><img src="Documentation/assets/boltai.png" height="40" alt="BoltAI"></a>
   <a href="https://paraspeech.com"><img src="Documentation/assets/paraspeech.png" height="40" alt="Paraspeech"></a>
-  <a href="https://altic.dev/fluid"><img src="Documentation/assets/fluidvoice.png" height="40" alt="Fluid Voice"></a>
   <a href="https://snaply.ai"><img src="Documentation/assets/snaply.png" height="40" alt="Snaply"></a>
   <a href="https://github.com/yazinsai/OpenOats"><img src="Documentation/assets/openoats.png" height="40" alt="OpenOats"></a>
   <a href="https://talat.app"><img src="Documentation/assets/talat.png" height="40" alt="Talat"></a>
+  <a href="https://slipbox.ai/"><img src="Documentation/assets/slipbox.png" height="40" alt="Slipbox"></a>
 <!-- Add your app: submit logo via PR. The Fluid Inference team works to curate this and add new apps to the showcase section, please do not add to this section if you're adding the app to the showcase section, but including a logo in your PR will help us when we update this section! We appreciate your patience. -->
 </p>
 
@@ -42,9 +42,9 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 
 ## Highlights
 
-- **Automatic Speech Recognition (ASR)**: [Parakeet TDT v3](Documentation/Models.md#batch-transcription-near-real-time) (0.6b) and other TDT/CTC models for batch transcription supporting 25 European languages and Japanese, plus SenseVoice and Paraformer for Mandarin Chinese; [Parakeet EOU](Documentation/Models.md#streaming-transcription-true-real-time) (120m) for streaming ASR with end-of-utterance detection (English only). See all [ASR models](Documentation/Models.md#asr-models).
+- **Automatic Speech Recognition (ASR)**: [Parakeet TDT v3](Documentation/Models.md#batch-transcription-near-real-time) (0.6b) and other TDT/CTC models for batch transcription supporting 25 European languages and Japanese, plus SenseVoice and Paraformer for Mandarin Chinese, [Nemotron 3.5 Transcribe Lite](Documentation/ASR/NemotronTranscribeLite.md) for fast meeting transcripts with speakers, and [LFM3-Audio-2B](Documentation/ASR/LFM3Audio.md) for ASR, live captions and TTS from one audio LM; [Parakeet EOU](Documentation/Models.md#streaming-transcription-true-real-time) (120m) for streaming ASR with end-of-utterance detection (English only). See all [ASR models](Documentation/Models.md#asr-models).
 - **Inverse Text Normalization (ITN)**: Post-process ASR output to convert spoken-form to written-form ("two hundred" → "200"). See [text-processing-rs](https://github.com/FluidInference/text-processing-rs). Optional: ASR-only apps can drop the engine (~8 MB per slice) with `traits: []` (Swift 6.2+), see [PostProcessing.md](Documentation/ASR/PostProcessing.md#opting-out-of-the-engine)
-- **Text-to-Speech (TTS)**: Kokoro (82m) for parallel synthesis with SSML and pronunciation control across 9 languages (EN, ES, FR, HI, IT, JA, PT, ZH); PocketTTS for streaming TTS with voice cloning support (EN, DE, ES, FR, IT, PT — 6L and 24L variants); Chatterbox Multilingual (520M, 18 languages) and Chatterbox Nano (110M, English with `[laugh]`/`[chuckle]` paralinguistic tags) in beta — see [Documentation/TTS/Chatterbox.md](Documentation/TTS/Chatterbox.md); Paradee (8M Kokoro distill, English, 12 MB) in beta — see [Documentation/TTS/Paradee.md](Documentation/TTS/Paradee.md); Gradium's Phonon 31m (Apache-2.0, English, 103 voices) on the Neural Engine at ~20x real time — see [Documentation/TTS/PocketTTS.md](Documentation/TTS/PocketTTS.md#phonon-31m-gradium)
+- **Text-to-Speech (TTS)**: Kokoro (82m) for parallel synthesis with SSML and pronunciation control across 9 languages (EN, ES, FR, HI, IT, JA, PT, ZH); PocketTTS for streaming TTS with voice cloning support (EN, DE, ES, FR, IT, PT — 6L and 24L variants); Chatterbox Multilingual (520M, 18 languages) and Chatterbox Nano (110M, English with `[laugh]`/`[chuckle]` paralinguistic tags) in beta — see [Documentation/TTS/Chatterbox.md](Documentation/TTS/Chatterbox.md); Paradee (8M Kokoro distill, English, four voices incl. two British, 11 MB) in beta — see [Documentation/TTS/Paradee.md](Documentation/TTS/Paradee.md); Gradium's Phonon 31m (Apache-2.0, English, 103 voices) on the Neural Engine at ~20x real time — see [Documentation/TTS/PocketTTS.md](Documentation/TTS/PocketTTS.md#phonon-31m-gradium)
 - **Speaker Diarization (Online + Offline)**: Speaker separation and identification across audio streams. Streaming pipeline for real-time processing and offline batch pipeline with advanced clustering.
 - **Speaker Embedding Extraction**: Generate speaker embeddings for voice comparison and clustering, you can use this for speaker identification
 - **Voice Activity Detection (VAD)**: Voice activity detection with Silero models
@@ -84,7 +84,7 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[BoltAI](https://boltai.com/)** | — | Write content 10x faster using parakeet models |
 | **[Dictate Anywhere](https://github.com/hoomanaskari/mac-dictate-anywhere)** | ✓ | Native macOS dictation app with global Fn key activation. Dictate into any app with 25 language support. Uses Parakeet ASR. |
 | **[hongbomiao.com](https://github.com/hongbo-miao/hongbomiao.com)** | ✓ | A personal R&D lab that facilitates knowledge sharing. Uses Parakeet ASR. |
-| **[Hex](https://github.com/kitlangton/Hex)** | ✓ | macOS app that lets you press-and-hold a hotkey to record your voice, transcribe it, and paste into any application. Uses Parakeet ASR. |
+| **[Hex](https://github.com/anomalyco/hex)** | ✓ | macOS app that lets you press-and-hold a hotkey to record your voice, transcribe it, and paste into any application. Uses Parakeet ASR. |
 | **[Super Voice Assistant](https://github.com/ykdojo/super-voice-assistant)** | ✓ | Open-source macOS voice assistant with local transcription. Uses Parakeet ASR. |
 | **[VoiceTypr](https://github.com/moinulmoin/voicetypr)** | ✓ | Open-source voice-to-text dictation for macOS and Windows. Uses Parakeet ASR. |
 | **[Summit AI Notes](https://summitnotes.app/)** | — | Local meeting transcription and summarization with speaker identification. Supports 100+ languages. |
@@ -342,6 +342,8 @@ claude mcp add -s user -t http deepwiki https://mcp.deepwiki.com/mcp
   - `FluidInference/parakeet-redux-coreml` (multilingual, smallest download at ~220 MB; iOS 18+ / macOS 15+ only, see [Parakeet Redux](Documentation/ASR/ParakeetRedux.md))
   - `FluidInference/parakeet-tdt-0.6b-v2-coreml` (English-only, highest recall)
   - `FluidInference/phonon-2-coreml` (English-only; Fermion Research's five-value re-training of v3, iOS 18+ / macOS 15+, see [Phonon-2](Documentation/ASR/Phonon2.md))
+  - `Muesli-HQ/phonon-2.5-coreml` (multilingual, 25 languages; ~290 MB; GPU encoder, iOS 18+ / macOS 15+, see [Phonon-2.5](Documentation/ASR/Phonon25.md))
+  - `FluidInference/bark-3.0-coreml` (English-only; Underdog Bark 3.0 (verbatim) and Bark 3.0 Clean (dictation, drops fillers), iOS 18+ / macOS 15+, see [Bark 3.0](Documentation/ASR/Bark3.md))
 - **Processing Mode**: Batch transcription for complete audio files
 - **Real-time Factor**: ~190x on M4 Pro (processes 1 hour of audio in ~19 seconds)
 - **Streaming Support**: Real-time streaming via `SlidingWindowAsrManager` with sliding window processing and cancellation support
@@ -660,7 +662,8 @@ FluidAudio ships two TTS backends:
 ### PocketTTS
 
 Streaming-friendly TTS with voice cloning support from short audio samples.
-Available language packs: `english` (default), `german`, `german_24l`,
+Available language packs: `english` (default, Kyutai's current `english_2026-10`),
+`english_2026-04` (the previous English pack), `german`, `german_24l`,
 `italian`, `italian_24l`, `portuguese`, `portuguese_24l`, `spanish`,
 `spanish_24l`, `french_24l` (24-layer only — no 6-layer French upstream).
 
@@ -747,24 +750,25 @@ Base weights: [hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)
 
 ### Paradee (beta)
 
-Kokoro-82M distilled into 8M parameters (one voice, `af_heart`, English), 12 MB of int8 weights,
-~100× real time on CPU. Uses the Kokoro English frontend. See [Documentation/TTS/Paradee.md](Documentation/TTS/Paradee.md).
+Kokoro-82M distilled into 8M parameters, English, 11 MB of int8 weights, ~100× real time on CPU. v1.2 (default)
+has four voices: `af_heart`, `am_puck`, and the British `bf_isabella` and `bm_fable`, which get British phonemes.
+Uses the Kokoro English frontend. See [Documentation/TTS/Paradee.md](Documentation/TTS/Paradee.md).
 
 ```swift
 let manager = ParadeeManager()
 try await manager.initialize()
-let samples = try await manager.synthesize(text: "Hello from FluidAudio.")  // 24 kHz Float32
+let samples = try await manager.synthesize(text: "Hello from FluidAudio.", voice: .bfIsabella)  // 24 kHz Float32
 ```
 
 ```bash
-swift run fluidaudiocli tts "Hello from FluidAudio." --backend paradee --output out.wav
+swift run fluidaudiocli tts "Hello from FluidAudio." --backend paradee --voice bm_fable --output out.wav
 ```
 
 ## Continuous Integration
 
 - `tests.yml`: Default build matrix covering SwiftPM tests and an iOS archive smoke test.
 - `diarizer-benchmark.yml`: Runs the streaming diarization benchmark on ES2004a for regression tracking.
-- `offline-pipeline.yml`: Executes the VBx offline pipeline end-to-end (`fluidaudio diarization-benchmark --mode offline`) and fails if DER/JER drift beyond guardrails or if models fail to download. Use this workflow as a reference for provisioning model caches in your own CI.
+- `offline-pipeline.yml`: Executes the VBx offline pipeline end-to-end on ES2004a (`fluidaudio diarization-benchmark --mode offline`), posts DER/JER/RTFx to the PR, and fails if the run produces no results (for example when models fail to download) or RTFx is 0. It does not gate on DER. Use this workflow as a reference for provisioning model caches in your own CI.
 
 ## Everything Else
 
@@ -793,7 +797,7 @@ silero-vad: <https://github.com/snakers4/silero-vad>
 
 Kokoro-82M: <https://huggingface.co/hexgrad/Kokoro-82M>
 
-Paradee-8M: <https://huggingface.co/sahilmahendrakar/Paradee-8M-v1.0>
+Paradee-8M: <https://huggingface.co/sahilmahendrakar/Paradee-8M-v1.2> (v1.2), <https://huggingface.co/sahilmahendrakar/Paradee-8M-v1.0> (v1.0)
 
 ### Citation
 

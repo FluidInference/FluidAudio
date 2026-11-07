@@ -51,11 +51,12 @@ extension PocketTtsSynthesizer {
     /// prefill and are then captured from the state).
     static func makeStateSession(
         voiceData: PocketTtsVoiceData,
-        temperature: Float = PocketTtsConstants.temperature,
+        temperature: Float? = nil,
         seed: UInt64? = nil,
         language: PocketTtsLanguage = .english,
         maxTokensPerChunk: Int = PocketTtsConstants.maxTokensPerChunk
     ) async throws -> PocketTtsSession {
+        let temperature = temperature ?? language.defaultTemperature
         let store = try currentModelStore()
         guard isStatePlacementAvailable else {
             throw PocketTTSError.processingFailed(

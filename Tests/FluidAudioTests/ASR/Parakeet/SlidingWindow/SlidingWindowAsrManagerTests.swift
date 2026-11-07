@@ -320,6 +320,72 @@ final class SlidingWindowAsrManagerTests: XCTestCase {
         XCTAssertEqual(SlidingWindowAsrManager.appendingVolatile("", "only"), "only")
     }
 
+    // MARK: - Mid-word window starts (#912)
+
+    /// The seams of earnings22 `4329526_chunk18` and `4470253_chunk31` (#912): the
+    /// next window opened with punctuation, and with the "y" of "Andre|y". The token
+    /// stream glues both on; the text state joined them with a space.
+    func testMidWordWindowStartJoinsLikeTheTokenStream() {
+        let punctuation = SlidingWindowAsrManager.joiningMidWordStart(
+            previous: "that later Andres will detail", windowText: ". As a result,", rawWindowText: ". As a result,",
+            previousRawWord: "detail")
+        XCTAssertEqual(punctuation.previous, "that later Andres will detail.")
+        XCTAssertEqual(punctuation.rest, "As a result,")
+
+        let continuation = SlidingWindowAsrManager.joiningMidWordStart(
+            previous: "give the floor to Andre", windowText: "y Kinsborg, who", rawWindowText: "y Kinsborg, who",
+            previousRawWord: "Andre")
+        XCTAssertEqual(continuation.previous, "give the floor to Andrey")
+        XCTAssertEqual(continuation.rest, "Kinsborg, who")
+    }
+
+    /// A vocabulary term that replaced the previous word already spells the
+    /// whole word: the continuation's letters go, its punctuation and an
+    /// apostrophe suffix stay.
+    func testMidWordWindowStartAfterAReplacementKeepsOnlyPunctuationAndPossessive() {
+        let letters = SlidingWindowAsrManager.joiningMidWordStart(
+            previous: "give the floor to Andrzej", windowText: "y Kensbok, who", rawWindowText: "y Kinsborg, who",
+            previousRawWord: "Andre")
+        XCTAssertEqual(letters.previous, "give the floor to Andrzej")
+        XCTAssertEqual(letters.rest, "Kensbok, who")
+
+        let lettersAndComma = SlidingWindowAsrManager.joiningMidWordStart(
+            previous: "thanks Andrzej", windowText: "y, next", rawWindowText: "y, next",
+            previousRawWord: "Andre")
+        XCTAssertEqual(lettersAndComma.previous, "thanks Andrzej,")
+        XCTAssertEqual(lettersAndComma.rest, "next")
+
+        let possessive = SlidingWindowAsrManager.joiningMidWordStart(
+            previous: "about Quilter", windowText: "'s products", rawWindowText: "'s products",
+            previousRawWord: "Quiltor")
+        XCTAssertEqual(possessive.previous, "about Quilter's")
+        XCTAssertEqual(possessive.rest, "products")
+    }
+
+    /// Earnings22 `4329526_chunk132` and `4452058_chunk35`: rescoring rewrote the
+    /// window's opening fragment ("?", "sa") into a vocabulary term, a word of its own.
+    func testMidWordWindowStartRewrittenByRescoringKeepsItsOwnWord() {
+        let punctuation = SlidingWindowAsrManager.joiningMidWordStart(
+            previous: "what type of discussion", windowText: "Sabby", rawWindowText: "?",
+            previousRawWord: "discussion")
+        XCTAssertEqual(punctuation.previous, "what type of discussion")
+        XCTAssertEqual(punctuation.rest, "Sabby")
+
+        let continuation = SlidingWindowAsrManager.joiningMidWordStart(
+            previous: "Hepsiburada HepsiExpress.", windowText: "HepsiExpress offers both",
+            rawWindowText: "sa Express offers both", previousRawWord: "Express.")
+        XCTAssertEqual(continuation.previous, "Hepsiburada HepsiExpress.")
+        XCTAssertEqual(continuation.rest, "HepsiExpress offers both")
+    }
+
+    func testMidWordWindowStartOfOnlyAFragmentLeavesNoRest() {
+        let joined = SlidingWindowAsrManager.joiningMidWordStart(
+            previous: "we have done so", windowText: ".", rawWindowText: ".",
+            previousRawWord: "so")
+        XCTAssertEqual(joined.previous, "we have done so.")
+        XCTAssertEqual(joined.rest, "")
+    }
+
     /// Seam retirement removes the previous window's last word from the text
     /// state; with vocabulary boosting that text may carry a replacement, so
     /// the rendered form is tracked (#897 review).

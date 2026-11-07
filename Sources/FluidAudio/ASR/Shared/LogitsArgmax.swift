@@ -43,4 +43,28 @@ enum LogitsArgmax {
         }
         return ids
     }
+
+    /// The first `count` rows as full-vocabulary fp32 vectors (row padding dropped).
+    static func leadingRows(logits: MLMultiArray, count: Int) -> [[Float]] {
+        let rows = min(count, logits.shape[1].intValue)
+        let vocab = logits.shape[2].intValue
+        let frameStride = logits.strides[1].intValue
+        guard rows > 0 else { return [] }
+
+        func copy(_ p: UnsafePointer<Float>) -> [[Float]] {
+            (0..<rows).map { t in Array(UnsafeBufferPointer(start: p + t * frameStride, count: vocab)) }
+        }
+
+        if logits.dataType == .float32 {
+            return copy(logits.dataPointer.assumingMemoryBound(to: Float32.self))
+        }
+        let total = rows * frameStride
+        let src = logits.dataPointer.assumingMemoryBound(to: UInt16.self)
+        var buf = [Float](repeating: 0, count: total)
+        return buf.withUnsafeMutableBufferPointer { dst in
+            guard let base = dst.baseAddress else { return [] }
+            Float16Conversion.toFloat32(src: src, dst: base, count: total)
+            return copy(UnsafePointer(base))
+        }
+    }
 }

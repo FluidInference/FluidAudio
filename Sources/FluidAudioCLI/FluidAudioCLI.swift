@@ -98,6 +98,12 @@ struct FluidAudioCLI {
             await NemotronVocabBenchmark.runCLI(arguments: Array(arguments.dropFirst(2)))
         case "nemotron-multilingual-multi-stream-bench":
             await NemotronMultilingualMultiStreamBench.run(arguments: Array(arguments.dropFirst(2)))
+        case "nemotron35-transcribe":
+            await Nemotron35TranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
+        #if arch(arm64)
+        case "lfm3-audio":
+            await LFM3AudioCommand.run(arguments: Array(arguments.dropFirst(2)))
+        #endif
         case "sensevoice-transcribe":
             await SenseVoiceTranscribeCommand.run(arguments: Array(arguments.dropFirst(2)))
         case "campplus-embed":
@@ -166,6 +172,8 @@ struct FluidAudioCLI {
                 nemotron-vocab-benchmark  Paired baseline-vs-biased custom vocabulary benchmark (earnings22-kws)
                 nemotron-multilingual-multi-stream-bench  Parallel multi-stream benchmark (N concurrent managers)
                 ja-benchmark            Run Japanese ASR benchmark on JSUT/Common Voice
+                nemotron35-transcribe   Nemotron 3.5 Transcribe Lite: words + speakers (encoder + CTC head, no LLM)
+                lfm3-audio              LFM3-Audio-2B: transcribe | live | tts | benchmark (Core ML / Core AI)
                 cohere-transcribe       Transcribe using Cohere Transcribe (cache-external pipeline, 14 languages)
                 cohere-benchmark        Run Cohere Transcribe FLEURS benchmark
                 canary-transcribe       Transcribe using Canary-1B-v2 (beta model conversion)

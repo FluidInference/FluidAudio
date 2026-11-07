@@ -39,6 +39,7 @@ public enum PocketTtsConstants {
     /// block exceeds this, the prefill falls back to per-token `cond_step`.
     public static let condPrefillMaxTokens: Int = 256
     /// Controls randomness in flow_decoder: scales initial noise by sqrt(temperature).
+    /// The default for packs without their own (see `PocketTtsLanguage.defaultTemperature`).
     public static let temperature: Float = 0.7
     /// flowlm_step EOS logit threshold — above this means the model is done speaking.
     public static let eosThreshold: Float = -4.0
@@ -75,9 +76,15 @@ public enum PocketTtsConstants {
 /// Supported PocketTTS language packs (matches upstream
 /// `kyutai/pocket-tts/languages/<id>/` folder names exactly).
 ///
-/// All packs live under `v2/<id>/` on `FluidInference/pocket-tts-coreml`.
+/// All packs live under `v2.1/<id>/` on `FluidInference/pocket-tts-coreml`.
 public enum PocketTtsLanguage: String, Sendable, CaseIterable {
+    /// Kyutai's current English model, `english_2026-10` (upstream's `english` id
+    /// serves the same weights). Reads sentence-final numbers and years; defaults to
+    /// temperature 0.3 (#1087).
     case english
+    /// Kyutai's `english_2026-04` checkpoint, the English pack before #1087. Same
+    /// architecture and tokenizer as `.english`, older weights and voices.
+    case english2026Apr = "english_2026-04"
     case french24L = "french_24l"
     case german
     case german24L = "german_24l"
@@ -91,18 +98,54 @@ public enum PocketTtsLanguage: String, Sendable, CaseIterable {
     /// Number of transformer layers in this language pack (6 or 24).
     public var transformerLayers: Int {
         switch self {
-        case .english, .german, .italian, .portuguese, .spanish:
+        case .english, .english2026Apr, .german, .italian, .portuguese, .spanish:
             return 6
         case .french24L, .german24L, .italian24L, .portuguese24L, .spanish24L:
             return 24
         }
     }
 
+    /// Sampling temperature the checkpoint was tuned for, used when a caller passes none.
+    /// Kyutai's `english_2026-10` config sets 0.3 ("human evals preferred this model at
+    /// 0.3"); every other pack keeps `PocketTtsConstants.temperature`.
+    public var defaultTemperature: Float {
+        switch self {
+        case .english:
+            return 0.3
+        case .english2026Apr, .french24L, .german, .german24L, .italian, .italian24L, .portuguese,
+            .portuguese24L, .spanish, .spanish24L:
+            return PocketTtsConstants.temperature
+        }
+    }
+
+    /// Whether the pack is an English checkpoint (English text normalization and
+    /// abbreviations; English voices).
+    var isEnglish: Bool {
+        self == .english || self == .english2026Apr
+    }
+
+    /// Whether live voice cloning re-projects the shared encoder's conditioning
+    /// (baked with `english_2026-04`'s speaker projection) into this pack's space,
+    /// so the pack needs `encoder_recover_pinv.bin` and `speaker_proj_weight.bin`
+    /// (#793). `.english` shares the April codec but not its projection.
+    var reprojectsSharedEncoder: Bool {
+        transformerLayers == 24 || self == .english
+    }
+
     /// HF subdirectory under the pocket-tts-coreml repo root.
     public var repoSubdirectory: String {
-        // v2.1 = optimized re-conversion of v2 (fused flow decoder on ANE,
-        // one-shot cond prefill, fp16 flowlm). Same weights as v2.
-        "v2.1/\(rawValue)"
+        // v2.1 = optimized conversion (fused flow decoder on ANE, one-shot cond
+        // prefill, fp16 flowlm). `.english` follows upstream's `english` alias to the
+        // current checkpoint; the April pack keeps the folder it shipped in (#1087).
+        switch self {
+        case .english:
+            return "v2.1/english_2026-10"
+        case .english2026Apr:
+            return "v2.1/english"
+        case .french24L, .german, .german24L, .italian, .italian24L, .portuguese, .portuguese24L,
+            .spanish, .spanish24L:
+            return "v2.1/\(rawValue)"
+        }
     }
 }
 #endif

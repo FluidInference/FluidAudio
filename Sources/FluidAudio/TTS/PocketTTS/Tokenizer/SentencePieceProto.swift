@@ -3,17 +3,37 @@ import Foundation
 
 /// Minimal protobuf parser for SentencePiece `.model` files.
 ///
-/// Extracts only the vocabulary pieces (string + score) from the
-/// `ModelProto` message, ignoring trainer/normalizer specs.
+/// Extracts the vocabulary pieces (string, score, type) and
+/// `TrainerSpec.byte_fallback` from the `ModelProto` message, ignoring the
+/// rest of the trainer spec and the normalizer spec.
 ///
 /// Wire format reference:
 /// - Tag = (field_number << 3) | wire_type
 /// - Wire type 0 = varint, 2 = length-delimited, 5 = 32-bit fixed
 enum SentencePieceProto {
 
+    /// `SentencePiece.Type` from `sentencepiece_model.proto`.
+    enum PieceType: Int, Sendable {
+        case normal = 1
+        case unknown = 2
+        case control = 3
+        case userDefined = 4
+        case unused = 5
+        case byte = 6
+    }
+
     struct Piece: Sendable {
         let piece: String
         let score: Float
+        let type: PieceType
+    }
+
+    /// The parts of `ModelProto` the tokenizer uses.
+    struct Model: Sendable {
+        let pieces: [Piece]
+        /// `TrainerSpec.byte_fallback`: a scalar no piece covers becomes its
+        /// UTF-8 byte pieces instead of the unknown piece.
+        let byteFallback: Bool
     }
 
     enum ParseError: Error {
@@ -24,7 +44,13 @@ enum SentencePieceProto {
 
     /// Parse a SentencePiece `.model` file and return the vocabulary pieces.
     static func parse(_ data: Data) throws -> [Piece] {
+        try parseModel(data).pieces
+    }
+
+    /// Parse a SentencePiece `.model` file.
+    static func parseModel(_ data: Data) throws -> Model {
         var pieces: [Piece] = []
+        var byteFallback = false
         var offset = 0
         let bytes = Array(data)
         let count = bytes.count
@@ -50,6 +76,9 @@ enum SentencePieceProto {
                     // Top-level field 1 = repeated SentencePiece message
                     let piece = try parsePiece(bytes: bytes, start: offset, end: end)
                     pieces.append(piece)
+                } else if fieldNumber == 2 {
+                    // Top-level field 2 = TrainerSpec message
+                    byteFallback = try parseByteFallback(bytes: bytes, start: offset, end: end)
                 }
                 // Skip to end of this field regardless
                 offset = end
@@ -62,7 +91,7 @@ enum SentencePieceProto {
             }
         }
 
-        return pieces
+        return Model(pieces: pieces, byteFallback: byteFallback)
     }
 
     // MARK: - Private
@@ -71,13 +100,19 @@ enum SentencePieceProto {
         var offset = start
         var piece: String?
         var score: Float = 0
+        var type: PieceType = .normal
 
         while offset < end {
             let (fieldNumber, wireType) = try readTag(bytes: bytes, count: end, offset: &offset)
 
             switch wireType {
             case 0:
-                _ = try readVarint(bytes: bytes, count: end, offset: &offset)
+                let value = try readVarint(bytes: bytes, count: end, offset: &offset)
+                if fieldNumber == 3 {
+                    // SentencePiece.type (enum). Like protobuf, read a value
+                    // this enum doesn't know as the default.
+                    type = PieceType(rawValue: Int(value)) ?? .normal
+                }
             case 1:
                 offset += 8
                 guard offset <= end else { throw ParseError.unexpectedEnd }
@@ -108,7 +143,38 @@ enum SentencePieceProto {
             }
         }
 
-        return Piece(piece: piece ?? "", score: score)
+        return Piece(piece: piece ?? "", score: score, type: type)
+    }
+
+    /// `TrainerSpec.byte_fallback` (field 35, bool). False when absent, the
+    /// proto default.
+    private static func parseByteFallback(bytes: [UInt8], start: Int, end: Int) throws -> Bool {
+        var offset = start
+        var byteFallback = false
+
+        while offset < end {
+            let (fieldNumber, wireType) = try readTag(bytes: bytes, count: end, offset: &offset)
+
+            switch wireType {
+            case 0:
+                let value = try readVarint(bytes: bytes, count: end, offset: &offset)
+                if fieldNumber == 35 {
+                    byteFallback = value != 0
+                }
+            case 1:
+                offset += 8
+            case 2:
+                let length = try readVarint(bytes: bytes, count: end, offset: &offset)
+                offset += Int(length)
+            case 5:
+                offset += 4
+            default:
+                throw ParseError.invalidData
+            }
+            guard offset <= end else { throw ParseError.unexpectedEnd }
+        }
+
+        return byteFallback
     }
 
     private static func readTag(

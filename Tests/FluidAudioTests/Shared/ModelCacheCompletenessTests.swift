@@ -305,6 +305,33 @@ final class ModelCacheCompletenessTests: XCTestCase {
         }
     }
 
+    func testLoadWithRecoveryCachePreservingErrorKeepsCache() async throws {
+        struct LowDisk: ModelCachePreservingError {
+            var preservesModelCache: Bool { true }
+        }
+        let baseDir = makeUniqueBaseDir()
+        let vadRepoPath = baseDir.appendingPathComponent(Repo.vad.folderName)
+        defer { try? FileManager.default.removeItem(at: baseDir) }
+        let bundle = vadRepoPath.appendingPathComponent(ModelNames.VAD.sileroVadFile)
+        try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+        try Data("x".utf8).write(to: bundle.appendingPathComponent("coremldata.bin"))
+
+        // Online: a purge-and-redownload would delete the bundle before any network attempt.
+        do {
+            _ = try await ModelHub.loadWithRecovery(
+                .vad, directory: baseDir,
+                requiredFiles: [ModelNames.VAD.sileroVadFile]
+            ) { throw LowDisk() }
+            XCTFail("expected LowDisk to surface")
+        } catch is LowDisk {
+            XCTAssertTrue(
+                FileManager.default.fileExists(atPath: bundle.path),
+                "a failure outside the cache must not purge it")
+        } catch {
+            XCTFail("expected LowDisk, got: \(error)")
+        }
+    }
+
     func testLoadWithRecoveryCancellationPreservesCache() async throws {
         let baseDir = makeUniqueBaseDir()
         let vadRepoPath = baseDir.appendingPathComponent(Repo.vad.folderName)
@@ -329,5 +356,61 @@ final class ModelCacheCompletenessTests: XCTestCase {
         } catch {
             XCTFail("expected CancellationError, got: \(error)")
         }
+    }
+
+    // MARK: - loadModels (#1067)
+
+    func testLoadModelsTreatsInterruptedBundleAsIncomplete() async throws {
+        // The #819 shape in a `loadModels` repo: the bundle directory exists
+        // with only partial weights. A bare existence check skipped the
+        // download, the load failed and the whole folder was purged; it must
+        // re-enter the download instead (offline mode surfaces that as the
+        // typed missing-model error, without touching the files).
+        let baseDir = makeUniqueBaseDir()
+        let vadRepoPath = baseDir.appendingPathComponent(Repo.vad.folderName)
+        defer { try? FileManager.default.removeItem(at: baseDir) }
+        let bundle = vadRepoPath.appendingPathComponent(ModelNames.VAD.sileroVadFile)
+        try FileManager.default.createDirectory(
+            at: bundle.appendingPathComponent("weights"), withIntermediateDirectories: true)
+        try Data("y".utf8).write(to: bundle.appendingPathComponent("weights/weight.bin.partial"))
+
+        ModelHub.offlineMode = true
+        do {
+            _ = try await ModelHub.loadModels(
+                .vad, modelNames: [ModelNames.VAD.sileroVadFile], directory: baseDir)
+            XCTFail("expected DownloadError.modelMissing")
+        } catch let DownloadError.modelMissing(repo, missing) {
+            XCTAssertEqual(repo, Repo.vad.folderName)
+            XCTAssertEqual(missing, [ModelNames.VAD.sileroVadFile])
+            XCTAssertTrue(
+                FileManager.default.fileExists(
+                    atPath: bundle.appendingPathComponent("weights/weight.bin.partial").path),
+                "the partial file must survive so the download can resume it")
+        } catch {
+            XCTFail("expected DownloadError.modelMissing, got: \(error)")
+        }
+    }
+
+    func testPurgeCorruptedFilesKeepsSiblingVariantsAndMarker() throws {
+        // A Parakeet v3 folder holding both encoder variants (#1067): purging
+        // the `.int8V2` encoder that failed must keep `.int8`'s encoder, the
+        // shared bundles and the revision marker.
+        try ModelCache.prepareForDownload(at: repoPath, revision: "abc123")
+        try makeBundle(ModelNames.ASR.encoderFile)
+        try makeBundle(ModelNames.ASR.encoderV2File, coremldata: false, partialWeights: true)
+        try makeBundle(ModelNames.ASR.decoderFile)
+        try makeFile(ModelNames.ASR.vocabularyFile)
+        try Data("y".utf8).write(to: repoPath.appendingPathComponent("config.json.partial"))
+
+        ModelCache.purgeCorruptedFiles(
+            [ModelNames.ASR.encoderV2File, "config.json", "missing.mlmodelc"], at: repoPath)
+
+        let fm = FileManager.default
+        XCTAssertFalse(fm.fileExists(atPath: repoPath.appendingPathComponent(ModelNames.ASR.encoderV2File).path))
+        XCTAssertFalse(fm.fileExists(atPath: repoPath.appendingPathComponent("config.json.partial").path))
+        for kept in [ModelNames.ASR.encoderFile, ModelNames.ASR.decoderFile, ModelNames.ASR.vocabularyFile] {
+            XCTAssertTrue(fm.fileExists(atPath: repoPath.appendingPathComponent(kept).path), kept)
+        }
+        XCTAssertTrue(ModelCache.matchesRevision(at: repoPath, revision: "abc123"))
     }
 }

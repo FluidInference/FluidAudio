@@ -52,15 +52,15 @@ final class LevelMeter: @unchecked Sendable {
 }
 
 @MainActor
-final class StreamPlayer: ObservableObject {
+final class StreamPlayer {
     /// Level of the audio being played, for the wave view.
     let meter = LevelMeter()
     static let sampleRate: Double = 24_000
 
     /// Frames handed to the player so far (this utterance).
-    @Published private(set) var scheduledFrames = 0
+    private(set) var scheduledFrames = 0
     /// Frames the hardware has finished playing (this utterance).
-    @Published private(set) var playedFrames = 0
+    private(set) var playedFrames = 0
 
     private let engine = AVAudioEngine()
     private let node = AVAudioPlayerNode()

@@ -208,7 +208,8 @@ extension CtcKeywordSpotter {
 
         // Convert logits -> log-probabilities and trim padding frames.
         // Apply temperature scaling (CTC_TEMPERATURE) and blank bias (BLANK_BIAS)
-        let allLogProbs = try makeLogProbs(from: ctcRaw, temperature: temperature, blankBias: blankBias)
+        let allLogProbs = try Self.makeLogProbs(
+            from: ctcRaw, temperature: temperature, blankBias: blankBias, blankId: blankId)
         let trimmed = trimLogProbs(allLogProbs, audioSampleCount: clampedCount)
         let frameCount = trimmed.count
 
@@ -368,64 +369,83 @@ extension CtcKeywordSpotter {
 
     // MARK: - Log Probability Processing
 
-    private func makeLogProbs(
+    static func makeLogProbs(
         from ctcOutput: MLMultiArray,
         temperature: Float = 1.0,
-        blankBias: Float = 0.0
+        blankBias: Float = 0.0,
+        blankId: Int
     ) throws -> [[Float]] {
         let rank = ctcOutput.shape.count
         guard rank == 3 || rank == 4 else {
             throw ASRError.processingFailed("Unexpected CTC output rank: \(ctcOutput.shape)")
         }
 
-        let vocabSize: Int
-        let timeSteps: Int
-        let indexBuilder: (Int, Int) -> [NSNumber]
+        // [1, time, vocabulary] or [1, vocabulary, 1, time].
+        let timeAxis = rank == 3 ? 1 : 3
+        let vocabularyAxis = rank == 3 ? 2 : 1
+        let timeSteps = ctcOutput.shape[timeAxis].intValue
+        let vocabSize = ctcOutput.shape[vocabularyAxis].intValue
+        guard timeSteps > 0, vocabSize > 0 else { return [] }
 
-        if rank == 3 {
-            // Expected shape: [1, timeSteps, vocabSize]
-            timeSteps = ctcOutput.shape[1].intValue
-            vocabSize = ctcOutput.shape[2].intValue
-            indexBuilder = { t, v in [0, t, v].map { NSNumber(value: $0) } }
-        } else {
-            // Expected shape: [1, vocabSize, 1, timeSteps]
-            vocabSize = ctcOutput.shape[1].intValue
-            timeSteps = ctcOutput.shape[3].intValue
-            indexBuilder = { t, v in [0, v, 0, t].map { NSNumber(value: $0) } }
-        }
-
-        if vocabSize <= 0 || timeSteps <= 0 {
-            return []
-        }
-
-        var logProbs: [[Float]] = Array(
-            repeating: Array(repeating: 0, count: vocabSize),
-            count: timeSteps
-        )
-
-        // Iterate over time/vocab dimensions, read logits or log-probabilities.
-        // Apply log-softmax per frame when needed.
-        for t in 0..<timeSteps {
-            var logits = [Float](repeating: 0, count: vocabSize)
-
-            for v in 0..<vocabSize {
-                logits[v] = ctcOutput[indexBuilder(t, v)].floatValue
+        return ctcOutput.withUnsafeBytes { bytes in
+            // Core ML may materialize storage when entering this closure. Read
+            // its current strides here, and do not assume contiguous output.
+            let timeStride = ctcOutput.strides[timeAxis].intValue
+            let vocabularyStride = ctcOutput.strides[vocabularyAxis].intValue
+            func extract(_ readLogit: (Int, Int) -> Float) -> [[Float]] {
+                var logProbs: [[Float]] = Array(
+                    repeating: Array(repeating: 0, count: vocabSize), count: timeSteps)
+                for t in 0..<timeSteps {
+                    var logits = [Float](repeating: 0, count: vocabSize)
+                    for v in 0..<vocabSize {
+                        logits[v] = readLogit(t, v)
+                    }
+                    // Retain the existing Float reduction order, temperature
+                    // scaling and post-normalization blank penalty exactly.
+                    var row = logSoftmax(logits, temperature: temperature)
+                    if blankBias != 0.0 && blankId < row.count {
+                        row[blankId] -= blankBias
+                    }
+                    logProbs[t] = row
+                }
+                return logProbs
             }
-
-            var row = logSoftmax(logits, temperature: temperature)
-
-            // Apply blank bias: subtract from blank token log prob to penalize it
-            if blankBias != 0.0 && blankId < row.count {
-                row[blankId] -= blankBias
+            switch ctcOutput.dataType {
+            case .float16:
+                // Use the existing portable conversion: Swift Float16 is not
+                // available on macOS x86_64. Convert storage including padding,
+                // then select logical elements with the original strides.
+                let halves = bytes.bindMemory(to: UInt16.self)
+                var floats = [Float](repeating: 0, count: halves.count)
+                return floats.withUnsafeMutableBufferPointer { destination in
+                    guard let source = halves.baseAddress, let target = destination.baseAddress else { return [] }
+                    Float16Conversion.toFloat32(src: source, dst: target, count: halves.count)
+                    return extract { t, v in destination[t * timeStride + v * vocabularyStride] }
+                }
+            case .float32:
+                let values = bytes.bindMemory(to: Float.self)
+                return extract { t, v in values[t * timeStride + v * vocabularyStride] }
+            case .float64:
+                let values = bytes.bindMemory(to: Double.self)
+                return extract { t, v in Float(values[t * timeStride + v * vocabularyStride]) }
+            case .int32:
+                let values = bytes.bindMemory(to: Int32.self)
+                return extract { t, v in Float(values[t * timeStride + v * vocabularyStride]) }
+            default:
+                // Keep Core ML's scalar conversion for other supported types,
+                // such as int8 on newer SDKs, without requiring that SDK to build.
+                return extract { t, v in
+                    let indices: [NSNumber] =
+                        rank == 3
+                        ? [0, NSNumber(value: t), NSNumber(value: v)]
+                        : [0, NSNumber(value: v), 0, NSNumber(value: t)]
+                    return ctcOutput[indices].floatValue
+                }
             }
-
-            logProbs[t] = row
         }
-
-        return logProbs
     }
 
-    private func logSoftmax(_ logits: [Float], temperature: Float = 1.0) -> [Float] {
+    private static func logSoftmax(_ logits: [Float], temperature: Float = 1.0) -> [Float] {
         guard !logits.isEmpty else { return [] }
 
         // Apply temperature scaling: divide logits by temperature before softmax

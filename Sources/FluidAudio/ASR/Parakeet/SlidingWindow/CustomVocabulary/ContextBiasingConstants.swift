@@ -139,6 +139,17 @@ public enum ContextBiasingConstants {
     /// - Used in: `VocabularyRescorer+ConstrainedCTC.swift` stopword check
     public static let stopwordSpanSimilarity: Float = 0.85
 
+    /// Lowest TDT token confidence at which a transcript word counts as confidently heard.
+    ///
+    /// A vocabulary term gets no context bias against a span whose words were all heard this
+    /// confidently, so it must beat the span on CTC evidence alone (#967). Below this, misheard
+    /// names keep the full bias; the 13 #967 dictation clips' correct fixes all sit at 0.70 or less.
+    public static let confidentWordMinConfidence: Float = 0.99
+
+    /// Similarity at and above which a confidently heard span is a close spelling of the term
+    /// ("Quiltor" / "Quilter", "Rashid" / "Rasyid") and keeps its bias, so the listed spelling still wins.
+    public static let closeSpellingSimilarity: Float = 0.80
+
     // MARK: - Context Biasing Weights
 
     /// Default context-biasing weight (CBW) per NeMo paper.
@@ -339,7 +350,9 @@ public enum ContextBiasingConstants {
     /// short-distractor set, disabling it drops false-positive insertions from
     /// ~94 to ~19 (the pre-#634 / 0.14.5 level) with no loss of biasing recall
     /// on distinctive-name vocabularies. Set to `false` for short-vocab KWS
-    /// where the acoustic rescue costs more than it recovers. Env:
+    /// where the acoustic rescue costs more than it recovers. The rescue only
+    /// runs for vocabularies of at most `largeVocabThreshold` terms, so this
+    /// has no effect on larger ones. Env:
     /// `FLUID_SPOTTER_RESCUE` (`0`/`false`/`no`/`off` disables).
     public static var defaultSpotterRescueEnabled: Bool {
         envBool("FLUID_SPOTTER_RESCUE") ?? true

@@ -1,6 +1,15 @@
 import Foundation
 
 /// Supported languages for script-based filtering.
+///
+/// A language hint constrains the decoder's script (Latin, Cyrillic, Greek), not the language.
+/// Every Latin-script case filters the same tokens, so `.spanish` and `.english` decode the
+/// same audio identically, and neither keeps English words out of Spanish speech (#1063).
+/// `.french` is the one exception: it also applies the English function-word blocklist
+/// (#630, #847). For a decode conditioned on one language, use Canary
+/// (`CanaryManager(models:source:target:)`) or Cohere Transcribe
+/// (`CoherePipeline.transcribe(audio:models:language:)`).
+/// See Documentation/ASR/TokenLanguageFilter.md.
 public enum Language: String, Sendable, CaseIterable {
     case english = "en"
     case spanish = "es"

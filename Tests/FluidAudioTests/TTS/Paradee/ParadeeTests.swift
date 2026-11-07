@@ -17,16 +17,74 @@ final class ParadeeTests: XCTestCase {
         XCTAssertEqual(Repo.paradeeFp32.folderName, "paradee-8m-coreml/fp32")
     }
 
+    func testV12RepoPathsAndSubdirectories() {
+        for (repo, variant) in [(Repo.paradeeV12Int8, "int8"), (.paradeeV12Fp32, "fp32")] {
+            XCTAssertEqual(repo.remotePath, "FluidInference/paradee-8m-coreml")
+            XCTAssertEqual(repo.subPath, "v1.2/\(variant)")
+            XCTAssertEqual(repo.folderName, "paradee-8m-coreml/v1.2/\(variant)")
+        }
+    }
+
     func testVariantMapsToRepo() {
         XCTAssertEqual(ParadeeVariant.int8.repo, .paradeeInt8)
         XCTAssertEqual(ParadeeVariant.fp32.repo, .paradeeFp32)
+        XCTAssertEqual(ParadeeVariant.int8.repo(for: .v10), .paradeeInt8)
+        XCTAssertEqual(ParadeeVariant.fp32.repo(for: .v10), .paradeeFp32)
+        XCTAssertEqual(ParadeeVariant.int8.repo(for: .v12), .paradeeV12Int8)
+        XCTAssertEqual(ParadeeVariant.fp32.repo(for: .v12), .paradeeV12Fp32)
     }
 
     func testRequiredModels() {
         let required: Set<String> = ["ParadeeText.mlmodelc", "ParadeeAcoustic.mlmodelc", "vocab.json"]
         XCTAssertEqual(ModelNames.Paradee.requiredModels, required)
-        XCTAssertEqual(ModelNames.getRequiredModelNames(for: .paradeeInt8, variant: nil), required)
-        XCTAssertEqual(ModelNames.getRequiredModelNames(for: .paradeeFp32, variant: nil), required)
+        for repo in [Repo.paradeeInt8, .paradeeFp32, .paradeeV12Int8, .paradeeV12Fp32] {
+            XCTAssertEqual(ModelNames.getRequiredModelNames(for: repo, variant: nil), required)
+        }
+    }
+
+    // MARK: - Voices
+
+    func testVoicesPerVersion() {
+        XCTAssertEqual(ParadeeVersion.v10.voices, [.afHeart])
+        XCTAssertFalse(ParadeeVersion.v10.hasVoiceInput)
+        // The v1.2 voice tables are ordered like config.json `voices`.
+        XCTAssertEqual(ParadeeVersion.v12.voices.map(\.rawValue), ["af_heart", "bf_isabella", "am_puck", "bm_fable"])
+        XCTAssertEqual(ParadeeVersion.v12.voices.map(\.modelIndex), [0, 1, 2, 3])
+        XCTAssertTrue(ParadeeVersion.v12.hasVoiceInput)
+        XCTAssertEqual(ParadeeVoice.allCases.filter(\.isBritish), [.bfIsabella, .bmFable])
+    }
+
+    func testV10RejectsOtherVoices() async {
+        let manager = ParadeeManager(version: .v10)
+        do {
+            _ = try await manager.synthesize(phonemes: "həlˈO", voice: .bmFable)
+            XCTFail("expected unsupportedVoice")
+        } catch ParadeeError.unsupportedVoice(let voice, let version) {
+            XCTAssertEqual(voice, "bm_fable")
+            XCTAssertEqual(version, "1.0")
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
+    }
+
+    // MARK: - British frontend
+
+    func testBritishLexiconFileName() {
+        XCTAssertEqual(LexiconAssetCache.englishFileName(british: false), "us_lexicon_cache.json")
+        XCTAssertEqual(LexiconAssetCache.englishFileName(british: true), "gb_lexicon_cache.json")
+    }
+
+    func testBritishFallbackRewritesAmericanPhonemes() {
+        // Expected values from the Python rules the mapping was measured with.
+        let cases: [(String, String)] = [
+            ("kˈɑɹ", "kˈɑː"), ("ɡˈO", "ɡˈQ"), ("bˈæθ", "bˈaθ"), ("hˈɑt", "hˈɒt"), ("fˈIɹ", "fˈIə"),
+            ("vˈɛɹi", "vˈɛɹi"), ("sˈɑɹi", "sˈɒɹi"), ("wˈɔTəɹ", "wˈɔtə"), ("bˈɜɹd", "bˈɜːd"), ("ˈWɹ", "ˈWə"),
+            ("kwɪksˈɑTɪk", "kwɪksˈɒtɪk"), ("ɡlˈɔɹbɪŋtᵊnz", "ɡlˈɔːbɪŋtᵊnz"), ("ˌɛɹˈOd", "ˌɛɹˈQd"),
+            ("bˈɑɹˌn", "bˈɑːˌn"), ("kˈɪʔnz", "kˈɪtnz"), ("ˈɪɹˌɪŋ", "ˈɪɹˌɪŋ"),
+        ]
+        for (american, british) in cases {
+            XCTAssertEqual(MisakiBritishFallback.fromAmerican(american), british, american)
+        }
     }
 
     func testGpuComputeUnitsRejected() {

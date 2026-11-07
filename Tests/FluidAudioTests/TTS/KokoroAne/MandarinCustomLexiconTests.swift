@@ -267,6 +267,53 @@ final class MandarinCustomLexiconTests: XCTestCase {
         XCTAssertEqual(out, "ㄨㄛ3ㄋㄧ2ㄏㄠ3")
     }
 
+    /// 这 zhè, 条 tiáo, 路 lù, 很 hěn, 走 zǒu, plus 长 with `changReading`
+    /// as its single-character reading. None of these form a dict phrase,
+    /// so every character goes through the single-character fallback run.
+    private static func roadDict(changReading: String) -> MandarinPinyinDict {
+        MandarinPinyinDict(
+            phrases: [:],
+            singles: [
+                0x8FD9: ["zhè"],
+                0x6761: ["tiáo"],
+                0x8DEF: ["lù"],
+                0x5F88: ["hěn"],
+                0x8D70: ["zǒu"],
+                0x957F: [changReading],
+            ])
+    }
+
+    func testPhonemizeKeepsWordOrderAroundLexiconHit() async throws {
+        // A lexicon hit used to flush only the literal buffer, so the
+        // pending single-character run (这条路很) was emitted after the
+        // hit: 这条路很长 came out as 长这条路很.
+        let lex = try MandarinCustomLexicon(entries: ["长": ["chang2"]])
+        var corrected = MandarinG2P(dict: Self.roadDict(changReading: "zhǎng"))
+        corrected.customLexicon = lex
+        let reference = MandarinG2P(dict: Self.roadDict(changReading: "cháng"))
+
+        for text in ["这条路很长", "这条路很长，走", "这长路"] {
+            let out = try await corrected.phonemize(text)
+            let expected = try await reference.phonemize(text)
+            XCTAssertEqual(out, expected, text)
+        }
+        let out = try await corrected.phonemize("这条路很长")
+        XCTAssertTrue(out.hasPrefix("ㄓㄜ4"), out)
+        XCTAssertTrue(out.hasSuffix("ㄔㄤ2"), out)
+    }
+
+    func testPhonemizeKeepsLiteralsAndHanziInOrderBeforeLexiconHit() async throws {
+        // ASCII before a Hanzi run before a hit: literal, run, hit. ASCII
+        // right before a hit (no run): literal, hit.
+        let lex = try MandarinCustomLexicon(entries: ["长": ["chang2"]])
+        var g2p = MandarinG2P(dict: Self.roadDict(changReading: "zhǎng"))
+        g2p.customLexicon = lex
+        let run = try await g2p.phonemize("A这长")
+        XCTAssertEqual(run, "Aㄓㄜ4ㄔㄤ2")
+        let literalOnly = try await g2p.phonemize("A长")
+        XCTAssertEqual(literalOnly, "Aㄔㄤ2")
+    }
+
     func testPhonemizeWithEmptyLexiconMatchesDictOnlyPath() async throws {
         let g2p = MandarinG2P(dict: Self.smallDict())
         let out = try await g2p.phonemize("你好")

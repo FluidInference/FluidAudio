@@ -69,7 +69,7 @@ enum StreamDiarizationBenchmark {
         var skipSimilarity: Float?
         var minSegmentDuration: Double = 1.0
         var minGapDuration: Double = 0.1
-        var exclusiveSegments = true
+        var exclusiveSegments = false
         var onsetThreshold: Float = 0.5
         var offsetThreshold: Float = 0.5
         var segMinDurationOn: Double = 0.0
@@ -126,7 +126,8 @@ enum StreamDiarizationBenchmark {
                 --skip-similarity <0-1>     Skip embedding if mask similarity >= threshold
                 --min-segment-duration <sec> Minimum segment duration (default: 1.0)
                 --min-gap-duration <sec>    Merge segments separated by less than this gap (default: 0.1)
-                --overlapping-segments      Allow speakers to overlap in output
+                --exclusive-segments        One speaker at a time: trim overlapping speech from the output
+                --overlapping-segments      Keep overlapping speech in the output (default)
                 --onset-threshold <0-1>     VAD onset probability (default: 0.5)
                 --offset-threshold <0-1>    VAD offset probability (default: 0.5)
                 --min-duration-on <sec>     Min speech to trigger VAD on (default: 0.0)
@@ -326,6 +327,8 @@ enum StreamDiarizationBenchmark {
                     args.minGapDuration = Double(arguments[i + 1]) ?? 0.1
                     i += 1
                 }
+            case "--exclusive-segments":
+                args.exclusiveSegments = true
             case "--overlapping-segments":
                 args.exclusiveSegments = false
             case "--onset-threshold":

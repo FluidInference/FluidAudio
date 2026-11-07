@@ -252,12 +252,23 @@ jobs:
 
       # Issue #855: real-recording finish() regression for the streaming final
       # window. Runs here because the benchmark above has already cached the v3
-      # models; the test skips when they are absent.
+      # models; the test skips when they are absent. #1074: the CTC compute-unit
+      # check and #967's threshold check reuse the v3 + CTC 110M downloads of the
+      # vocabulary-boosting test.
       - name: Streaming final-window regression (real recordings)
         if: always()
         env:
           FLUIDAUDIO_RUN_ASR_E2E: "1"
-        run: swift test --filter 'SlidingWindowFinalWindowRegressionTests|SlidingWindowVocabularyBoostingStreamingTests'
+        run: swift test --filter 'SlidingWindowFinalWindowRegressionTests|SlidingWindowVocabularyBoostingStreamingTests|CtcModelsComputeUnitsTests|VocabularyBoostingThresholdsTests|VocabularySpanPreservationTests|VocabularyNameBoundaryTests'
+        timeout-minutes: 15
+
+      # #1033: cancel() must join the recognizer before returning (real recordings,
+      # reuses the v3 models cached above).
+      - name: Streaming cancellation regression (real recordings)
+        if: always()
+        env:
+          FLUIDAUDIO_RUN_ASR_E2E: "1"
+        run: swift test --filter 'SlidingWindowCancellationTests'
         timeout-minutes: 15
 
       - name: Comment PR
