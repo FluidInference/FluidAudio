@@ -211,4 +211,27 @@ final class PocketTtsCutPlacementTests: XCTestCase {
         XCTAssertTrue(result[0].hasSuffix("precedes rain\u{2014}"), "cut not at the dash: \(result)")
         XCTAssertTrue(result[1].hasPrefix("a mix of ozone"), "cut not at the dash: \(result)")
     }
+
+    // MARK: - Periods inside a word
+
+    func testPeriodBeforeALetterDoesNotEndASentence() {
+        XCTAssertEqual(
+            PocketTtsSynthesizer.splitSentences(
+                "Read the guide at www.kyutai.org first. Then write to jo@icloud.com today."),
+            ["Read the guide at www.kyutai.org first.", "Then write to jo@icloud.com today."])
+        XCTAssertEqual(
+            PocketTtsSynthesizer.splitSentences("Bring a tool, e.g. a hammer. We start at 4 p.m. Then we eat."),
+            ["Bring a tool, e.g. a hammer.", "We start at 4 p.m.", "Then we eat."])
+    }
+
+    func testChunksKeepAddressesWhole() throws {
+        let tokenizer = try makeEnglishTokenizer()
+        let text =
+            "The release notes for this version are on the project site at www.kyutai.org, and the "
+            + "team reads every message sent to jo@icloud.com. Questions about the old models, i.e. the "
+            + "ones from last year, go to the forum instead."
+        let parts = try chunks(text, tokenizer: tokenizer, voiceCachePosition: 126)
+        XCTAssertGreaterThan(parts.count, 1)
+        XCTAssertEqual(parts.joined(separator: " "), text)
+    }
 }
