@@ -80,38 +80,66 @@ final class MandarinG2pwIntegrationTests: XCTestCase {
         indices.compactMap(catalog.bopomofo(forLabel:)).sorted()
     }
 
-    func testMainlandLabelsFoldTaiwanReadingIntoDefault() throws {
-        // g2pW lists 和 as hàn (Taiwan, "and") besides the mainland readings.
-        let catalog = try MandarinPolyphoneCatalog(text: "和\tㄏㄜ2\n和\tㄏㄢ4\n和\tㄏㄨㄛ4\n和\tㄏㄜ4\n")
-        let mainland = try XCTUnwrap(
-            MandarinG2pwModel.mainlandLabels(
-                for: "和", readings: Self.syllables("hé", "hè", "huó", "huò"), catalog: catalog))
-        XCTAssertEqual(Self.labels(mainland.labels, catalog), ["ㄏㄜ2", "ㄏㄜ4", "ㄏㄨㄛ4"])
-        let han = try XCTUnwrap(catalog.labels.firstIndex(of: "ㄏㄢ4"))
-        XCTAssertEqual(mainland.folds[han].flatMap(catalog.bopomofo(forLabel:)), "ㄏㄜ2")
+    /// Bins for `char` from tab-separated catalog rows, and a probability
+    /// vector setter keyed by label.
+    private static func bins(
+        _ char: Character, _ labels: [String], readings: [String]
+    ) throws -> (MandarinG2pwModel.MainlandBins?, ([String: Float]) -> [Float]) {
+        let catalog = try MandarinPolyphoneCatalog(text: labels.map { "\(char)\t\($0)\n" }.joined())
+        let bins = MandarinG2pwModel.MainlandBins(
+            char: char, readings: readings.map(MandarinPinyinNormalizer.normalize), catalog: catalog)
+        let probs: ([String: Float]) -> [Float] = { values in
+            var probs = [Float](repeating: 0, count: catalog.labels.count)
+            for (label, value) in values { probs[catalog.labels.firstIndex(of: label)!] = value }
+            return probs
+        }
+        return (bins, probs)
     }
 
-    func testMainlandLabelsAllowNeutralToneForms() throws {
-        let catalog = try MandarinPolyphoneCatalog(text: "夫\tㄈㄨ1\n夫\tㄈㄨ2\n夫\tㄈㄨ5\n")
-        let mainland = try XCTUnwrap(
-            MandarinG2pwModel.mainlandLabels(for: "夫", readings: Self.syllables("fū", "fú"), catalog: catalog))
-        XCTAssertEqual(Self.labels(mainland.labels, catalog), ["ㄈㄨ1", "ㄈㄨ2", "ㄈㄨ5"])
-        XCTAssertTrue(mainland.folds.isEmpty)
+    func testTaiwanReadingCountsTowardTheDefault() throws {
+        // 和 hàn (Taiwan, "and") is mainland hé: 0.6 + 0.15 beats huò's 0.25.
+        let (bins, probs) = try Self.bins(
+            "和", ["ㄏㄜ2", "ㄏㄢ4", "ㄏㄨㄛ4", "ㄏㄜ4"], readings: ["hé", "hè", "huó", "huò"])
+        let mainland = try XCTUnwrap(bins)
+        XCTAssertNil(mainland.pick(probs(["ㄏㄢ4": 0.6, "ㄏㄨㄛ4": 0.25, "ㄏㄜ2": 0.15])))
+        XCTAssertEqual(mainland.pick(probs(["ㄏㄨㄛ4": 0.8, "ㄏㄢ4": 0.1, "ㄏㄜ2": 0.1])), "ㄏㄨㄛ4")
     }
 
-    func testMainlandLabelsMapTaiwanDaiToDei() throws {
+    func testTaiwanToneOfTheDefaultStillLetsTheModelChoose() throws {
+        // 削: the inventory has xiāo and Taiwan xuè, not the default xuē.
+        let (bins, probs) = try Self.bins("削", ["ㄒㄧㄠ1", "ㄒㄩㄝ4"], readings: ["xuē", "xiāo", "qiào", "shào"])
+        let mainland = try XCTUnwrap(bins)
+        XCTAssertEqual(mainland.pick(probs(["ㄒㄧㄠ1": 1])), "ㄒㄧㄠ1")
+        XCTAssertNil(mainland.pick(probs(["ㄒㄩㄝ4": 0.9, "ㄒㄧㄠ1": 0.1])))
+    }
+
+    func testInventoryWithoutTheDefaultKeepsTheDictReading() throws {
+        // Traditional 吨 is another character (tún); simplified 吨 is "ton", dūn.
+        let (bins, _) = try Self.bins("吨", ["ㄊㄨㄣ2", "ㄊㄨㄣ3"], readings: ["dūn", "tún", "tǔn"])
+        XCTAssertNil(bins)
+    }
+
+    func testNeutralToneFormIsAReading() throws {
+        let (bins, probs) = try Self.bins("夫", ["ㄈㄨ1", "ㄈㄨ2", "ㄈㄨ5"], readings: ["fū", "fú"])
+        XCTAssertEqual(try XCTUnwrap(bins).pick(probs(["ㄈㄨ5": 0.8, "ㄈㄨ1": 0.2])), "ㄈㄨ5")
+    }
+
+    func testTaiwanDaiCountsTowardDei() throws {
         // 得 "must": Taiwan dǎi is mainland děi, not the default dé.
-        let catalog = try MandarinPolyphoneCatalog(text: "得\tㄉㄜ2\n得\tㄉㄜ5\n得\tㄉㄟ3\n得\tㄉㄞ3\n")
-        let mainland = try XCTUnwrap(
-            MandarinG2pwModel.mainlandLabels(for: "得", readings: Self.syllables("dé", "de", "děi"), catalog: catalog))
-        let dai = try XCTUnwrap(catalog.labels.firstIndex(of: "ㄉㄞ3"))
-        XCTAssertEqual(mainland.folds[dai].flatMap(catalog.bopomofo(forLabel:)), "ㄉㄟ3")
+        let (bins, probs) = try Self.bins("得", ["ㄉㄜ2", "ㄉㄜ5", "ㄉㄟ3", "ㄉㄞ3"], readings: ["dé", "de", "děi"])
+        let mainland = try XCTUnwrap(bins)
+        XCTAssertEqual(mainland.pick(probs(["ㄉㄞ3": 0.5, "ㄉㄜ2": 0.3, "ㄉㄟ3": 0.2])), "ㄉㄟ3")
     }
 
-    func testMainlandLabelsNeedTwoSharedReadings() throws {
-        // 期 qí is Taiwan-only; one shared reading leaves g2pW nothing to pick.
-        let catalog = try MandarinPolyphoneCatalog(text: "期\tㄑㄧ1\n期\tㄑㄧ2\n")
-        XCTAssertNil(MandarinG2pwModel.mainlandLabels(for: "期", readings: Self.syllables("qī", "jī"), catalog: catalog))
+    func testNothingToChooseWhenEveryLabelIsTheDefault() throws {
+        // 期 qí is the Taiwan tone of the default qī.
+        let (bins, _) = try Self.bins("期", ["ㄑㄧ1", "ㄑㄧ2"], readings: ["qī", "jī"])
+        XCTAssertNil(bins)
+    }
+
+    func testNonFiniteScoresKeepTheDictReading() throws {
+        let (bins, probs) = try Self.bins("和", ["ㄏㄜ2", "ㄏㄨㄛ4"], readings: ["hé", "huò"])
+        XCTAssertNil(try XCTUnwrap(bins).pick(probs(["ㄏㄜ2": .nan, "ㄏㄨㄛ4": .nan])))
     }
 
     func testDictReadingsAreKeyedByTargetPosition() throws {
@@ -139,6 +167,13 @@ final class MandarinG2pwIntegrationTests: XCTestCase {
             let phonemes = try await manager.phonemes(for: text)
             XCTAssertTrue(phonemes.contains("ㄏㄜ2"), "\(text) → \(phonemes)")
             XCTAssertFalse(phonemes.contains("ㄏㄢ4") || phonemes.contains("ㄏ我4"), "\(text) → \(phonemes)")
+        }
+        // 削 xiāo, 吨 dūn, 厂 chǎng, 咋 zǎ (the last three are other characters in the inventory).
+        for (text, reading) in [
+            ("妈妈在削苹果。", "ㄒ要1"), ("这辆卡车能装五吨货。", "ㄉ文1"), ("他在厂里上班。", "ㄔㄤ"), ("你咋不早说？", "ㄗㄚ"),
+        ] {
+            let phonemes = try await manager.phonemes(for: text)
+            XCTAssertTrue(phonemes.contains(reading), "\(text) → \(phonemes)")
         }
     }
 

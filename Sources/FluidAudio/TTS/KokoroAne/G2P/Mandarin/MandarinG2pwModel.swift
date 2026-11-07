@@ -125,9 +125,10 @@ public actor MandarinG2pwModel {
     ///
     /// `dictReadings` gives, per target position, the readings the
     /// caller's dictionary lists, default first. Such a target returns
-    /// only labels matching one of them or its neutral-tone form (see
-    /// ``mainlandLabels(for:readings:catalog:)``), and is dropped when
-    /// fewer than two match, so the caller keeps its own reading.
+    /// only a label spelling one of them (see ``MainlandBins``), and is
+    /// dropped — the caller keeps its default — when that default wins,
+    /// when the inventory does not cover it, or when the scores are not
+    /// finite.
     public func disambiguate(
         chars: [Character],
         targets: [Int],
@@ -156,13 +157,10 @@ public actor MandarinG2pwModel {
                 !candidates.isEmpty,
                 let charId = catalog.charIndex[ch]
             else { continue }
-            var labels = candidates
-            var folds: [Int: Int] = [:]
+            var bins: MainlandBins?
             if let readings = dictReadings[charIdx] {
-                guard let mainland = Self.mainlandLabels(for: ch, readings: readings, catalog: catalog)
-                else { continue }
-                labels = mainland.labels
-                folds = mainland.folds
+                guard let mainland = MainlandBins(char: ch, readings: readings, catalog: catalog) else { continue }
+                bins = mainland
             }
 
             let tokenPos = encoded.tokenPositionForChar[charIdx]
@@ -173,19 +171,19 @@ public actor MandarinG2pwModel {
                 charId: charId,
                 targetPosition: tokenPos
             )
+            if let bins {
+                if let pick = bins.pick(probs) { output[charIdx] = pick }
+                continue
+            }
             // Pick the argmax over the candidate subset only — the model
             // already applies the mask, this just guards against a
             // bundle that was exported without it.
-            var score: [Int: Float] = [:]
-            for cand in candidates where cand >= 0 && cand < probs.count {
-                score[folds[cand] ?? cand, default: 0] += probs[cand]
-            }
-            var bestIdx = labels[0]
+            var bestIdx = candidates[0]
             var bestProb = -Float.infinity
-            for cand in labels {
-                guard let prob = score[cand] else { continue }
-                if prob > bestProb {
-                    bestProb = prob
+            for cand in candidates {
+                guard cand >= 0, cand < probs.count else { continue }
+                if probs[cand] > bestProb {
+                    bestProb = probs[cand]
                     bestIdx = cand
                 }
             }
@@ -209,35 +207,67 @@ public actor MandarinG2pwModel {
         "得": ["ㄉㄞ3": "ㄉㄟ3"]  // dǎi, "must": mainland děi
     ]
 
-    /// The catalog labels of `char` the mainland dict also lists
-    /// (`readings`, default first, or their neutral-tone forms), and
-    /// where each other label's probability goes: the catalog is the
-    /// Taiwan-standard inventory, so a label the dict lacks is mostly the
-    /// Taiwan reading of a sense the dict reads by default (`和` hàn,
-    /// mainland hé). `nil` when fewer than two labels match.
-    static func mainlandLabels(
-        for char: Character, readings: [MandarinPinyinNormalizer.Syllable], catalog: MandarinPolyphoneCatalog
-    ) -> (labels: [Int], folds: [Int: Int])? {
-        guard let candidates = catalog.candidates(for: char) else { return nil }
-        func key(_ label: Int) -> String? {
-            catalog.bopomofo(forLabel: label).flatMap(MandarinBopomofoMap.decode(bopomofo:)).flatMap(readingKey)
-        }
-        let neutral = readings.map { MandarinPinyinNormalizer.Syllable(base: $0.base, tone: 5) }
-        let allowed = Set((readings + neutral).compactMap(readingKey))
-        let labels = candidates.filter { key($0).map(allowed.contains) ?? false }
-        guard labels.count >= 2 else { return nil }
+    /// Which mainland dict reading each catalog label of a character counts
+    /// toward. The inventory is Taiwan-standard: a label spelling a dict
+    /// reading (or its neutral-tone form) counts for itself; one the dict
+    /// lacks is mostly the Taiwan reading of a sense the dict reads by
+    /// default (`和` hàn is mainland hé, `削` xuè is xuē) and counts toward
+    /// the default, unless ``taiwanReadings`` says otherwise.
+    struct MainlandBins {
+        /// Catalog label index → reading key it counts toward.
+        let bin: [Int: String]
+        /// Reading key → the label to return for it.
+        let label: [String: String]
+        let defaultKey: String
 
-        let defaultLabel = readings.first.flatMap(readingKey).flatMap { first in labels.first { key($0) == first } }
-        var folds: [Int: Int] = [:]
-        for label in candidates where !labels.contains(label) {
-            let alias = catalog.bopomofo(forLabel: label).flatMap { taiwanReadings[char]?[$0] }
-            if let alias, let target = labels.first(where: { catalog.bopomofo(forLabel: $0) == alias }) {
-                folds[label] = target
-            } else if let defaultLabel {
-                folds[label] = defaultLabel
+        /// `nil` when no label spells the default reading in any tone
+        /// (the inventory has a different character: Traditional 吨 is not
+        /// the simplified 吨, "ton") or when every label counts toward the
+        /// default, so g2pW has nothing to choose.
+        init?(char: Character, readings: [MandarinPinyinNormalizer.Syllable], catalog: MandarinPolyphoneCatalog) {
+            guard let first = readings.first, let defaultKey = MandarinG2pwModel.readingKey(first),
+                let candidates = catalog.candidates(for: char)
+            else { return nil }
+            let neutral = readings.map { MandarinPinyinNormalizer.Syllable(base: $0.base, tone: 5) }
+            let dictKeys = Set((readings + neutral).compactMap(MandarinG2pwModel.readingKey))
+            var bin: [Int: String] = [:]
+            var label: [String: String] = [:]
+            var coversDefault = false
+            for index in candidates {
+                guard let text = catalog.bopomofo(forLabel: index) else { continue }
+                let syllable = MandarinBopomofoMap.decode(bopomofo: text)
+                let key = syllable.flatMap(MandarinG2pwModel.readingKey)
+                if let key, dictKeys.contains(key) {
+                    bin[index] = key
+                    label[key] = text
+                } else if let alias = MandarinG2pwModel.taiwanReadings[char]?[text],
+                    let aliasKey = MandarinBopomofoMap.decode(bopomofo: alias).flatMap(MandarinG2pwModel.readingKey)
+                {
+                    bin[index] = aliasKey
+                    label[aliasKey] = label[aliasKey] ?? alias
+                } else {
+                    bin[index] = defaultKey
+                }
+                if key == defaultKey || syllable?.base == first.base { coversDefault = true }
             }
+            guard coversDefault, Set(bin.values).count >= 2 else { return nil }
+            self.bin = bin
+            self.label = label
+            self.defaultKey = defaultKey
         }
-        return (labels, folds)
+
+        /// The label of the reading with the most probability, or `nil`
+        /// when that is the default (the caller already has it) or no
+        /// score is finite.
+        func pick(_ probs: [Float]) -> String? {
+            var score: [String: Float] = [:]
+            for (index, key) in bin where index >= 0 && index < probs.count && probs[index].isFinite {
+                score[key, default: 0] += probs[index]
+            }
+            guard let best = score.max(by: { $0.value < $1.value || ($0.value == $1.value && $0.key > $1.key) })
+            else { return nil }
+            return best.key == defaultKey ? nil : label[best.key]
+        }
     }
 
     private struct SentenceInputs {

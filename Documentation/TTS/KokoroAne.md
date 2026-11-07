@@ -491,8 +491,10 @@ simplified-only polyphones such as `还` / `长` / `发` keep the dict's
 first reading. That inventory is Taiwan-standard, so g2pW may only return
 readings the (mainland) dict lists or their neutral-tone forms; the
 probability of a Taiwan-only reading counts toward the dict's default
-(`和` read hàn becomes hé), and a character with fewer than two shared
-readings keeps the dict's first reading. Every g2pW asset is optional — if the bundle or its text
+(`和` read hàn becomes hé, `削` xuè becomes xuē). A character whose inventory
+entry lacks the dict's default in every tone keeps the dict's first reading:
+simplification merged it with another word (simplified `吨` "ton" is
+Traditional `噸`; Traditional `吨` reads tún). Every g2pW asset is optional — if the bundle or its text
 files are missing, synthesis continues dict-only.
 
 ## Japanese G2P
