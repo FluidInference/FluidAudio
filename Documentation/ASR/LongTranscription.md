@@ -616,10 +616,15 @@ previous window's tokens within 1 s of its last token (`unspacedTailStart`),
 where the decoder guesses at the window edge ("理解します。" ahead of
 "スペイン語を…"). `reconcileUnspacedSeam` replaces that tail when the re-decode
 emits inside it and reaches past it, and otherwise keeps it and drops the
-re-decode's copy. The tail never starts within the new window's first second,
-and no `tdtJa` window counts as opening mid-word. On the two FLEURS `ja_jp`
-files from the issue (142 s / 180 s) streaming CER goes 67.4% / 38.7% → 3.4% /
-6.4% (batch: 4.8% / 7.3%).
+re-decode's copy. The tail stays inside the previous window and never starts
+within the new window's first second. Dedup matches runs of two or more
+tokens, so a single re-emitted copy of the last kept token (`植植物`) is dropped
+after it (`isUnspacedJitterCopy`); an equal character further back is the
+re-decode's own (`多いといわれ`). No `tdtJa` window counts as opening mid-word,
+and window texts join without a separator, since a seam can fall mid-sentence.
+On the two FLEURS `ja_jp` files from the issue (142 s / 180 s) streaming CER
+goes 67.4% / 38.7% → 3.4% / 6.4% (batch: 4.8% / 7.3%), and the 25 single clips
+4.4% → 4.2%.
 
 **End-aligned final window.** A short final flush window (a 16.9 s clip at
 an 8 s chunk leaves 0.9 s of new audio behind 2 s of left context) yields

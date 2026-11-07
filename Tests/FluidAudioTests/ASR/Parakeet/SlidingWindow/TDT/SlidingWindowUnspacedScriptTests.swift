@@ -45,6 +45,19 @@ final class SlidingWindowUnspacedScriptTests: XCTestCase {
         XCTAssertNil(AsrManager.unspacedTailStart(timestamps: [], stableTokenFloor: 0))
     }
 
+    /// The tail never reaches into an older window than the previous one: with short windows the
+    /// last second can start before the previous window's first token.
+    func testTheTailStaysInsideThePreviousWindow() {
+        XCTAssertEqual(
+            AsrManager.unspacedTailStart(timestamps: previousTimestamps, stableTokenFloor: 0, previousWindowStart: 9),
+            9)
+        XCTAssertEqual(
+            AsrManager.unspacedTailStart(timestamps: previousTimestamps, stableTokenFloor: 0, previousWindowStart: 6),
+            7, "a floor ahead of the tail changes nothing")
+        XCTAssertNil(
+            AsrManager.unspacedTailStart(timestamps: previousTimestamps, stableTokenFloor: 0, previousWindowStart: 12))
+    }
+
     /// The re-decode emits inside the tail and past it: its reading replaces the tail.
     func testACoveringRedecodeReplacesTheTail() {
         let seam = AsrManager.reconcileUnspacedSeam(
@@ -61,12 +74,56 @@ final class SlidingWindowUnspacedScriptTests: XCTestCase {
         XCTAssertEqual(seam.droppedCurrent, 0)
     }
 
-    /// The re-decode ends inside the tail (the audio ran out): the tail stays and its copy goes.
+    /// The re-decode ends inside the tail (the audio ran out): the tail stays and its copy goes,
+    /// including る@120, two frames past the kept る, which dedup leaves as a single token:
+    /// "食べる", never "食べるる".
     func testARedecodeThatStopsInTheTailKeepsItOnce() {
         let seam = AsrManager.reconcileUnspacedSeam(
             previousTimestamps: previousTimestamps, tailStart: 7, currentTimestamps: [110, 116, 120])
         XCTAssertEqual(seam.droppedPrevious, 0)
         XCTAssertEqual(seam.droppedCurrent, 2)
+        XCTAssertTrue(
+            AsrManager.isUnspacedJitterCopy(
+                keptTokens: previousTokens, keptTimestamps: previousTimestamps, token: 12, timestamp: 120))
+    }
+
+    /// The re-decode re-emits 全, the last kept token ahead of the replaced tail, and dedup leaves
+    /// a single token: "ほぼ全員が", never "ほぼ全全員が".
+    func testAReplacedTailDropsTheCopyOfTheKeptTokenAheadOfIt() {
+        // ほ@97 ぼ@99 全@104 | 員@106 が@108 理@110 解@112 し@114 ま@116 す@117 。@118
+        let previous = [80, 97, 99, 104, 106, 108, 110, 112, 114, 116, 117, 118]
+        XCTAssertEqual(AsrManager.unspacedTailStart(timestamps: previous, stableTokenFloor: 0), 4)
+        let current = [103, 105, 107, 125, 130]
+        let seam = AsrManager.reconcileUnspacedSeam(
+            previousTimestamps: previous, tailStart: 4, currentTimestamps: current)
+        XCTAssertEqual(seam.droppedPrevious, 8)
+        XCTAssertEqual(seam.droppedCurrent, 0)
+        XCTAssertTrue(
+            AsrManager.isUnspacedJitterCopy(
+                keptTokens: [1, 2, 3, 4], keptTimestamps: Array(previous.prefix(4)), token: 4, timestamp: 103))
+    }
+
+    /// A copy can only be of the last kept token: the re-decode's い of "いわれ" equals the い of
+    /// "多い" two tokens back, and stays ("多いといわれて", never "多いとわれて").
+    func testAnEqualCharacterFurtherBackIsNotACopy() {
+        // 多@969 い@971 と@972 | い@974 われ …
+        XCTAssertFalse(
+            AsrManager.isUnspacedJitterCopy(
+                keptTokens: [1, 2, 3], keptTimestamps: [969, 971, 972], token: 2, timestamp: 974))
+        XCTAssertTrue(
+            AsrManager.isUnspacedJitterCopy(
+                keptTokens: [1, 2, 3], keptTimestamps: [969, 971, 972], token: 3, timestamp: 973))
+    }
+
+    /// A token past the jitter margin, or a different token, is the re-decode's own.
+    func testOnlyANearbyCopyOfTheLastKeptTokenGoes() {
+        XCTAssertFalse(
+            AsrManager.isUnspacedJitterCopy(
+                keptTokens: [1, 2, 3], keptTimestamps: [80, 100, 104], token: 3, timestamp: 110))
+        XCTAssertFalse(
+            AsrManager.isUnspacedJitterCopy(
+                keptTokens: [1, 2, 3], keptTimestamps: [80, 100, 104], token: 9, timestamp: 104))
+        XCTAssertFalse(AsrManager.isUnspacedJitterCopy(keptTokens: [], keptTimestamps: [], token: 3, timestamp: 104))
     }
 
     /// Only the tail can still be retired, so the tokens ahead of it are stable.
@@ -96,6 +153,16 @@ final class SlidingWindowUnspacedScriptTests: XCTestCase {
             "ほぼ全員が")
         XCTAssertNil(SlidingWindowAsrManager.removingTrailingWord("理解します。", from: "ほぼ全員が理解します。"))
         XCTAssertNil(SlidingWindowAsrManager.removingTrailingWord("知っています", from: "ほぼ全員が", unspaced: true))
+    }
+
+    /// Window texts of an unspaced model join with no separator: a seam can fall mid-sentence
+    /// ("ほぼ全員が" + "理解します。"). Spaced models keep the space.
+    func testUnspacedWindowTextsJoinWithoutASpace() {
+        XCTAssertEqual(SlidingWindowAsrManager.windowTextSeparator(unspaced: true), "")
+        XCTAssertEqual(SlidingWindowAsrManager.windowTextSeparator(unspaced: false), " ")
+        XCTAssertEqual(
+            SlidingWindowAsrManager.appendingVolatile("ほぼ全員が", "理解します。", separator: ""), "ほぼ全員が理解します。")
+        XCTAssertEqual(SlidingWindowAsrManager.appendingVolatile("first", "second"), "first second")
     }
 
     func testOnlyTheUnspacedModelDropsTheWordRules() {

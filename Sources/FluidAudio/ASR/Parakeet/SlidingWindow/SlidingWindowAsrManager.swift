@@ -110,6 +110,9 @@ public actor SlidingWindowAsrManager {
     /// retirement can remove it even when it no longer equals the raw token
     /// text (#897).
     private var lastWindowRenderedLastWord: String?
+    /// Where the last window that emitted tokens begins in `accumulatedTokens`:
+    /// an unspaced model's re-decoded tail stays inside it (#1118).
+    private var lastWindowTokenStart = 0
 
     // Raw sample buffer for sliding-window assembly (absolute indexing)
     private var sampleBuffer: [Float] = []
@@ -250,6 +253,7 @@ public actor SlidingWindowAsrManager {
         accumulatedTokens.removeAll()
         accumulatedTokenTimestamps.removeAll()
         lastWindowRenderedLastWord = nil
+        lastWindowTokenStart = 0
         failedWindowCount = 0
         lastWindowError = nil
 
@@ -341,6 +345,8 @@ public actor SlidingWindowAsrManager {
             )
         }
 
+        let separator = Self.windowTextSeparator(
+            unspaced: !AsrManager.marksWordStarts(await asrManager?.modelVersion))
         let finalText: String
         if vocabBoostingEnabled {
             // Text-based reconstruction preserves rescored corrections from processWindow().
@@ -348,7 +354,7 @@ public actor SlidingWindowAsrManager {
             var parts: [String] = []
             if !confirmedTranscript.isEmpty { parts.append(confirmedTranscript) }
             if !volatileTranscript.isEmpty { parts.append(volatileTranscript) }
-            finalText = parts.joined(separator: " ")
+            finalText = parts.joined(separator: separator)
         } else if !accumulatedTokens.isEmpty,
             let reconstructedText = await asrManager?.convertTokensToText(accumulatedTokens)
         {
@@ -359,7 +365,7 @@ public actor SlidingWindowAsrManager {
             var parts: [String] = []
             if !confirmedTranscript.isEmpty { parts.append(confirmedTranscript) }
             if !volatileTranscript.isEmpty { parts.append(volatileTranscript) }
-            finalText = parts.joined(separator: " ")
+            finalText = parts.joined(separator: separator)
         }
 
         if let continuation = tokenContinuation {
@@ -403,6 +409,7 @@ public actor SlidingWindowAsrManager {
         accumulatedTokens.removeAll()
         accumulatedTokenTimestamps.removeAll()
         lastWindowRenderedLastWord = nil
+        lastWindowTokenStart = 0
 
         logger.info("SlidingWindowAsrManager reset for source: \(String(describing: self.audioSource))")
     }
@@ -558,7 +565,8 @@ public actor SlidingWindowAsrManager {
                     globalFrameOffset: windowStartSample / ASRConstants.samplesPerEncoderFrame,
                     isLastChunk: isLastChunk,
                     language: config.language,
-                    stableTokenFloor: tokenContinuation != nil ? publishedStableTokenCount : 0
+                    stableTokenFloor: tokenContinuation != nil ? publishedStableTokenCount : 0,
+                    previousWindowTokenStart: lastWindowTokenStart
                 )
             else {
                 failTokenStream(SlidingWindowTokenStreamError.invalidNativeUpdate)
@@ -569,6 +577,7 @@ public actor SlidingWindowAsrManager {
             self.decoderState = state
 
             let (tokens, timestamps, confidences, _, droppedPreviousTokens) = result
+            let unspaced = !AsrManager.marksWordStarts(await asrManager?.modelVersion)
 
             // The window re-decoded the previous window's last word in full (#897):
             // retire that word from the accumulated tokens and from the text state.
@@ -581,7 +590,6 @@ public actor SlidingWindowAsrManager {
                     // for that word rather than its raw token text. An unspaced
                     // model retires a time tail, which ends the text without a space
                     // before it, and its rendered "last word" is the whole window.
-                    let unspaced = !AsrManager.marksWordStarts(await asrManager?.modelVersion)
                     let candidates =
                         [droppedText] + (unspaced ? [] : lastWindowRenderedLastWord.map { [$0] } ?? [])
                     for candidate in candidates {
@@ -627,6 +635,7 @@ public actor SlidingWindowAsrManager {
             // Update state only after all required async calls complete successfully
             let retainedTokenCount = accumulatedTokens.count
             accumulatedTokens.append(contentsOf: tokens)
+            if !tokens.isEmpty { lastWindowTokenStart = retainedTokenCount }
             // Keep global timestamps aligned 1:1 with accumulatedTokens for #787 dedup.
             // `tokens`/`adjustedTimestamps` are already post-dedup and same length; guard
             // against any mismatch so the arrays never drift out of alignment.
@@ -699,7 +708,9 @@ public actor SlidingWindowAsrManager {
                 transcriptText = joinMidWordWindow(
                     transcriptText, rawWindowText: interim.text, previousRawWord: previousRawWord)
             }
-            await updateTranscriptionState(with: displayResult, text: transcriptText, shouldConfirm: shouldConfirm)
+            await updateTranscriptionState(
+                with: displayResult, text: transcriptText, shouldConfirm: shouldConfirm,
+                separator: Self.windowTextSeparator(unspaced: unspaced))
             lastWindowRenderedLastWord = Self.renderedLastWord(
                 rawText: interim.text, renderedText: displayResult.text, replacements: appliedReplacements)
 
@@ -805,7 +816,9 @@ public actor SlidingWindowAsrManager {
         return (previous + (replaced ? fragment.dropFirst(letters.count) : fragment), rest)
     }
 
-    private func updateTranscriptionState(with result: ASRResult, text: String, shouldConfirm: Bool) async {
+    private func updateTranscriptionState(
+        with result: ASRResult, text: String, shouldConfirm: Bool, separator: String
+    ) async {
         let totalAudioProcessed = Double(bufferStartIndex + sampleBuffer.count) / 16000.0
 
         if shouldConfirm {
@@ -815,7 +828,7 @@ public actor SlidingWindowAsrManager {
                     components.append(confirmedTranscript)
                 }
                 components.append(volatileTranscript)
-                confirmedTranscript = components.joined(separator: " ")
+                confirmedTranscript = components.joined(separator: separator)
             }
             volatileTranscript = text
             logger.debug(
@@ -827,7 +840,7 @@ public actor SlidingWindowAsrManager {
             // window's text whenever two consecutive windows went unconfirmed — with
             // boosting on, finish() builds from this text, and a trailing empty flush
             // window returned an empty transcript for a 15 s clip (#851).
-            volatileTranscript = Self.appendingVolatile(volatileTranscript, text)
+            volatileTranscript = Self.appendingVolatile(volatileTranscript, text, separator: separator)
             let hasMinimumContext = totalAudioProcessed >= config.minContextForConfirmation
             let reason =
                 !hasMinimumContext
@@ -878,10 +891,16 @@ public actor SlidingWindowAsrManager {
         return String(text.dropLast(word.count + 1))
     }
 
+    /// What joins one window's text to the next: a space, or nothing for an
+    /// unspaced model, whose seam can fall inside a sentence (#1118). Pure.
+    static func windowTextSeparator(unspaced: Bool) -> String {
+        unspaced ? "" : " "
+    }
+
     /// Join the still-volatile text with a newer unconfirmed window's text.
     /// Empty pieces (a silent flush window) contribute nothing. Pure, for testability.
-    static func appendingVolatile(_ existing: String, _ incoming: String) -> String {
-        [existing, incoming].filter { !$0.isEmpty }.joined(separator: " ")
+    static func appendingVolatile(_ existing: String, _ incoming: String, separator: String = " ") -> String {
+        [existing, incoming].filter { !$0.isEmpty }.joined(separator: separator)
     }
 
     /// Apply vocabulary rescoring to a window's text using CTC-based constrained decoding.

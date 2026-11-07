@@ -126,16 +126,19 @@ extension AsrManager {
 
     /// The unspaced counterpart of `redecodeWordStart`: the first token within
     /// `unspacedTailFrames` of the previous last token, at or after the stable
-    /// floor, and never before `minFrame` (where the next window's audio has
-    /// warmed up — a tail it cannot re-decode is not its to retire). Nil when
-    /// that would drop index 0 or nothing. Timestamps are global frames. Pure.
+    /// floor and the previous window's first token (a tail reaching into an older
+    /// window would not end the text state), and never before `minFrame` (where
+    /// the next window's audio has warmed up — a tail it cannot re-decode is not
+    /// its to retire). Nil when that would drop index 0 or nothing. Timestamps
+    /// are global frames. Pure.
     nonisolated internal static func unspacedTailStart(
-        timestamps: [Int], stableTokenFloor: Int, minFrame: Int = Int.min, tailFrames: Int = unspacedTailFrames
+        timestamps: [Int], stableTokenFloor: Int, previousWindowStart: Int = 0, minFrame: Int = Int.min,
+        tailFrames: Int = unspacedTailFrames
     ) -> Int? {
         guard let last = timestamps.max() else { return nil }
         let startFrame = max(last - tailFrames, minFrame)
         guard let start = timestamps.firstIndex(where: { $0 >= startFrame }), start > 0 else { return nil }
-        let floored = max(start, stableTokenFloor)
+        let floored = max(start, stableTokenFloor, previousWindowStart)
         return floored < timestamps.count ? floored : nil
     }
 
@@ -159,6 +162,27 @@ extension AsrManager {
             return (previousTimestamps.count - tailStart, 0)
         }
         return (0, currentTimestamps.prefix(while: { $0 <= previousLast }).count)
+    }
+
+    /// Whether the first token of an unspaced re-decode is a single-token copy of
+    /// the last kept previous token (`全` re-emitted ahead of a replaced tail, `る`
+    /// just past a kept one), which dedup leaves: it matches runs of two or more.
+    /// The re-decode emits in order from its cutoff, so a copy can only be of the
+    /// last kept token; an equal character further back (the `い` of `多い` ahead
+    /// of `いわれ`) is the re-decode's own. Timestamps are global frames. Pure.
+    nonisolated internal static func isUnspacedJitterCopy(
+        keptTokens: [Int],
+        keptTimestamps: [Int],
+        token: Int,
+        timestamp: Int,
+        jitterFrames: Int = redecodeEmissionJitterFrames,
+        frameTolerance: Int = 2 * redecodeEmissionJitterFrames
+    ) -> Bool {
+        guard let lastToken = keptTokens.last, let lastFrame = keptTimestamps.last,
+            keptTokens.count == keptTimestamps.count
+        else { return false }
+        return token == lastToken && abs(timestamp - lastFrame) <= frameTolerance
+            && timestamp <= lastFrame + jitterFrames
     }
 
     /// How many leading current tokens re-emit the stable start of a word the
@@ -570,7 +594,8 @@ extension AsrManager {
         globalFrameOffset: Int = 0,
         isLastChunk: Bool = false,
         language: Language? = nil,
-        stableTokenFloor: Int = 0
+        stableTokenFloor: Int = 0,
+        previousWindowTokenStart: Int = 0
     ) async throws -> (
         tokens: [Int], timestamps: [Int], confidences: [Float], encoderSequenceLength: Int,
         droppedPreviousTokens: Int
@@ -604,6 +629,7 @@ extension AsrManager {
                 // The tail needs a second of this window's own audio ahead of it.
                 : Self.unspacedTailStart(
                     timestamps: previousTimestamps, stableTokenFloor: stableTokenFloor,
+                    previousWindowStart: previousWindowTokenStart,
                     minFrame: globalFrameOffset + Self.unspacedTailFrames)
         } else {
             trailingWordStart = nil
@@ -636,6 +662,7 @@ extension AsrManager {
         var effectivePrevious = previousTokens
         var effectivePreviousTimestamps = previousTokenTimestamps
         var droppedPrevious = 0
+        var stripsJitterCopies = false
 
         // An unspaced model replaces the previous window's time tail with the
         // re-decoded one (#1118).
@@ -647,6 +674,7 @@ extension AsrManager {
                 tailStart: trailingWordStart,
                 currentTimestamps: currentTimestamps.map { $0 + globalFrameOffset }
             )
+            stripsJitterCopies = true
             droppedPrevious = seam.droppedPrevious
             if seam.droppedCurrent > 0 {
                 currentTokens.removeFirst(seam.droppedCurrent)
@@ -722,12 +750,23 @@ extension AsrManager {
             let tolerance =
                 redecodePlan.initialTimeIndexOverride == 0
                 ? 2 * Self.redecodeEmissionJitterFrames : ASRConstants.duplicateFrameTolerance
-            let (deduped, removedCount) = removeDuplicateTokenSequence(
+            var (deduped, removedCount) = removeDuplicateTokenSequence(
                 previous: effectivePrevious, current: currentTokens,
                 previousTimestamps: effectivePreviousTimestamps,
                 currentTimestamps: currentGlobalTimestamps,
                 frameTolerance: tolerance,
                 punctuationTokens: punctuationTokenIds)
+            // A copy dedup left behind is a single token; after a matched run, an
+            // equal token is the next character (`こ` of `ここ`).
+            if stripsJitterCopies, removedCount == 0, let first = deduped.first,
+                let keptTimestamps = effectivePreviousTimestamps, let currentGlobalTimestamps,
+                Self.isUnspacedJitterCopy(
+                    keptTokens: effectivePrevious, keptTimestamps: keptTimestamps,
+                    token: first, timestamp: currentGlobalTimestamps[0])
+            {
+                deduped.removeFirst()
+                removedCount = 1
+            }
             let adjustedTimestamps =
                 removedCount > 0 ? Array(currentTimestamps.dropFirst(removedCount)) : currentTimestamps
             let adjustedConfidences =
