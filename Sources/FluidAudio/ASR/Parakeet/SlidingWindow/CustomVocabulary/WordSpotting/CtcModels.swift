@@ -143,10 +143,13 @@ extension CtcModels {
     /// - Parameters:
     ///   - directory: Directory containing the downloaded CoreML bundles.
     ///   - variant: Which CTC model variant to load (default: .ctc110m).
+    ///   - progressHandler: Download (if the cache is incomplete) and compile progress. Called once per bundle, so
+    ///     the fraction restarts after the first reaches 1.0.
     /// - Returns: Loaded `CtcModels` instance.
     public static func load(
         from directory: URL,
-        variant: CtcModelVariant = .ctc110m
+        variant: CtcModelVariant = .ctc110m,
+        progressHandler: ProgressHandler? = nil
     ) async throws -> CtcModels {
         logger.info("Loading CTC models (\(variant.displayName)) from: \(directory.path)")
 
@@ -159,13 +162,15 @@ extension CtcModels {
             variant.repo,
             modelNames: [ModelNames.CTC.melSpectrogramPath],
             directory: parentDirectory,
-            computeUnits: melSpectrogramConfiguration().computeUnits
+            computeUnits: melSpectrogramConfiguration().computeUnits,
+            progressHandler: progressHandler
         )
         let encoderModels = try await ModelHub.loadModels(
             variant.repo,
             modelNames: [ModelNames.CTC.audioEncoderPath],
             directory: parentDirectory,
-            computeUnits: config.computeUnits
+            computeUnits: config.computeUnits,
+            progressHandler: progressHandler
         )
 
         guard
@@ -194,12 +199,15 @@ extension CtcModels {
     ///   - directory: Custom cache directory (default: uses defaultCacheDirectory for variant).
     ///   - variant: Which CTC model variant to download (default: .ctc110m).
     ///   - force: Whether to force re-download even if models exist.
+    ///   - progressHandler: Download and compile progress. Called once per bundle, so the fraction restarts after
+    ///     the first reaches 1.0. Not called when the models are already present.
     /// - Returns: The directory where models were downloaded.
     @discardableResult
     public static func download(
         to directory: URL? = nil,
         variant: CtcModelVariant = .ctc110m,
-        force: Bool = false
+        force: Bool = false,
+        progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let targetDir = directory ?? defaultCacheDirectory(for: variant)
         logger.info("Preparing CTC models (\(variant.displayName)) at: \(targetDir.path)")
@@ -228,7 +236,8 @@ extension CtcModels {
                 variant.repo,
                 modelNames: [name],
                 directory: parentDir,
-                computeUnits: computeUnits
+                computeUnits: computeUnits,
+                progressHandler: progressHandler
             )
         }
 
@@ -241,13 +250,15 @@ extension CtcModels {
     /// - Parameters:
     ///   - directory: Custom cache directory (default: uses defaultCacheDirectory for variant).
     ///   - variant: Which CTC model variant to use (default: .ctc110m).
+    ///   - progressHandler: Forwarded to `download` and `load`.
     /// - Returns: Loaded `CtcModels` instance.
     public static func downloadAndLoad(
         to directory: URL? = nil,
-        variant: CtcModelVariant = .ctc110m
+        variant: CtcModelVariant = .ctc110m,
+        progressHandler: ProgressHandler? = nil
     ) async throws -> CtcModels {
-        let targetDir = try await download(to: directory, variant: variant)
-        return try await load(from: targetDir, variant: variant)
+        let targetDir = try await download(to: directory, variant: variant, progressHandler: progressHandler)
+        return try await load(from: targetDir, variant: variant, progressHandler: progressHandler)
     }
 
     /// Default CoreML configuration for CTC inference (the audio encoder).
