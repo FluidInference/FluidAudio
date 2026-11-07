@@ -7,7 +7,6 @@ More apps and projects built with FluidAudio. See the [README showcase](../READM
 | **[mac-whisper-speedtest](https://github.com/anvanvan/mac-whisper-speedtest)** | ✓ | Comparison of different local ASR, including one of the first versions of FluidAudio's ASR models |
 | **[Starling](https://github.com/Ryandonofrio3/Starling)** | ✓ | Open Source, fully local voice-to-text transcription with auto-paste at your cursor. |
 | **[Voxeoflow](https://www.voxeoflow.app)** | — | Mac dictation app with real-time translation. Lightning-fast transcription in over 100 languages, instantly translated to your target language. |
-| **[Speakmac](https://speakmac.app)** | — | Mac app that lets you type anywhere on your Mac using your voice. Fully local, private dictation built on FluidAudio. |
 | **[SamScribe](https://github.com/Steven-Weng/SamScribe)** | ✓ | An open-source macOS app that captures and transcribes audio from your microphone and meeting applications (Zoom, Teams, Chrome) in real-time, with cross-session speaker recognition. |
 | **[WhisKey](https://whiskey.asktobuild.app/)** | — | Privacy-first voice dictation keyboard for iOS and macOS. On-device transcription with 12+ languages, AI meeting summaries, and mindmap generation. Great for daily use and vibe-coding. Uses speaker diarization. |
 | **[Ora](https://futurelab.studio/ora)** | — | Local voice assistant for macOS with speech recognition and text-to-speech. |
