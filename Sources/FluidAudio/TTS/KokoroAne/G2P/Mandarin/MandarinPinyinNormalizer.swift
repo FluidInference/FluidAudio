@@ -21,7 +21,7 @@ public enum MandarinPinyinNormalizer {
         public var tone: Int  // 1…4 = explicit, 5 = neutral / unmarked.
         /// Whether this syllable has absorbed a trailing `儿` (erhua).
         /// Set by `MandarinErhua.merge`; consumed by
-        /// `MandarinBopomofoMap.encode` to append the `ㄦ` suffix.
+        /// `MandarinBopomofoMap.encode`, which writes misaki's `R` marker.
         public var erhua: Bool
         /// Whether this `er` syllable is the erhua suffix `儿` and may fold
         /// into the syllable before it. Pinyin alone can't tell `儿` from

@@ -314,6 +314,13 @@ final class MandarinCustomLexiconTests: XCTestCase {
         XCTAssertEqual(literalOnly, "Aㄔㄤ2")
     }
 
+    func testBopomofoEscapeAcceptsErhuaMarker() async throws {
+        // `encode(erhua:)` writes misaki's R, so a ported entry may carry it.
+        let lex = try MandarinCustomLexicon(entries: ["玩儿": ["@万R2"]])
+        let out = try await MandarinG2P(dict: Self.smallDict(), customLexicon: lex).phonemize("玩儿")
+        XCTAssertEqual(out, "万R2")
+    }
+
     func testPhonemizeWithEmptyLexiconMatchesDictOnlyPath() async throws {
         let g2p = MandarinG2P(dict: Self.smallDict())
         let out = try await g2p.phonemize("你好")

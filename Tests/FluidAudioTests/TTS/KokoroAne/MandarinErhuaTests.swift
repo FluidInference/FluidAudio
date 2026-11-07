@@ -210,6 +210,39 @@ final class MandarinErhuaTests: XCTestCase {
             "ㄓㄦ4")
     }
 
+    func testMergeKeepsSlashFlagsAligned() {
+        // 花园 | 儿里: the folded 儿 opened a word, so its `/` moves to 里.
+        var syllables: [MandarinPinyinNormalizer.Syllable] = [
+            .init(base: "hua", tone: 1), .init(base: "yuan", tone: 2),
+            .init(base: "er", tone: 2, isErhuaSuffix: true), .init(base: "li", tone: 3),
+        ]
+        var slashes = [false, false, true, false]
+        MandarinErhua.merge(&syllables, slashes: &slashes)
+        XCTAssertEqual(syllables.map(\.base), ["hua", "yuan", "li"])
+        XCTAssertTrue(syllables[1].erhua)
+        XCTAssertEqual(slashes, [false, false, true])
+
+        // A folded 儿 inside a word leaves the later flags in place.
+        var inWord: [MandarinPinyinNormalizer.Syllable] = [
+            .init(base: "zhe", tone: 4), .init(base: "er", tone: 2, isErhuaSuffix: true),
+            .init(base: "hen", tone: 3),
+        ]
+        var inWordSlashes = [false, false, true]
+        MandarinErhua.merge(&inWord, slashes: &inWordSlashes)
+        XCTAssertEqual(inWordSlashes, [false, true])
+    }
+
+    func testG2PEndToEndErhuaKeepsWordSlashes() async throws {
+        // misaki: 他这儿很好 → ㄊㄚ1/ㄓㄦ4/ㄏㄣ2ㄏㄠ3 (这儿 folds and its bare e
+        // final becomes er; the `/` before 很好 survives the fold).
+        var dict = Self.miniDict()
+        dict = MandarinPinyinDict(
+            phrases: dict.phrases,
+            singles: dict.singles.merging([0x5F88: ["hěn"], 0x597D: ["hǎo"]]) { $1 })
+        let phon = try await MandarinG2P(dict: dict).phonemize("他这儿很好")
+        XCTAssertEqual(phon, "ㄊㄚ1/ㄓㄦ4/ㄏㄣ2ㄏㄠ3")
+    }
+
     // MARK: - End-to-end through MandarinG2P
 
     func testG2PEndToEndZher() async throws {

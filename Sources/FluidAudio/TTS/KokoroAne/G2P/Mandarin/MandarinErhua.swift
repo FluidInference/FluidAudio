@@ -5,12 +5,10 @@ import Foundation
 /// `这儿`, `小孩儿`, `一会儿` emit a single r-coloured token instead
 /// of trailing `er` as a separate audible syllable.
 ///
-/// Mirrors `misaki/zh_frontend.py:_merge_erhua` with one simplification:
-/// we don't drop the preceding final's `-n` / `-ng` consonant (e.g.
-/// `wan + r` stays `wanr` rather than collapsing to `war`). The Kokoro
-/// v1.1-zh acoustic model was trained on misaki-style input where the
-/// erhua marker is a standalone `ㄦ` appended to the toned final, so
-/// the simpler form preserves intelligibility without per-final tables.
+/// Mirrors `misaki/zh_frontend.py:_merge_erhua`: the preceding final
+/// keeps its `-n` / `-ng` (`wan + r` stays `wanr`, not `war`) and the
+/// fold is marked by an `R` before the tone digit
+/// (`MandarinBopomofoMap.encode(erhua:)`).
 ///
 /// Boundary rules:
 ///
@@ -41,11 +39,20 @@ public enum MandarinErhua {
         mergeReportingRemovals(&syllables)
     }
 
+    /// ``merge(_:)`` keeping `slashes`, one word-boundary flag per
+    /// syllable, aligned. A folded `儿` that opened a word (the segmenter
+    /// split `花园` | `儿里`) hands its flag to the syllable after it.
+    static func merge(_ syllables: inout [MandarinPinyinNormalizer.Syllable], slashes: inout [Bool]) {
+        for removed in mergeReportingRemovals(&syllables) {
+            if slashes[removed], removed + 1 < slashes.count { slashes[removed + 1] = true }
+            slashes.remove(at: removed)
+        }
+    }
+
     /// ``merge(_:)``, returning the indices (into the input) of the
-    /// removed `er` syllables in descending order, so a caller can drop
-    /// the matching entries from an array kept parallel to `syllables`.
+    /// removed `er` syllables in descending order.
     @discardableResult
-    static func mergeReportingRemovals(_ syllables: inout [MandarinPinyinNormalizer.Syllable]) -> [Int] {
+    private static func mergeReportingRemovals(_ syllables: inout [MandarinPinyinNormalizer.Syllable]) -> [Int] {
         guard syllables.count >= 2 else { return [] }
 
         // Walk back-to-front so removals don't shift unprocessed indices,

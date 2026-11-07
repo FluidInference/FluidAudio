@@ -21,6 +21,7 @@ enum PhonemeChunker {
     /// chunk.
     static let defaultBoundaryPunctuation: Set<Character> = [
         ",", ".", ";", ":", "!", "?", "…", "—",
+        "/",  // Kokoro Mandarin word separator
     ]
 
     /// Split `phonemes` into chunks of at most `maxLength` characters each.

@@ -237,6 +237,7 @@ public struct MandarinCustomLexicon: Sendable, Equatable {
             for ch in value { set.insert(ch) }
         }
         for d in "12345" { set.insert(d) }
+        set.insert("R")  // erhua marker, `MandarinBopomofoMap.encode(erhua:)`
         for p in MandarinBopomofoMap.allowedPunctuation { set.insert(p) }
         return set
     }()

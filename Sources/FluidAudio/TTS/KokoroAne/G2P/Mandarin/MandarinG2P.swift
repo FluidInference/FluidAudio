@@ -148,9 +148,7 @@ public struct MandarinG2P: Sendable {
             // Order: erhua first (it shrinks the buffer), then sandhi
             // operates on the merged result so 3+3 promotion sees the
             // r-coloured syllable as a single tonal unit.
-            for removed in MandarinErhua.mergeReportingRemovals(&pendingSyllables) {
-                pendingSlash.remove(at: removed)
-            }
+            MandarinErhua.merge(&pendingSyllables, slashes: &pendingSlash)
             MandarinToneSandhi.apply(&pendingSyllables)
             var emitted = false
             var slash = false
