@@ -488,7 +488,11 @@ out-of-vocabulary runs, tone sandhi, erhua folding and g2pW polyphone
 disambiguation. g2pW only fires on single-char dict fallbacks whose
 Hanzi exists in its Traditional inventory (e.g. `行`, `重`, `好`);
 simplified-only polyphones such as `还` / `长` / `发` keep the dict's
-first reading. Every g2pW asset is optional — if the bundle or its text
+first reading. That inventory is Taiwan-standard, so g2pW may only return
+readings the (mainland) dict lists or their neutral-tone forms; the
+probability of a Taiwan-only reading counts toward the dict's default
+(`和` read hàn becomes hé), and a character with fewer than two shared
+readings keeps the dict's first reading. Every g2pW asset is optional — if the bundle or its text
 files are missing, synthesis continues dict-only.
 
 ## Japanese G2P

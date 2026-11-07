@@ -122,9 +122,16 @@ public actor MandarinG2pwModel {
     /// Targets that aren't polyphonic (per the catalog) are silently
     /// dropped — the caller should already have filtered them, but a
     /// belt-and-braces check keeps the contract honest.
+    ///
+    /// `dictReadings` gives, per target position, the readings the
+    /// caller's dictionary lists, default first. Such a target returns
+    /// only labels matching one of them or its neutral-tone form (see
+    /// ``mainlandLabels(for:readings:catalog:)``), and is dropped when
+    /// fewer than two match, so the caller keeps its own reading.
     public func disambiguate(
         chars: [Character],
-        targets: [Int]
+        targets: [Int],
+        dictReadings: [Int: [MandarinPinyinNormalizer.Syllable]] = [:]
     ) async throws -> [Int: String] {
         guard !targets.isEmpty else { return [:] }
 
@@ -149,6 +156,14 @@ public actor MandarinG2pwModel {
                 !candidates.isEmpty,
                 let charId = catalog.charIndex[ch]
             else { continue }
+            var labels = candidates
+            var folds: [Int: Int] = [:]
+            if let readings = dictReadings[charIdx] {
+                guard let mainland = Self.mainlandLabels(for: ch, readings: readings, catalog: catalog)
+                else { continue }
+                labels = mainland.labels
+                folds = mainland.folds
+            }
 
             let tokenPos = encoded.tokenPositionForChar[charIdx]
             let probs = try await runOne(
@@ -161,12 +176,16 @@ public actor MandarinG2pwModel {
             // Pick the argmax over the candidate subset only — the model
             // already applies the mask, this just guards against a
             // bundle that was exported without it.
-            var bestIdx = candidates[0]
+            var score: [Int: Float] = [:]
+            for cand in candidates where cand >= 0 && cand < probs.count {
+                score[folds[cand] ?? cand, default: 0] += probs[cand]
+            }
+            var bestIdx = labels[0]
             var bestProb = -Float.infinity
-            for cand in candidates {
-                guard cand >= 0, cand < probs.count else { continue }
-                if probs[cand] > bestProb {
-                    bestProb = probs[cand]
+            for cand in labels {
+                guard let prob = score[cand] else { continue }
+                if prob > bestProb {
+                    bestProb = prob
                     bestIdx = cand
                 }
             }
@@ -175,6 +194,50 @@ public actor MandarinG2pwModel {
             }
         }
         return output
+    }
+
+    /// Comparable form of one reading: its v1.1-zh vocab encoding, so a
+    /// catalog label (`ㄏㄨㄛ5`) and a dict reading (`huo`) that spell the
+    /// same syllable compare equal.
+    static func readingKey(_ syllable: MandarinPinyinNormalizer.Syllable) -> String? {
+        MandarinBopomofoMap.encode(syllable: syllable.base, tone: syllable.tone)
+    }
+
+    /// Catalog labels that are the Taiwan reading of a sense the mainland
+    /// dict reads with a reading other than its default.
+    static let taiwanReadings: [Character: [String: String]] = [
+        "得": ["ㄉㄞ3": "ㄉㄟ3"]  // dǎi, "must": mainland děi
+    ]
+
+    /// The catalog labels of `char` the mainland dict also lists
+    /// (`readings`, default first, or their neutral-tone forms), and
+    /// where each other label's probability goes: the catalog is the
+    /// Taiwan-standard inventory, so a label the dict lacks is mostly the
+    /// Taiwan reading of a sense the dict reads by default (`和` hàn,
+    /// mainland hé). `nil` when fewer than two labels match.
+    static func mainlandLabels(
+        for char: Character, readings: [MandarinPinyinNormalizer.Syllable], catalog: MandarinPolyphoneCatalog
+    ) -> (labels: [Int], folds: [Int: Int])? {
+        guard let candidates = catalog.candidates(for: char) else { return nil }
+        func key(_ label: Int) -> String? {
+            catalog.bopomofo(forLabel: label).flatMap(MandarinBopomofoMap.decode(bopomofo:)).flatMap(readingKey)
+        }
+        let neutral = readings.map { MandarinPinyinNormalizer.Syllable(base: $0.base, tone: 5) }
+        let allowed = Set((readings + neutral).compactMap(readingKey))
+        let labels = candidates.filter { key($0).map(allowed.contains) ?? false }
+        guard labels.count >= 2 else { return nil }
+
+        let defaultLabel = readings.first.flatMap(readingKey).flatMap { first in labels.first { key($0) == first } }
+        var folds: [Int: Int] = [:]
+        for label in candidates where !labels.contains(label) {
+            let alias = catalog.bopomofo(forLabel: label).flatMap { taiwanReadings[char]?[$0] }
+            if let alias, let target = labels.first(where: { catalog.bopomofo(forLabel: $0) == alias }) {
+                folds[label] = target
+            } else if let defaultLabel {
+                folds[label] = defaultLabel
+            }
+        }
+        return (labels, folds)
     }
 
     private struct SentenceInputs {

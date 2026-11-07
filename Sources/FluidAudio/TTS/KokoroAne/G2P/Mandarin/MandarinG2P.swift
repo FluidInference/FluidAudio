@@ -114,12 +114,16 @@ public struct MandarinG2P: Sendable {
         // Polyphone disambiguation: when a g2pW model is wired and the
         // segmenter flagged candidate Hanzi, run the classifier and
         // splice in `.disambiguated` cases. The classifier sees the
-        // full normalized sentence so it can pick by context.
+        // full normalized sentence so it can pick by context. Its
+        // inventory is Taiwan-standard, so it may only return readings
+        // the (mainland) dict lists.
         if let g2pw, !result.polyphoneTargets.isEmpty {
             do {
+                let positions = result.polyphoneTargets.map { $0.charPos }
                 let picks = try await g2pw.disambiguate(
                     chars: normalizedChars,
-                    targets: result.polyphoneTargets.map { $0.charPos }
+                    targets: positions,
+                    dictReadings: dictReadings(at: positions, in: normalizedChars)
                 )
                 for target in result.polyphoneTargets {
                     guard let bopomofo = picks[target.charPos] else { continue }
@@ -241,6 +245,17 @@ public struct MandarinG2P: Sendable {
                 "Mandarin G2P produced no phonemes for input '\(text)'")
         }
         return (output, punctuationSources)
+    }
+
+    /// The dict's readings, default first, for the Hanzi at each position.
+    func dictReadings(at positions: [Int], in chars: [Character]) -> [Int: [MandarinPinyinNormalizer.Syllable]] {
+        var readings: [Int: [MandarinPinyinNormalizer.Syllable]] = [:]
+        for position in positions {
+            guard let scalar = chars[position].unicodeScalars.first, let pinyin = dict.singles[scalar.value]
+            else { continue }
+            readings[position] = pinyin.map(MandarinPinyinNormalizer.normalize)
+        }
+        return readings
     }
 
     /// Quick predicate: should this string be routed through the

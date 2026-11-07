@@ -72,6 +72,76 @@ final class MandarinG2pwIntegrationTests: XCTestCase {
         XCTAssertTrue(out.contains("ㄒ"))
     }
 
+    private static func syllables(_ pinyin: String...) -> [MandarinPinyinNormalizer.Syllable] {
+        pinyin.map(MandarinPinyinNormalizer.normalize)
+    }
+
+    private static func labels(_ indices: [Int], _ catalog: MandarinPolyphoneCatalog) -> [String] {
+        indices.compactMap(catalog.bopomofo(forLabel:)).sorted()
+    }
+
+    func testMainlandLabelsFoldTaiwanReadingIntoDefault() throws {
+        // g2pW lists 和 as hàn (Taiwan, "and") besides the mainland readings.
+        let catalog = try MandarinPolyphoneCatalog(text: "和\tㄏㄜ2\n和\tㄏㄢ4\n和\tㄏㄨㄛ4\n和\tㄏㄜ4\n")
+        let mainland = try XCTUnwrap(
+            MandarinG2pwModel.mainlandLabels(
+                for: "和", readings: Self.syllables("hé", "hè", "huó", "huò"), catalog: catalog))
+        XCTAssertEqual(Self.labels(mainland.labels, catalog), ["ㄏㄜ2", "ㄏㄜ4", "ㄏㄨㄛ4"])
+        let han = try XCTUnwrap(catalog.labels.firstIndex(of: "ㄏㄢ4"))
+        XCTAssertEqual(mainland.folds[han].flatMap(catalog.bopomofo(forLabel:)), "ㄏㄜ2")
+    }
+
+    func testMainlandLabelsAllowNeutralToneForms() throws {
+        let catalog = try MandarinPolyphoneCatalog(text: "夫\tㄈㄨ1\n夫\tㄈㄨ2\n夫\tㄈㄨ5\n")
+        let mainland = try XCTUnwrap(
+            MandarinG2pwModel.mainlandLabels(for: "夫", readings: Self.syllables("fū", "fú"), catalog: catalog))
+        XCTAssertEqual(Self.labels(mainland.labels, catalog), ["ㄈㄨ1", "ㄈㄨ2", "ㄈㄨ5"])
+        XCTAssertTrue(mainland.folds.isEmpty)
+    }
+
+    func testMainlandLabelsMapTaiwanDaiToDei() throws {
+        // 得 "must": Taiwan dǎi is mainland děi, not the default dé.
+        let catalog = try MandarinPolyphoneCatalog(text: "得\tㄉㄜ2\n得\tㄉㄜ5\n得\tㄉㄟ3\n得\tㄉㄞ3\n")
+        let mainland = try XCTUnwrap(
+            MandarinG2pwModel.mainlandLabels(for: "得", readings: Self.syllables("dé", "de", "děi"), catalog: catalog))
+        let dai = try XCTUnwrap(catalog.labels.firstIndex(of: "ㄉㄞ3"))
+        XCTAssertEqual(mainland.folds[dai].flatMap(catalog.bopomofo(forLabel:)), "ㄉㄟ3")
+    }
+
+    func testMainlandLabelsNeedTwoSharedReadings() throws {
+        // 期 qí is Taiwan-only; one shared reading leaves g2pW nothing to pick.
+        let catalog = try MandarinPolyphoneCatalog(text: "期\tㄑㄧ1\n期\tㄑㄧ2\n")
+        XCTAssertNil(MandarinG2pwModel.mainlandLabels(for: "期", readings: Self.syllables("qī", "jī"), catalog: catalog))
+    }
+
+    func testDictReadingsAreKeyedByTargetPosition() throws {
+        let dict = MandarinPinyinDict(
+            phrases: [:],
+            singles: [
+                Character("和").unicodeScalars.first!.value: ["hé", "hè", "hú"],
+                Character("我").unicodeScalars.first!.value: ["wǒ"],
+            ])
+        let readings = MandarinG2P(dict: dict).dictReadings(at: [1], in: Array("我和你"))
+        XCTAssertEqual(readings[1], Self.syllables("hé", "hè", "hú"))
+        XCTAssertNil(readings[0])
+    }
+
+    /// Runs the shipped g2pW bundle when the Mandarin assets are cached.
+    func testShippedG2pwReadsConjunctionHeAsMainlandHe() async throws {
+        let repoDirectory = try KokoroAneResourceDownloader.repositoryDirectory(variant: .mandarin)
+        let cached = FileManager.default.fileExists(
+            atPath: repoDirectory.appendingPathComponent("g2pw/g2pw.mlmodelc").path)
+        try XCTSkipUnless(
+            cached || ProcessInfo.processInfo.environment["FLUIDAUDIO_RUN_TTS_E2E"] == "1",
+            "Mandarin g2pW bundle not cached; set FLUIDAUDIO_RUN_TTS_E2E=1")
+        let manager = KokoroAneManager(variant: .mandarin)
+        for text in ["我和你是好朋友。", "老师和学生都来了。", "漫画和现实的世界是不可能相通的。"] {
+            let phonemes = try await manager.phonemes(for: text)
+            XCTAssertTrue(phonemes.contains("ㄏㄜ2"), "\(text) → \(phonemes)")
+            XCTAssertFalse(phonemes.contains("ㄏㄢ4") || phonemes.contains("ㄏ我4"), "\(text) → \(phonemes)")
+        }
+    }
+
     func testMixedTextWithMultiplePolyphones() throws {
         // Two polyphonic chars in one sentence → two targets. The
         // segmenter records charPos in the *normalized* string so
