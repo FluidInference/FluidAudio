@@ -229,4 +229,32 @@ final class VocabularyRescorerUtilsTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - Stopword exemption for exact term forms (#1115)
+
+    private func termForms(_ canonical: String, aliases: [String]) -> Set<String> {
+        Set(VocabularyRescorer.normalizedForms(canonicalTerm: canonical, aliases: aliases).map(\.normalized))
+    }
+
+    func testStopwordThatIsExactAliasIsNotSkipped() {
+        XCTAssertTrue(VocabularyRescorer.stopwords.contains("say"))
+        XCTAssertFalse(VocabularyRescorer.isSkippedStopword("say", termForms: termForms("Sie", aliases: ["say"])))
+        XCTAssertFalse(
+            VocabularyRescorer.isSkippedStopword("say", termForms: termForms("Sie", aliases: ["Say!"])),
+            "Exactness is judged on normalized forms")
+    }
+
+    func testStopwordFuzzilyMatchingAliasIsSkipped() {
+        // "saw" clears the similarity floor against the alias "say" but is not a registered form.
+        XCTAssertGreaterThanOrEqual(
+            VocabularyRescorer.stringSimilarity("saw", "say"), ContextBiasingConstants.minSimilarityFloor)
+        XCTAssertTrue(VocabularyRescorer.isSkippedStopword("saw", termForms: termForms("Sie", aliases: ["say"])))
+    }
+
+    func testStopwordThatIsNotATermFormIsSkipped() {
+        let forms = termForms("Sie", aliases: [])
+        XCTAssertTrue(VocabularyRescorer.isSkippedStopword("say", termForms: forms))
+        XCTAssertTrue(VocabularyRescorer.isSkippedStopword("see", termForms: forms))
+        XCTAssertFalse(VocabularyRescorer.isSkippedStopword("sigh", termForms: forms), "Not a stopword")
+    }
 }

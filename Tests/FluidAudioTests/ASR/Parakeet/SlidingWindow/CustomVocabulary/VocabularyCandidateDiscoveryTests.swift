@@ -168,4 +168,54 @@ final class VocabularyCandidateDiscoveryTests: XCTestCase {
             spotter: spotter, vocabulary: CustomVocabularyContext(terms: []), ctcModelDirectory: directory)
         XCTAssertFalse(empty.hasCTCRescoringCandidates(transcript: "unrelated", tokenTimings: unrelatedTimings))
     }
+
+    /// A lone stopword reaches CTC scoring only when it spells one of the term's forms exactly (#1115). Every
+    /// rejected word clears the similarity floor, so the stopword rule alone rejects it. Runs in the CI E2E step.
+    func testLoneStopwordReachesScoringOnlyAsExactAliasWithInstalledModels() async throws {
+        let directory = CtcModels.defaultCacheDirectory()
+        let models = try await installedCtcModels()
+        let spotter = CtcKeywordSpotter(models: models)
+        let tokenizer = try await CtcTokenizer.load(from: directory)
+        let floor = ContextBiasingConstants.minSimilarityFloor
+        XCTAssertGreaterThanOrEqual(VocabularyRescorer.stringSimilarity("saw", "say"), floor)
+        XCTAssertGreaterThanOrEqual(VocabularyRescorer.stringSimilarity("see", "sie"), floor)
+        XCTAssertEqual(
+            VocabularyRescorer.stringSimilarity("sue", "sie"), VocabularyRescorer.stringSimilarity("see", "sie"))
+        // "say", "saw" and "see" are stopwords; "sue" is the non-stopword control for "see".
+        let cases: [(transcript: String, aliases: [String], expected: Bool)] = [
+            ("the word say for you", ["say"], true),
+            ("the word Say, for you", ["say"], true),
+            ("the word saw for you", ["say"], false),
+            ("the word see for you", ["say"], false),
+            ("the word see for you", [], false),
+            ("the word sue for you", [], true),
+        ]
+        for (transcript, aliases, expected) in cases {
+            let context = CustomVocabularyContext(terms: [
+                CustomVocabularyTerm(text: "Sie", aliases: aliases, ctcTokenIds: tokenizer.encode("Sie"))
+            ])
+            let rescorer = try await VocabularyRescorer.create(
+                spotter: spotter, vocabulary: context,
+                config: .init(spotterRescueEnabled: false), ctcModelDirectory: directory)
+            let timings = transcript.split(separator: " ").enumerated().map { index, word in
+                TokenTiming(
+                    token: "▁" + word, tokenId: index + 1, startTime: Double(index), endTime: Double(index + 1),
+                    confidence: 1)
+            }
+            XCTAssertEqual(
+                rescorer.hasCTCRescoringCandidates(transcript: transcript, tokenTimings: timings), expected,
+                "'\(transcript)' with aliases \(aliases)")
+        }
+    }
+
+    /// CTC 110M from the cache, or downloaded when `FLUIDAUDIO_RUN_ASR_E2E=1` (the CI E2E step).
+    private func installedCtcModels() async throws -> CtcModels {
+        let directory = CtcModels.defaultCacheDirectory()
+        let allowDownload = ProcessInfo.processInfo.environment["FLUIDAUDIO_RUN_ASR_E2E"] == "1"
+        try XCTSkipUnless(
+            CtcModels.modelsExist(at: directory) || allowDownload,
+            "CTC 110M not cached; set FLUIDAUDIO_RUN_ASR_E2E=1 to download")
+        _ = try await CtcModels.download(to: directory)
+        return try await CtcModels.loadDirect(from: directory)
+    }
 }
