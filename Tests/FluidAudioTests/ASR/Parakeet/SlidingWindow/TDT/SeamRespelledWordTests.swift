@@ -49,6 +49,23 @@ final class SeamRespelledWordTests: XCTestCase {
         XCTAssertEqual(seam.droppedCurrent, 4, "30 years goes, the period stays")
     }
 
+    /// "thirty" is the first accumulated word (speech starts at the end of window 1). Retiring from
+    /// index 0 would drop the whole history, which the manager refuses, and both readings would stay:
+    /// the kept spelling stays instead and its re-reading goes.
+    func testARespelledFirstAccumulatedWordKeepsItsSpelling() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [12, 13, 14, 15],
+            previousTimestamps: [153, 154, 156, 158],
+            trailingWordStart: 3,
+            currentTokens: currentTokens,
+            currentTimestamps: currentTimestamps,
+            currentPieces: currentPieces,
+            previousPieces: [" th", "ir", "ty", " years"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(seam.droppedCurrent, 4, "thirty years.")
+    }
+
     /// "say" starts nearer "safe" than the last word "for.": "safe for." is replaced
     /// ("the word safe say for you" in the issue's offset sweep).
     func testARespelledWordAheadOfAPunctuatedLastWord() {
@@ -97,6 +114,20 @@ final class SeamRespelledWordTests: XCTestCase {
         XCTAssertEqual(seam.droppedCurrent, 0)
     }
 
+    /// Two kept words on one frame (duration-0 steps): the tie goes to the later word by position.
+    func testATieOnOneFrameGoesToTheLaterPosition() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4],
+            previousTimestamps: [190, 200, 200, 206],
+            trailingWordStart: 3,
+            currentTokens: [5, 6, 7],
+            currentTimestamps: [201, 206, 215],
+            currentPieces: [" oft", " cake", " is"],
+            previousPieces: [" so", " of", " off", " ca"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 2, "off ca; of stays")
+    }
+
     /// The re-decode splits "forever" into "for ever", so counting back from the "with" anchor lands
     /// on "parent", 9 frames away. The nearest word decides instead (LibriSpeech 1221-135766,
     /// ref "her parent for ever with").
@@ -114,6 +145,38 @@ final class SeamRespelledWordTests: XCTestCase {
         XCTAssertEqual(seam.droppedCurrent, 0)
     }
 
+    /// The last word's own copy landing a couple of frames early, nearer the word before it, is
+    /// still the last word's: "old and code" + "code"@101 keeps "and".
+    func testTheLastWordsEarlyCopyIsNotAnEarlierWord() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3],
+            previousTimestamps: [90, 100, 103],
+            trailingWordStart: 2,
+            currentTokens: [3, 4, 5],
+            currentTimestamps: [101, 112, 120],
+            currentPieces: [" code", " is", " new"],
+            previousPieces: [" old", " and", " code"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 0)
+        XCTAssertEqual(seam.droppedCurrent, 1, "the copy of code goes")
+    }
+
+    /// The same for a fragment's completion landing early: `and an` + `analyzing`@101 retires only
+    /// `an` (#897).
+    func testAnEarlyFragmentCompletionRetiresOnlyTheFragment() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3],
+            previousTimestamps: [90, 100, 103],
+            trailingWordStart: 2,
+            currentTokens: [4, 5, 6, 7],
+            currentTimestamps: [101, 105, 107, 115],
+            currentPieces: [" anal", "y", "zing", " it"],
+            previousPieces: [" code", " and", " an"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 1)
+        XCTAssertEqual(seam.droppedCurrent, 0)
+    }
+
     /// A word that starts nearest the last word is that word's re-reading, not an earlier
     /// word's: `and an` + `analyzing` still retires only `an` (#897).
     func testAWordNearestTheLastWordIsNotAnEarlierWordsRespelling() {
@@ -125,6 +188,54 @@ final class SeamRespelledWordTests: XCTestCase {
             currentTimestamps: [103, 105, 107, 115],
             currentPieces: [" anal", "y", "zing", " it"],
             previousPieces: [" code", " and", " an"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 1)
+        XCTAssertEqual(seam.droppedCurrent, 0)
+    }
+
+    /// "to"@155 re-emits a kept word; the next word "a" can't then re-read that word or an earlier
+    /// one: "go to the a store now", as before, never "go a store now".
+    func testARespelledTargetNeverPrecedesAMatchedKeptWord() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4, 5],
+            previousTimestamps: [140, 156, 158, 160, 162],
+            trailingWordStart: 3,
+            currentTokens: [2, 6, 4, 7, 8],
+            currentTimestamps: [155, 156, 160, 163, 175],
+            currentPieces: [" to", " a", " st", "ore", " now"],
+            previousPieces: [" go", " to", " the", " st", "o"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 2, "only the fragment sto")
+        XCTAssertEqual(seam.droppedCurrent, 1, "the copy of to")
+    }
+
+    /// A word the re-decode inserts ahead of the last word starts later than a re-reading would:
+    /// "the hedge fence" + "a fence." keeps "hedge" ("hedge a Offence" in the A/B).
+    func testAnInsertedWordIsNotARespelling() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3],
+            previousTimestamps: [100, 103, 107],
+            trailingWordStart: 2,
+            currentTokens: [4, 3, 5],
+            currentTimestamps: [106, 108, 118],
+            currentPieces: [" a", " fence", "."],
+            previousPieces: [" the", " hedge", " fence"]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 1, "only the last word")
+        XCTAssertEqual(seam.droppedCurrent, 0)
+    }
+
+    /// The same with a token subscriber: the recovered "thirty" stays ("lag to thirty years.").
+    func testAnInsertedWordStaysUnderAStableFloor() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3],
+            previousTimestamps: [140, 151, 158],
+            trailingWordStart: 2,
+            currentTokens: [4, 3, 5],
+            currentTimestamps: [154, 159, 170],
+            currentPieces: [" thirty", " years", "."],
+            previousPieces: [" lag", " to", " years"],
+            stableTokenFloor: 2
         )
         XCTAssertEqual(seam.droppedPrevious, 1)
         XCTAssertEqual(seam.droppedCurrent, 0)
@@ -146,7 +257,41 @@ final class SeamRespelledWordTests: XCTestCase {
         XCTAssertEqual(seam.droppedCurrent, 4)
     }
 
-    func testAnUpdateCarriesTheManagersText() {
+    func testSpellingsAgree() {
+        XCTAssertTrue(AsrManager.spellingsAgree("word", "world"))
+        XCTAssertTrue(AsrManager.spellingsAgree("say", "safe"))
+        XCTAssertTrue(AsrManager.spellingsAgree("for", "forever"), "a split")
+        XCTAssertFalse(AsrManager.spellingsAgree("the", "a"))
+        XCTAssertFalse(AsrManager.spellingsAgree("thirty", "to"))
+        XCTAssertFalse(AsrManager.spellingsAgree("a", "and"), "a one-letter prefix is no evidence")
+        XCTAssertFalse(AsrManager.spellingsAgree("offence", "a"))
+        XCTAssertFalse(AsrManager.spellingsAgree("", "a"))
+    }
+
+    /// A retired span of several words leaves the text whether it holds the raw words or their
+    /// vocabulary replacements (#1113 with boosting).
+    func testARetiredSpanIsRenderedWithItsReplacements() {
+        func replacement(_ original: String, _ term: String) -> VocabularyRescorer.RescoringResult {
+            VocabularyRescorer.RescoringResult(
+                originalWord: original, originalScore: -5, replacementWord: term, replacementScore: -1,
+                shouldReplace: true, reason: "test")
+        }
+        XCTAssertEqual(
+            SlidingWindowAsrManager.renderingReplacements("on cubernetis", [replacement("cubernetis", "Kubernetes")]),
+            "on Kubernetes")
+        XCTAssertEqual(
+            SlidingWindowAsrManager.renderingReplacements("of truth,", [replacement("truth,", "Trooth")]),
+            "of Trooth,", "the span's outer punctuation stays, as the rescorer writes it")
+        XCTAssertEqual(
+            SlidingWindowAsrManager.renderingReplacements(
+                "word safe for.", [replacement("safe", "Sie"), replacement("unrelated", "Term")]),
+            "word Sie for.")
+        XCTAssertEqual(
+            SlidingWindowAsrManager.removingTrailingWord("on Kubernetes", from: "runs on Kubernetes"), "runs")
+        XCTAssertEqual(SlidingWindowAsrManager.removingTrailingWord("thirty years", from: "to thirty years"), "to")
+    }
+
+    func testTheUpdateInitStoresTheManagersText() {
         let update = SlidingWindowTranscriptionUpdate(
             text: "30 years.", isConfirmed: true, confidence: 0.9, timestamp: Date(),
             confirmedTranscript: "by twenty-five to 30 years.", volatileTranscript: "")

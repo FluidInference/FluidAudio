@@ -110,6 +110,9 @@ public actor SlidingWindowAsrManager {
     /// retirement can remove it even when it no longer equals the raw token
     /// text (#897).
     private var lastWindowRenderedLastWord: String?
+    /// The previous window's applied vocabulary replacements, to render a retired
+    /// span of several words the way the transcript text holds it (#1113).
+    private var lastWindowReplacements: [VocabularyRescorer.RescoringResult] = []
 
     // Raw sample buffer for sliding-window assembly (absolute indexing)
     private var sampleBuffer: [Float] = []
@@ -250,6 +253,7 @@ public actor SlidingWindowAsrManager {
         accumulatedTokens.removeAll()
         accumulatedTokenTimestamps.removeAll()
         lastWindowRenderedLastWord = nil
+        lastWindowReplacements = []
         failedWindowCount = 0
         lastWindowError = nil
 
@@ -403,6 +407,7 @@ public actor SlidingWindowAsrManager {
         accumulatedTokens.removeAll()
         accumulatedTokenTimestamps.removeAll()
         lastWindowRenderedLastWord = nil
+        lastWindowReplacements = []
 
         logger.info("SlidingWindowAsrManager reset for source: \(String(describing: self.audioSource))")
     }
@@ -570,16 +575,20 @@ public actor SlidingWindowAsrManager {
 
             let (tokens, timestamps, confidences, _, droppedPreviousTokens) = result
 
-            // The window re-decoded the previous window's last word in full (#897):
-            // retire that word from the accumulated tokens and from the text state.
+            // The window re-decoded the previous window's last word in full (#897),
+            // or re-spelled the words from an earlier one (#1113): retire them from
+            // the accumulated tokens and from the text state.
             if droppedPreviousTokens > 0, droppedPreviousTokens < accumulatedTokens.count {
                 let dropped = Array(accumulatedTokens.suffix(droppedPreviousTokens))
                 accumulatedTokens.removeLast(droppedPreviousTokens)
                 accumulatedTokenTimestamps.removeLast(min(droppedPreviousTokens, accumulatedTokenTimestamps.count))
                 if let droppedText = await asrManager?.convertTokensToText(dropped), !droppedText.isEmpty {
-                    // The text state may hold a vocabulary-rescored replacement
-                    // for that word rather than its raw token text.
-                    let candidates = [droppedText] + (lastWindowRenderedLastWord.map { [$0] } ?? [])
+                    // The text state may hold vocabulary-rescored replacements for
+                    // those words rather than their raw token text.
+                    let rendered = Self.renderingReplacements(droppedText, lastWindowReplacements)
+                    let candidates =
+                        [droppedText] + (rendered == droppedText ? [] : [rendered])
+                        + (lastWindowRenderedLastWord.map { [$0] } ?? [])
                     for candidate in candidates {
                         if let trimmed = Self.removingTrailingWord(candidate, from: volatileTranscript) {
                             volatileTranscript = trimmed
@@ -694,6 +703,7 @@ public actor SlidingWindowAsrManager {
             await updateTranscriptionState(with: displayResult, text: transcriptText, shouldConfirm: shouldConfirm)
             lastWindowRenderedLastWord = Self.renderedLastWord(
                 rawText: interim.text, renderedText: displayResult.text, replacements: appliedReplacements)
+            lastWindowReplacements = appliedReplacements
 
             let update = SlidingWindowTranscriptionUpdate(
                 text: displayResult.text,
@@ -856,6 +866,27 @@ public actor SlidingWindowAsrManager {
             return replacement
         }
         return renderedText.split(separator: " ").last.map(String.init)
+    }
+
+    /// `rawText` as rescoring renders it: each applied replacement whose original
+    /// words occur in it becomes the replacement with the span's outer
+    /// punctuation, as `VocabularyRescorer.applyReplacement` writes it. Pure.
+    static func renderingReplacements(
+        _ rawText: String, _ replacements: [VocabularyRescorer.RescoringResult]
+    ) -> String {
+        var words = rawText.split(separator: " ").map(String.init)
+        for result in replacements where result.shouldReplace {
+            guard let replacement = result.replacementWord, !replacement.isEmpty else { continue }
+            let original = result.originalWord.split(separator: " ").map(String.init)
+            guard !original.isEmpty, original.count <= words.count,
+                let start = (0...(words.count - original.count)).last(where: {
+                    Array(words[$0..<($0 + original.count)]) == original
+                })
+            else { continue }
+            let rendered = VocabularyRescorer.preservingBoundaryPunctuation(replacement, spanWords: original)
+            words.replaceSubrange(start..<(start + original.count), with: [rendered])
+        }
+        return words.joined(separator: " ")
     }
 
     /// `text` without its trailing `word` when `text` ends with that word as a
@@ -1161,11 +1192,12 @@ public struct SlidingWindowTranscriptionUpdate: Sendable {
     /// scores the decision was made on, so callers can tell a recognizer error
     /// from a bad vocabulary replacement. `nil` when nothing was replaced.
     public let ctcReplacements: [VocabularyRescorer.RescoringResult]?
-    /// The manager's `confirmedTranscript` and `volatileTranscript` after this
-    /// update. Unlike `text`, they carry the edits the window made to earlier
-    /// text — a retired or re-spelled seam word (#897, #1113), a mid-word join
-    /// (#912) — so joining update texts is not needed to follow the manager.
+    /// The manager's `confirmedTranscript` after this update. Unlike `text`, it
+    /// carries the edits the window made to earlier text — a retired or
+    /// re-spelled seam word (#897, #1113), a mid-word join (#912) — so joining
+    /// update texts is not needed to follow the manager.
     public let confirmedTranscript: String
+    /// The manager's `volatileTranscript` after this update; see `confirmedTranscript`.
     public let volatileTranscript: String
 
     public init(

@@ -252,15 +252,23 @@ extension AsrManager {
         return Array(pieces[start..<wordExtent(in: pieces, from: start)])
     }
 
+    /// How far a re-reading of a kept word may start from it. The same
+    /// mid-window word decoded twice lands within 2 frames (`thirty`/`30` 0,
+    /// `safe`/`say` 1, `a`/`the` 2); a word the re-decode inserts after a kept one
+    /// starts later (`a` 3 frames after `hedge`, `to` 4 after `went`).
+    internal static let respelledWordFrames = 2
+
     /// The kept word (before the last word) that a differently spelled
-    /// re-emitted word starting at `frame` re-reads (#1113), or nil. Exact
+    /// re-emitted word `core` starting at `frame` re-reads (#1113), or nil. Exact
     /// re-emissions after it anchor the alignment: in `the knowledge` over a kept
     /// `a knowledge`, `the` re-reads `a` though it starts on `knowledge`'s frame.
-    /// Otherwise, the kept word starting nearest it within the jitter margin —
-    /// the later one on a tie — when that is nearer than the last word. Emission
-    /// frames jitter, so frames alone mis-pair adjacent words. Pure.
+    /// Without an anchor, frames alone cannot tell the word before the last word
+    /// from the last word itself (`Saviour` landing early), so the nearest kept
+    /// word must also be nearer than the last word, within the jitter margin,
+    /// and spelled alike (`spellingsAgree`); ties go to the later word. Pure.
     nonisolated internal static func respelledWord(
         at frame: Int,
+        core: String,
         following: [(core: String, frame: Int)],
         keptWords: [(core: String, frame: Int, start: Int)],
         lastWord: (core: String, frame: Int),
@@ -277,17 +285,27 @@ extension AsrManager {
             // A split or merged word (`forever` → `for ever`) shifts the
             // alignment; the start frames then disagree and the nearest word decides.
             let target = anchor - offset - 1
-            if target >= 0, abs(keptWords[target].frame - frame) <= jitterFrames { return keptWords[target] }
+            if target >= 0, abs(keptWords[target].frame - frame) <= respelledWordFrames { return keptWords[target] }
             break
         }
         func distance(_ word: (core: String, frame: Int, start: Int)) -> Int { abs(word.frame - frame) }
         guard
             let nearest = keptWords.min(by: {
-                distance($0) < distance($1) || (distance($0) == distance($1) && $0.frame > $1.frame)
+                distance($0) < distance($1) || (distance($0) == distance($1) && $0.start > $1.start)
             }),
-            distance(nearest) <= jitterFrames, distance(nearest) < abs(lastWord.frame - frame)
+            distance(nearest) <= jitterFrames, distance(nearest) < abs(lastWord.frame - frame),
+            spellingsAgree(core, nearest.core)
         else { return nil }
         return nearest
+    }
+
+    /// Whether two spellings could be one word read twice: one extends the
+    /// other (`for` / `forever`, a split) or they differ in at most half their
+    /// letters (`word` / `world`). Pure.
+    nonisolated internal static func spellingsAgree(_ a: String, _ b: String) -> Bool {
+        guard !a.isEmpty, !b.isEmpty else { return false }
+        if min(a.count, b.count) >= 2, a.hasPrefix(b) || b.hasPrefix(a) { return true }
+        return 2 * StringUtils.levenshteinDistance(a, b) <= max(a.count, b.count)
     }
 
     /// Seam reconciliation for the final streaming window (#897).
@@ -317,6 +335,10 @@ extension AsrManager {
     ///    Behind a continuation head the first real word is the next word by
     ///    construction, so only the prefix rule can retire. A different word
     ///    starting later: the re-decode skipped the previous word, keep it.
+    ///    Before that, re-emitted earlier words are consumed: an identical
+    ///    spelling at the same frame is dropped, and a different spelling of a
+    ///    kept word (`thirty` → `30`, `respelledWord`) retires the kept words
+    ///    from it on instead of only the last word (#1113).
     /// 3. Retiring additionally requires the re-decode to reach past the
     ///    previous window's last frame; an empty or early-ending final window
     ///    keeps the previous word.
@@ -399,6 +421,7 @@ extension AsrManager {
         let lastWord = (core: wordCore(previousPieces.dropFirst(trailingWordStart)), frame: lastWordStartFrame)
         let currentWords = words(in: currentPieces, timestamps: currentTimestamps, upTo: currentPieces.count)
         var consumed = head
+        var consumedKeptStart = -1
         var respelledStart: Int?
         while consumed < currentTokens.count {
             if isPunctuation(consumed), !startsWordPiece(in: currentPieces, at: consumed),
@@ -412,17 +435,26 @@ extension AsrManager {
             let core = wordCore(Array(currentPieces[consumed..<end]))
             let frame = currentTimestamps[consumed]
             guard frame <= lastWordStartFrame + jitterFrames, !core.isEmpty else { break }
-            if previousWords.contains(where: { $0.core == core && abs($0.frame - frame) <= frameTolerance }) {
+            if let kept = previousWords.last(where: { $0.core == core && abs($0.frame - frame) <= frameTolerance }) {
+                consumedKeptStart = max(consumedKeptStart, kept.start)
                 consumed = end
                 continue
             }
+            // The last word's own re-reading — the same word, or a fragment and
+            // its completion — is step 3's call wherever its frame lands.
+            if !lastWord.core.isEmpty, core.hasPrefix(lastWord.core) || lastWord.core.hasPrefix(core) { break }
             let following = currentWords.filter { $0.start >= end && $0.frame <= lastWordStartFrame + frameTolerance }
             guard
                 let target = respelledWord(
-                    at: frame, following: following.map { ($0.core, $0.frame) }, keptWords: previousWords,
-                    lastWord: lastWord, jitterFrames: jitterFrames, frameTolerance: frameTolerance)
+                    at: frame, core: core, following: following.map { ($0.core, $0.frame) },
+                    keptWords: previousWords, lastWord: lastWord, jitterFrames: jitterFrames,
+                    frameTolerance: frameTolerance),
+                target.start > consumedKeptStart
             else { break }
-            if target.start >= stableTokenFloor, extendsBeyondPrevious {
+            // Retiring from the first accumulated token, into the stable prefix,
+            // or without a re-decode that reaches past the previous window is not
+            // possible: the kept spelling stays and the re-reading goes instead.
+            if target.start > 0, target.start >= stableTokenFloor, extendsBeyondPrevious {
                 respelledStart = target.start
                 break
             }
