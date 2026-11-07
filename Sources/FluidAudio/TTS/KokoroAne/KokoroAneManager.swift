@@ -55,6 +55,8 @@ public actor KokoroAneManager {
     private var englishFrontendReady = false
     /// BART G2P fallback bound to the store's models root (#1023).
     nonisolated let englishG2P: G2PModel
+    /// ``setPunctuationPauses(_:)``, in acoustic frames.
+    private var punctuationPauses: [Character: Int32] = [:]
 
     /// Select `.v3` for the pinned static-bucket pipeline (macOS 15 / iOS 18+).
     /// A supplied model store owns the runtime version and compute policy.
@@ -184,6 +186,25 @@ public actor KokoroAneManager {
         await store.setMandarinCustomLexicon(lexicon)
     }
 
+    /// Set how long the pause at a punctuation mark lasts, replacing the
+    /// pause Kokoro predicts (Mandarin `、` and `，` get only 50–125 ms).
+    ///
+    /// Keys are marks as written in the input text. Mandarin text keeps
+    /// `、` and `，` apart even though both reach the model as `,`; phoneme
+    /// input and the other languages are matched on the marks in the
+    /// phoneme string. A mark without an entry of its own uses the entry
+    /// for the mark the model sees, so `","` also covers `，` and `、`.
+    /// Consecutive marks share the longest of their pauses.
+    ///
+    /// The duration is rounded to Kokoro's 25 ms acoustic frame and is not
+    /// scaled by `speed`. A longer pause than the predicted one is rendered
+    /// as silence; a shorter one trims the predicted pause. Applies to all
+    /// later synthesis on this manager; pass `[:]` to restore the predicted
+    /// pauses.
+    public func setPunctuationPauses(_ pauses: [Character: Duration]) {
+        punctuationPauses = pauses.mapValues(KokoroAnePauses.frames(for:))
+    }
+
     /// Install (or clear) a user-supplied English pronunciation override.
     ///
     /// Entries map a word to a Misaki-style IPA string (e.g.
@@ -274,16 +295,22 @@ public actor KokoroAneManager {
         let frontend = try await resolveFrontend(for: text)
         // Chunk after normalization / G2P so written forms are never split; the
         // cap is in Unicode scalars, as the vocab encoder counts it (#712, #940).
-        let chunks = PhonemeChunker.chunk(
-            frontend.phonemes, maxLength: KokoroAneConstants.maxPhonemeLength, countsUnicodeScalars: true)
+        let scalars = frontend.phonemes.unicodeScalars.map(Character.init)
+        let chunks = PhonemeChunker.chunkRanges(scalars, maxLength: KokoroAneConstants.maxPhonemeLength)
         guard chunks.count > 1 else {
             return try await runChain(
-                phonemes: frontend.phonemes, normalizedText: frontend.normalizedText, voice: voice, speed: speed)
+                phonemes: frontend.phonemes, normalizedText: frontend.normalizedText, voice: voice, speed: speed,
+                punctuationSources: frontend.punctuationSources)
         }
         var parts: [KokoroAneSynthesisResult] = []
         for chunk in chunks {
             try Task.checkCancellation()
-            parts.append(try await runChain(phonemes: chunk, normalizedText: nil, voice: voice, speed: speed))
+            let sources = frontend.punctuationSources.filter { chunk.contains($0.key) }
+            parts.append(
+                try await runChain(
+                    phonemes: String(scalars[chunk]), normalizedText: nil, voice: voice, speed: speed,
+                    punctuationSources: Dictionary(
+                        uniqueKeysWithValues: sources.map { ($0.key - chunk.lowerBound, $0.value) })))
         }
         var result = KokoroAneSynthesisResult.concatenating(parts)
         result.normalizedText = frontend.normalizedText
@@ -315,14 +342,19 @@ public actor KokoroAneManager {
     /// ``synthesizeDetailed(text:voice:speed:)`` can report the normalized
     /// text it actually spoke (issue #943). `normalizedText` is `nil` when the
     /// input was treated as pre-computed phonemes.
-    func resolveFrontend(for text: String) async throws -> (normalizedText: String?, phonemes: String) {
+    ///
+    /// `punctuationSources` maps the Unicode-scalar offset of a punctuation
+    /// mark the frontend rewrote to the mark as written (Mandarin only).
+    func resolveFrontend(
+        for text: String
+    ) async throws -> (normalizedText: String?, phonemes: String, punctuationSources: [Int: Character]) {
         switch variant {
         case .english:
             // Byte-exact NeMo TN before G2P via the shared frontend entry
             // point: "$5" → "five dollars", "2024" → "twenty twenty four".
             // No-op for plain prose.
             let normalized = EnglishTextNormalizer.normalizeForFrontend(text)
-            return (normalized, try await phonemize(text: normalized))
+            return (normalized, try await phonemize(text: normalized), [:])
         case .mandarin:
             try await store.loadIfNeeded()
             // Normalize written forms to their Mandarin reading before
@@ -338,25 +370,26 @@ public actor KokoroAneManager {
             }
             if MandarinG2P.looksLikeHanzi(normalized) {
                 let g2p = try await store.mandarinG2PPipeline()
-                return (normalized, try await g2p.phonemize(normalized))
+                let traced = try await g2p.phonemizeTracingPunctuation(normalized)
+                return (normalized, traced.phonemes, traced.punctuationSources)
             } else {
                 // No Hanzi present → caller already supplied bopomofo /
                 // ASCII punctuation. Pass through so power users can
                 // still override pronunciation manually.
-                return (nil, normalized)
+                return (nil, normalized, [:])
             }
         case .japanese:
             // Pre-computed IPA (issue #698) passes through untouched: NFKC
             // would fold its modifier letters (ʲ → j). Anything outside the
             // phoneme alphabet — kana, kanji, half-width kana, digits — is
             // text and goes through normalization and the frontend.
-            guard !Self.looksLikePrecomputedJapaneseIPA(text) else { return (nil, text) }
+            guard !Self.looksLikePrecomputedJapaneseIPA(text) else { return (nil, text, [:]) }
             // The NeMo FST drops half-width dakuten (ｶﾞ → カ) and reads the
             // full-width tilde as a symbol, so fold both before it runs.
             let folded = JapaneseCutlet.foldingHalfWidthForms(text)
             let normalized = NemoTextNormalizer.normalize(folded, language: .japanese)
             let g2p = try await store.japaneseG2PPipeline()
-            return (normalized, try await g2p.phonemize(normalized))
+            return (normalized, try await g2p.phonemize(normalized), [:])
         case .spanish:
             var normalized = NemoTextNormalizer.normalize(text, language: .spanish)
             // Without the engine linked, read numbers here rather than let the
@@ -365,14 +398,14 @@ public actor KokoroAneManager {
                 normalized = RomanceNumberNormalizer.normalize(normalized, language: .spanish)
             }
             let lexicon = await store.spanishLexicon()
-            return (normalized, try Self.nonEmpty(SpanishG2P.phonemize(normalized, lexicon: lexicon), for: text))
+            return (normalized, try Self.nonEmpty(SpanishG2P.phonemize(normalized, lexicon: lexicon), for: text), [:])
         case .french:
             var normalized = NemoTextNormalizer.normalize(text, language: .french)
             if !NemoTextNormalizer.isAvailable {
                 normalized = RomanceNumberNormalizer.normalize(normalized, language: .french)
             }
             let g2p = try await store.frenchG2PPipeline()
-            return (normalized, try Self.nonEmpty(await g2p.phonemize(normalized), for: text))
+            return (normalized, try Self.nonEmpty(await g2p.phonemize(normalized), for: text), [:])
         }
     }
 
@@ -412,7 +445,8 @@ public actor KokoroAneManager {
         phonemes: String,
         normalizedText: String?,
         voice: String?,
-        speed: Float
+        speed: Float,
+        punctuationSources: [Int: Character] = [:]
     ) async throws -> KokoroAneSynthesisResult {
         try await store.loadIfNeeded()
         let vocab = try await store.vocabulary()
@@ -424,14 +458,17 @@ public actor KokoroAneManager {
         // raw phoneme-string length in scalars (BOS/EOS not counted).
         let phonemeCount = KokoroAneVocab.phonemeLength(phonemes)
         let (styleS, styleTimbre) = pack.slice(for: phonemeCount)
+        let pauses = KokoroAnePauses.spans(
+            phonemes: phonemes, vocab: vocab, sources: punctuationSources, pauses: punctuationPauses)
 
         var result: KokoroAneSynthesisResult
         if store.version == .v3 {
             result = try await store.synthesizeV3(
-                inputIds: inputIds, styleS: styleS, styleTimbre: styleTimbre, speed: speed)
+                inputIds: inputIds, styleS: styleS, styleTimbre: styleTimbre, speed: speed, pauses: pauses)
         } else {
             result = try await KokoroAneSynthesizer.synthesize(
-                inputIds: inputIds, styleS: styleS, styleTimbre: styleTimbre, speed: speed, store: store)
+                inputIds: inputIds, styleS: styleS, styleTimbre: styleTimbre, speed: speed, pauses: pauses,
+                store: store)
         }
         result.normalizedText = normalizedText
         result.phonemes = phonemes

@@ -63,6 +63,8 @@ public struct TTS {
         // Parsed from the `--variant` flag (en/english/zh/mandarin).
         var kokoroAneVariant: KokoroAneVariant = .english
         var kokoroVersion: KokoroAneVersion = .legacy
+        // `--pause MARK=MS`, repeatable — KokoroAne punctuation pauses.
+        var kokoroPauses: [Character: Duration] = [:]
         // Inflect model size — only consulted when backend == .inflect.
         // Parsed from `--variant` (micro/nano) or the backend token
         // (inflect-micro / inflect-nano).
@@ -152,6 +154,17 @@ public struct TTS {
                 i += 1
             case "--phonemes":
                 treatAsPhonemes = true
+            case "--pause":
+                guard i + 1 < arguments.count, let separator = arguments[i + 1].lastIndex(of: "="),
+                    arguments[i + 1][..<separator].count == 1, let mark = arguments[i + 1].first,
+                    let milliseconds = Int(arguments[i + 1][arguments[i + 1].index(after: separator)...]),
+                    milliseconds >= 0
+                else {
+                    print("--pause expects MARK=MILLISECONDS, e.g. --pause 、=300")
+                    exit(1)
+                }
+                kokoroPauses[mark] = .milliseconds(milliseconds)
+                i += 1
             case "--variant", "--model-variant":
                 if i + 1 < arguments.count {
                     let value = arguments[i + 1].lowercased()
@@ -463,7 +476,7 @@ public struct TTS {
             await runKokoroAne(
                 text: text, output: output, voice: voice, metricsPath: metricsPath,
                 variant: kokoroAneVariant, version: kokoroVersion, lexiconPath: lexiconPath,
-                treatAsPhonemes: treatAsPhonemes)
+                treatAsPhonemes: treatAsPhonemes, pauses: kokoroPauses)
         case .styletts2:
             await runStyleTTS2(
                 text: text, ipa: styletts2Ipa,
@@ -1108,7 +1121,8 @@ public struct TTS {
 
     private static func runKokoroAne(
         text: String, output: String, voice: String, metricsPath: String?,
-        variant: KokoroAneVariant, version: KokoroAneVersion, lexiconPath: String?, treatAsPhonemes: Bool
+        variant: KokoroAneVariant, version: KokoroAneVersion, lexiconPath: String?, treatAsPhonemes: Bool,
+        pauses: [Character: Duration]
     ) async {
         do {
             let tStart = Date()
@@ -1136,6 +1150,8 @@ public struct TTS {
                             + "supports a custom lexicon.")
                 }
             }
+
+            await manager.setPunctuationPauses(pauses)
 
             let tLoad0 = Date()
             try await manager.initialize()
@@ -1803,6 +1819,8 @@ public struct TTS {
                                                               bypasses tone sandhi)
                                    Ignored for KokoroAne English (no lexicon support yet).
               --kokoro-version     Kokoro architecture: legacy (default) or v3 (en/ja/zh, macOS 15 / iOS 18+).
+              --pause MARK=MS      KokoroAne pause at a punctuation mark, in milliseconds
+                                   (repeatable, e.g. --pause 、=300 --pause ，=400).
               --variant            KokoroAne language (values: en,zh,ja,es,fr).
                                    For --backend kokoro-ane --variant zh, Hanzi
                                    input is auto-phonemized through the bundled

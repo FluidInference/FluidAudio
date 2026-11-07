@@ -118,7 +118,9 @@ final class KokoroAneV3Pipeline {
         computeUnits.tail == .cpuAndGPU
     }
 
-    func synthesize(inputIds: [Int32], style: [Float], speed: Float = 1) throws -> Result {
+    func synthesize(
+        inputIds: [Int32], style: [Float], speed: Float = 1, pauses: [KokoroAnePauses.Span] = []
+    ) throws -> Result {
         guard (2...512).contains(inputIds.count), inputIds.allSatisfy({ (0..<178).contains($0) }),
             style.count == 256, style.allSatisfy(\.isFinite), speed.isFinite, speed > 0,
             (Float(0x1p-24)...65504).contains(speed)
@@ -128,10 +130,12 @@ final class KokoroAneV3Pipeline {
         }
         lock.lock()
         defer { lock.unlock() }
-        return try autoreleasepool { try run(inputIds: inputIds, style: style, speed: speed) }
+        return try autoreleasepool { try run(inputIds: inputIds, style: style, speed: speed, pauses: pauses) }
     }
 
-    private func run(inputIds: [Int32], style voice: [Float], speed: Float) throws -> Result {
+    private func run(
+        inputIds: [Int32], style voice: [Float], speed: Float, pauses: [KokoroAnePauses.Span]
+    ) throws -> Result {
         var timings: [String: Double] = [:]
         func time() -> Double { Double(DispatchTime.now().uptimeNanoseconds) / 1e6 }
         func predict(_ stage: String, _ input: [String: MLMultiArray]) throws -> MLFeatureProvider {
@@ -174,7 +178,8 @@ final class KokoroAneV3Pipeline {
         guard values.allSatisfy({ $0.isFinite && $0 >= 0 && $0 <= 2000 }) else {
             throw KokoroAneV3Error.invalidInput("Invalid predicted durations")
         }
-        let durations = values.map { max(1, Int32($0.rounded())) }
+        var durations = values.map { max(1, Int32($0.rounded())) }
+        let silentFrames = KokoroAnePauses.apply(pauses, to: &durations)
         let frames = durations.reduce(0) { $0 + Int($1) }
         guard frames >= 2, frames <= 2000 else { throw KokoroAneV3Error.invalidInput("Audio exceeds 2000-frame limit") }
         let alignment = try predict(
@@ -185,8 +190,15 @@ final class KokoroAneV3Pipeline {
             ])
         let asr = try Self.half(Self.array(alignment, "asr"))
         let prosody = try predict("Prosody", ["en": Self.half(Self.array(alignment, "en")), "style_s": style])
-        let f0 = try Self.array(prosody, "F0")
-        let noise = try Self.array(prosody, "N")
+        var f0 = try Self.array(prosody, "F0")
+        var noise = try Self.array(prosody, "N")
+        if !silentFrames.isEmpty {
+            var f0Values = Arrays.readFloats(f0)
+            var noiseValues = Arrays.readFloats(noise)
+            try KokoroAnePauses.silence(f0: &f0Values, n: &noiseValues, frames: silentFrames, durations: durations)
+            f0 = try Arrays.float32Array(shape: f0.shape.map(\.intValue), from: f0Values)
+            noise = try Arrays.float32Array(shape: noise.shape.map(\.intValue), from: noiseValues)
+        }
         let f16 = try Self.half(f0)
         let n16 = try Self.half(noise)
         var xPre: MLMultiArray?

@@ -46,24 +46,43 @@ enum PhonemeChunker {
         boundaryPunctuation: Set<Character> = defaultBoundaryPunctuation,
         countsUnicodeScalars: Bool = false
     ) -> [String] {
-        precondition(maxLength > 0, "maxLength must be positive")
-
         let characters: [Character] =
             countsUnicodeScalars ? phonemes.unicodeScalars.map(Character.init) : Array(phonemes)
+        return chunkRanges(characters, maxLength: maxLength, boundaryPunctuation: boundaryPunctuation)
+            .map { String(characters[$0]) }
+    }
+
+    /// ``chunk(_:maxLength:boundaryPunctuation:countsUnicodeScalars:)`` as
+    /// ranges into `characters`, so callers can map positions from the full
+    /// string into each chunk.
+    static func chunkRanges(
+        _ characters: [Character],
+        maxLength: Int,
+        boundaryPunctuation: Set<Character> = defaultBoundaryPunctuation
+    ) -> [Range<Int>] {
+        precondition(maxLength > 0, "maxLength must be positive")
+
         let count = characters.count
-        if count == 0 { return [] }
+        var ranges: [Range<Int>] = []
+
+        func appendChunk(_ range: Range<Int>) {
+            var lower = range.lowerBound
+            var upper = range.upperBound
+            while lower < upper, characters[lower].isWhitespace { lower += 1 }
+            while upper > lower, characters[upper - 1].isWhitespace { upper -= 1 }
+            if lower < upper { ranges.append(lower..<upper) }
+        }
 
         // Fast path: already within the cap (the common case).
         if count <= maxLength {
-            let trimmed = phonemes.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? [] : [trimmed]
+            appendChunk(0..<count)
+            return ranges
         }
 
         func isBoundary(_ character: Character) -> Bool {
             character.isWhitespace || boundaryPunctuation.contains(character)
         }
 
-        var chunks: [String] = []
         var start = 0
 
         // Skip any leading whitespace so the first window is fully usable.
@@ -85,21 +104,16 @@ enum PhonemeChunker {
             // No usable boundary in the window → hard-split at the cap.
             if breakAt <= start { breakAt = windowEnd }
 
-            appendChunk(characters[start..<breakAt], to: &chunks)
+            appendChunk(start..<breakAt)
 
             start = breakAt
             while start < count, characters[start].isWhitespace { start += 1 }
         }
 
         if start < count {
-            appendChunk(characters[start..<count], to: &chunks)
+            appendChunk(start..<count)
         }
-        return chunks
-    }
-
-    private static func appendChunk(_ slice: ArraySlice<Character>, to chunks: inout [String]) {
-        let text = String(slice).trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty { chunks.append(text) }
+        return ranges
     }
 }
 #endif

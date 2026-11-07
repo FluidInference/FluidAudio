@@ -256,6 +256,15 @@ final class KokoroAneV3Tests: XCTestCase {
                 Array(repeating: zh, count: 4).joined(separator: " "), speed: 0.7),
             fast: false)
         try check(try await mandarin.synthesizeDetailed(text: "你好世界。"), fast: true)
+        // A punctuation pause rewrites the 、 cluster (`,` + ` `) and silences it.
+        await mandarin.setPunctuationPauses(["、": .milliseconds(400)])
+        let paused = try await mandarin.synthesizeDetailed(text: "你好、世界。")
+        try check(paused, fast: true)
+        let comma = try XCTUnwrap(paused.inputIds.firstIndex(of: 3))
+        XCTAssertEqual(paused.predictedDurations[comma] + paused.predictedDurations[comma + 1], 16)
+        let start = (Int(paused.predictedDurations[..<comma].reduce(0, +)) + 1) * 600
+        let interior = paused.samples[start..<(start + 13 * 600)]
+        XCTAssertLessThan(interior.map { abs($0) }.max() ?? 1, 0.001)
         await mandarin.cleanup()
     }
 

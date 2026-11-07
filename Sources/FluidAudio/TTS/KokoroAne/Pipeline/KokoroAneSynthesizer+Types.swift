@@ -57,7 +57,8 @@ public struct KokoroAneSynthesisResult: Sendable {
     /// chunks long input, this is the per-chunk ids concatenated in order, so
     /// each chunk contributes its own BOS/EOS pair.
     public let inputIds: [Int32]
-    /// PostAlbert `pred_dur`: acoustic-frame counts for each input token.
+    /// PostAlbert `pred_dur`: acoustic-frame counts for each input token,
+    /// after any ``KokoroAneManager/setPunctuationPauses(_:)`` override.
     ///
     /// Kokoro uses these exact durations to build the alignment consumed by
     /// the downstream prosody/vocoder stages. Exposing them lets callers
