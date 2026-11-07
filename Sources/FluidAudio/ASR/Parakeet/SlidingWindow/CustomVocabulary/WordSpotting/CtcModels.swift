@@ -143,8 +143,8 @@ extension CtcModels {
     /// - Parameters:
     ///   - directory: Directory containing the downloaded CoreML bundles.
     ///   - variant: Which CTC model variant to load (default: .ctc110m).
-    ///   - progressHandler: Download (if the cache is incomplete) and compile progress. Called once per bundle, so
-    ///     the fraction restarts after the first reaches 1.0.
+    ///   - progressHandler: Download (when the cache is incomplete) and compile progress, reported as one sequence
+    ///     from 0 to 1.
     /// - Returns: Loaded `CtcModels` instance.
     public static func load(
         from directory: URL,
@@ -163,14 +163,14 @@ extension CtcModels {
             modelNames: [ModelNames.CTC.melSpectrogramPath],
             directory: parentDirectory,
             computeUnits: melSpectrogramConfiguration().computeUnits,
-            progressHandler: progressHandler
+            progressHandler: scaledProgressHandler(progressHandler, step: 0, of: 2)
         )
         let encoderModels = try await ModelHub.loadModels(
             variant.repo,
             modelNames: [ModelNames.CTC.audioEncoderPath],
             directory: parentDirectory,
             computeUnits: config.computeUnits,
-            progressHandler: progressHandler
+            progressHandler: scaledProgressHandler(progressHandler, step: 1, of: 2)
         )
 
         guard
@@ -199,8 +199,8 @@ extension CtcModels {
     ///   - directory: Custom cache directory (default: uses defaultCacheDirectory for variant).
     ///   - variant: Which CTC model variant to download (default: .ctc110m).
     ///   - force: Whether to force re-download even if models exist.
-    ///   - progressHandler: Download and compile progress. Called once per bundle, so the fraction restarts after
-    ///     the first reaches 1.0. Not called when the models are already present.
+    ///   - progressHandler: Download and compile progress, reported as one sequence from 0 to 1. Not called when the
+    ///     models are already present.
     /// - Returns: The directory where models were downloaded.
     @discardableResult
     public static func download(
@@ -231,13 +231,13 @@ extension CtcModels {
             (ModelNames.CTC.audioEncoderPath, defaultConfiguration().computeUnits),
         ]
 
-        for (name, computeUnits) in specs {
+        for (step, (name, computeUnits)) in specs.enumerated() {
             _ = try await ModelHub.loadModels(
                 variant.repo,
                 modelNames: [name],
                 directory: parentDir,
                 computeUnits: computeUnits,
-                progressHandler: progressHandler
+                progressHandler: scaledProgressHandler(progressHandler, step: step, of: specs.count)
             )
         }
 
@@ -250,15 +250,31 @@ extension CtcModels {
     /// - Parameters:
     ///   - directory: Custom cache directory (default: uses defaultCacheDirectory for variant).
     ///   - variant: Which CTC model variant to use (default: .ctc110m).
-    ///   - progressHandler: Forwarded to `download` and `load`.
+    ///   - progressHandler: Download (when needed) and compile progress, reported as one sequence from 0 to 1.
     /// - Returns: Loaded `CtcModels` instance.
     public static func downloadAndLoad(
         to directory: URL? = nil,
         variant: CtcModelVariant = .ctc110m,
         progressHandler: ProgressHandler? = nil
     ) async throws -> CtcModels {
-        let targetDir = try await download(to: directory, variant: variant, progressHandler: progressHandler)
-        return try await load(from: targetDir, variant: variant, progressHandler: progressHandler)
+        // `load` downloads an incomplete cache itself, so each model is built once and the handler sees one sequence.
+        try await load(
+            from: directory ?? defaultCacheDirectory(for: variant), variant: variant, progressHandler: progressHandler)
+    }
+
+    /// Wraps `handler` so that load `step` of `count` sequential `ModelHub.loadModels` calls reports into
+    /// `[step / count, (step + 1) / count]`, which makes the calls one sequence from 0 to 1. Only the last load
+    /// reports ModelHub's closing `.compiling(modelName: "")`.
+    static func scaledProgressHandler(_ handler: ProgressHandler?, step: Int, of count: Int) -> ProgressHandler? {
+        guard let handler else { return nil }
+        let lower = Double(step) / Double(count)
+        let width = 1.0 / Double(count)
+        let isLast = step == count - 1
+        return { progress in
+            if !isLast, case .compiling(let modelName) = progress.phase, modelName.isEmpty { return }
+            handler(
+                DownloadProgress(fractionCompleted: lower + width * progress.fractionCompleted, phase: progress.phase))
+        }
     }
 
     /// Default CoreML configuration for CTC inference (the audio encoder).
