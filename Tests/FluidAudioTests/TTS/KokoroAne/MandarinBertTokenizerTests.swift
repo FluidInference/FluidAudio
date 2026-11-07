@@ -57,6 +57,14 @@ final class MandarinBertTokenizerTests: XCTestCase {
         XCTAssertEqual(encoded.tokenPositionForChar, [1, 2])
     }
 
+    func testWhitespaceIsDropped() throws {
+        // misaki's `，` → `, ` must not reach g2pW as an [UNK] token.
+        let tok = try MandarinBertTokenizer(vocab: Self.smallVocab())
+        let encoded = tok.encode(chars: ["你", " ", "好"], maxLength: 6)
+        XCTAssertEqual(encoded.inputIds, [101, 200, 201, 102, 0, 0])
+        XCTAssertEqual(encoded.tokenPositionForChar, [1, 2, 2])
+    }
+
     func testUnknownCharFallsBackToUnk() throws {
         let tok = try MandarinBertTokenizer(vocab: Self.smallVocab())
         // 鵝 isn't in our miniature vocab — should encode as [UNK].

@@ -186,15 +186,61 @@ final class MandarinErhuaTests: XCTestCase {
         let erhua = MandarinBopomofoMap.encode(syllable: "xiao", tone: 3, erhua: true)
         XCTAssertNotNil(nonErhua)
         XCTAssertNotNil(erhua)
-        // Erhua form contains an extra ㄦ before the tone digit.
-        XCTAssertEqual(erhua, (nonErhua ?? "").replacingOccurrences(of: "3", with: "ㄦ3"))
+        // Erhua form carries misaki's R before the tone digit.
+        XCTAssertEqual(erhua, (nonErhua ?? "").replacingOccurrences(of: "3", with: "R3"))
     }
 
     func testEncodeErhuaOnSimpleFinal() {
-        // hai2 + erhua → ㄏㄞㄦ2.
+        // hai2 + erhua → ㄏㄞR2, as misaki's ZHFrontend writes 小孩儿.
         XCTAssertEqual(
             MandarinBopomofoMap.encode(syllable: "hai", tone: 2, erhua: true),
-            "ㄏㄞㄦ2")
+            "ㄏㄞR2")
+        XCTAssertEqual(
+            MandarinBopomofoMap.encode(syllable: "shi", tone: 4, erhua: true),
+            "ㄕ十R4")
+    }
+
+    func testEncodeErhuaOnBareEFinalBecomesEr() {
+        // misaki rewrites `<initial> e` + R to the er final: 歌儿 → ㄍㄦ1.
+        XCTAssertEqual(
+            MandarinBopomofoMap.encode(syllable: "ge", tone: 1, erhua: true),
+            "ㄍㄦ1")
+        XCTAssertEqual(
+            MandarinBopomofoMap.encode(syllable: "zhe", tone: 4, erhua: true),
+            "ㄓㄦ4")
+    }
+
+    func testMergeKeepsSlashFlagsAligned() {
+        // 花园 | 儿里: the folded 儿 opened a word, so its `/` moves to 里.
+        var syllables: [MandarinPinyinNormalizer.Syllable] = [
+            .init(base: "hua", tone: 1), .init(base: "yuan", tone: 2),
+            .init(base: "er", tone: 2, isErhuaSuffix: true), .init(base: "li", tone: 3),
+        ]
+        var slashes = [false, false, true, false]
+        MandarinErhua.merge(&syllables, slashes: &slashes)
+        XCTAssertEqual(syllables.map(\.base), ["hua", "yuan", "li"])
+        XCTAssertTrue(syllables[1].erhua)
+        XCTAssertEqual(slashes, [false, false, true])
+
+        // A folded 儿 inside a word leaves the later flags in place.
+        var inWord: [MandarinPinyinNormalizer.Syllable] = [
+            .init(base: "zhe", tone: 4), .init(base: "er", tone: 2, isErhuaSuffix: true),
+            .init(base: "hen", tone: 3),
+        ]
+        var inWordSlashes = [false, false, true]
+        MandarinErhua.merge(&inWord, slashes: &inWordSlashes)
+        XCTAssertEqual(inWordSlashes, [false, true])
+    }
+
+    func testG2PEndToEndErhuaKeepsWordSlashes() async throws {
+        // misaki: 他这儿很好 → ㄊㄚ1/ㄓㄦ4/ㄏㄣ2ㄏㄠ3 (这儿 folds and its bare e
+        // final becomes er; the `/` before 很好 survives the fold).
+        var dict = Self.miniDict()
+        dict = MandarinPinyinDict(
+            phrases: dict.phrases,
+            singles: dict.singles.merging([0x5F88: ["hěn"], 0x597D: ["hǎo"]]) { $1 })
+        let phon = try await MandarinG2P(dict: dict).phonemize("他这儿很好")
+        XCTAssertEqual(phon, "ㄊㄚ1/ㄓㄦ4/ㄏㄣ2ㄏㄠ3")
     }
 
     // MARK: - End-to-end through MandarinG2P
@@ -264,7 +310,7 @@ final class MandarinErhuaTests: XCTestCase {
         // 小孩儿 as a dict phrase: the word-final 儿 still folds.
         let g2p = MandarinG2P(dict: Self.miniDict(phrases: ["小孩儿": ["xiǎo", "hái", "ér"]]))
         let phon = try await g2p.phonemize("小孩儿")
-        XCTAssertTrue(phon.hasSuffix("ㄏㄞㄦ2"), "expected erhua on 孩; got '\(phon)'")
+        XCTAssertTrue(phon.hasSuffix("ㄏㄞR2"), "expected erhua on 孩; got '\(phon)'")
     }
 
     // MARK: - Test fixtures

@@ -233,6 +233,31 @@ final class MandarinJiebaHmmTests: XCTestCase {
         XCTAssertEqual(withHmm, withoutHmmButCached)
     }
 
+    func testHmmWordStaysOneWordAcrossPerCharFallbacks() async throws {
+        // 特朗普 is not a phrase: the HMM groups it and each char falls back
+        // to the singles dict, but it is still one word (no `/` inside).
+        let singles: [UInt32: [String]] = [
+            0x4ED6: ["tā"], 0x7279: ["tè"], 0x6717: ["lǎng"], 0x666E: ["pǔ"],
+        ]
+        let dict = MandarinPinyinDict(phrases: [:], singles: singles)
+        let hmm = MandarinJiebaHmm(
+            tables: Self.buildToyTables(groupChars: ["特", "朗", "普"], singletonChars: ["他"]))
+        let g2p = MandarinG2P(dict: dict, jiebaHmm: hmm)
+        XCTAssertEqual(g2p.segment(chars: Array("他特朗普")).wordStarts, [true, true, false, false])
+        let phon = try await g2p.phonemize("他特朗普")
+        XCTAssertEqual(phon, "ㄊㄚ1/ㄊㄜ4ㄌㄤ2ㄆㄨ3")
+    }
+
+    func testFoldedErThatOpensAWordKeepsTheSlash() async throws {
+        // misaki: 花园儿里 → ㄏ穵1元R2/ㄌㄧ3. The HMM groups 儿里, so 儿 opens
+        // that word; folding it into 园 must keep the `/` before 里.
+        let singles: [UInt32: [String]] = [0x513F: ["ér"], 0x91CC: ["lǐ"]]
+        let dict = MandarinPinyinDict(phrases: ["花园": ["huā", "yuán"]], singles: singles)
+        let hmm = MandarinJiebaHmm(tables: Self.buildToyTables(groupChars: ["儿", "里"], singletonChars: []))
+        let phon = try await MandarinG2P(dict: dict, jiebaHmm: hmm).phonemize("花园儿里")
+        XCTAssertEqual(phon, "ㄏ穵1元R2/ㄌㄧ3")
+    }
+
     func testIntegrationFlushesHanziRunOnPunctuation() async throws {
         // 他特朗普,你好 — punctuation between hanzi-runs must split the
         // HMM input, otherwise the comma would end up inside the

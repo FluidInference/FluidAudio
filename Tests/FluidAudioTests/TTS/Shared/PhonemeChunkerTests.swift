@@ -24,6 +24,11 @@ final class PhonemeChunkerTests: XCTestCase {
         XCTAssertEqual(chunk("   ", 100), [])
     }
 
+    func testBreaksAtKokoroMandarinWordSeparator() {
+        // Mandarin phonemes carry `/` between words, not spaces.
+        XCTAssertEqual(chunk("ㄋㄧ2/ㄏㄠ3/ㄕ十4", 8), ["ㄋㄧ2/ㄏㄠ3/", "ㄕ十4"])
+    }
+
     func testExactlyAtCapIsNotSplit() {
         let text = String(repeating: "a", count: 10)
         XCTAssertEqual(chunk(text, 10), [text])

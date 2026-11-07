@@ -95,8 +95,9 @@ public struct MandarinBertTokenizer: Sendable {
         public let attentionMask: [Int32]
         public let tokenTypeIds: [Int32]
         /// `tokenPositionForChar[i]` = id-array index where `chars[i]`
-        /// landed (always `i + 1` in the char-level path due to `[CLS]`,
-        /// but exposed explicitly so callers don't bake the offset in).
+        /// landed (`i + 1` after `[CLS]` until a dropped whitespace
+        /// character shifts it; a whitespace character gets the index of
+        /// the token after it), so callers don't bake the offset in.
         public let tokenPositionForChar: [Int]
     }
 
@@ -104,27 +105,30 @@ public struct MandarinBertTokenizer: Sendable {
     /// if the sentence + `[CLS]` + `[SEP]` would exceed `maxLength`.
     /// Pads with `[PAD]` (`attentionMask = 0`) up to `maxLength`.
     ///
-    /// Whitespace and ASCII punctuation in `text` are dropped — g2pW
-    /// only sees Hanzi context. If callers need to preserve those in a
-    /// downstream pipeline, they should do so outside this tokenizer.
+    /// Whitespace is dropped, as BERT's basic tokenizer and upstream g2pW
+    /// do (the vocab has no space token, so it would otherwise be
+    /// `[UNK]`); punctuation stays as its own token.
     public func encode(
         chars: [Character],
         maxLength: Int = defaultMaxLength
     ) -> Encoded {
         precondition(maxLength >= 2, "maxLength must hold at least [CLS] + [SEP]")
         let usable = max(0, maxLength - 2)
-        let truncated = chars.count > usable ? Array(chars.prefix(usable)) : chars
 
         var inputIds: [Int32] = []
         inputIds.reserveCapacity(maxLength)
         var positions: [Int] = []
-        positions.reserveCapacity(truncated.count)
+        positions.reserveCapacity(min(chars.count, usable))
 
         inputIds.append(clsId)
-        for ch in truncated {
-            let token = String(ch)
+        for ch in chars {
+            if ch.isWhitespace {
+                positions.append(inputIds.count)
+                continue
+            }
+            guard inputIds.count - 1 < usable else { break }
             positions.append(inputIds.count)
-            inputIds.append(vocab[token] ?? unkId)
+            inputIds.append(vocab[String(ch)] ?? unkId)
         }
         inputIds.append(sepId)
 

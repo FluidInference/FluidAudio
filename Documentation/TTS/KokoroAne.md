@@ -423,7 +423,9 @@ The Mandarin variant ships a self-contained, network-free Hanzi → Bopomofo
 pipeline modelled on
 [`misaki[zh]`](https://github.com/hexgrad/misaki/blob/main/misaki/zh_frontend.py):
 
-1. **Punctuation normalization** — fullwidth `，。！？；：` collapse to ASCII.
+1. **Punctuation normalization** — fullwidth marks map to the ASCII ones
+   in the vocab with the spaces misaki's `map_punctuation` adds
+   (`，`/`、` → `, `, `。` → `. `, `（` → ` (`, `「` → ` “`).
 2. **Forward maximum match segmentation** — greedy phrase lookup against
    ~411k phrase entries, falls back to per-character single lookup
    (~42k Hanzi).
@@ -434,7 +436,14 @@ pipeline modelled on
    before tone 4, 一-promotion based on the next syllable's tone.
 5. **Bopomofo + tone-digit encoding** — initials/finals split, sibilant
    `i`-fix (`zi/ci/si → ㄭ`, `zhi/chi/shi/ri → 十`), j/q/x + u → ü, then
-   one bopomofo character per part + the tone digit.
+   one bopomofo character per part + the tone digit. Erhua is misaki's `R`
+   before the tone digit (`小孩儿` → `ㄒ要3ㄏㄞR2`).
+6. **Word separators** — `/` between adjacent words, as misaki's
+   `ZHFrontend` writes them after merging `不`/`一` with the next word,
+   reduplications, short third-tone pairs and `儿`
+   (`我们去公园吧？` → `我3ㄇㄣ5/ㄑㄩ4/ㄍ中1元2/ㄅㄚ5?`). Word boundaries come
+   from the segmentation above, not jieba's, so they can differ from
+   misaki's.
 
 Asset footprint (downloaded on first synthesis, cached at
 `<repoDir>/g2p/`):
