@@ -10,7 +10,9 @@ import XCTest
 /// piece at a mid-speech seam. These pin the merge rule the change relies
 /// on: a flushed token at the window's last frame survives only when the
 /// right window has nothing before the left window ends — a pause — and
-/// is dropped whenever the right window heard the same stretch.
+/// is dropped whenever the right window heard the same stretch. When the
+/// right window's first word is clear of the left window's last word, the
+/// drop never takes the right window's words with it.
 final class FlushedSeamTokenTests: XCTestCase {
 
     private typealias Token = (token: Int, timestamp: Int, confidence: Float, duration: Int)
@@ -30,11 +32,16 @@ final class FlushedSeamTokenTests: XCTestCase {
         7: "▁so",
         8: "▁this",
         9: "▁um",
+        10: "me",
         90: ".",
     ]
 
     private var safeIds: Set<Int> {
         ChunkProcessor.spliceSafeTokenIds(vocabulary: vocabulary)!
+    }
+
+    private var punctuationIds: Set<Int> {
+        ChunkProcessor.punctuationTokenIds(vocabulary: vocabulary)!
     }
 
     private func decode(_ tokens: [Token]) -> String {
@@ -117,7 +124,7 @@ final class FlushedSeamTokenTests: XCTestCase {
         ]
 
         let merged = processor.mergeTokenWindowsForTesting(
-            left: left, right: right, spliceSafeTokenIds: safeIds
+            left: left, right: right, spliceSafeTokenIds: safeIds, punctuationTokenIds: punctuationIds
         )
 
         XCTAssertEqual(merged.map(\.token), [1, 6, 90, 7, 8])
@@ -144,7 +151,7 @@ final class FlushedSeamTokenTests: XCTestCase {
         ]
 
         let merged = processor.mergeTokenWindowsForTesting(
-            left: left, right: right, spliceSafeTokenIds: safeIds
+            left: left, right: right, spliceSafeTokenIds: safeIds, punctuationTokenIds: punctuationIds
         )
 
         XCTAssertEqual(merged.map(\.token), [1, 2, 3, 4, 5])
@@ -153,8 +160,10 @@ final class FlushedSeamTokenTests: XCTestCase {
 
     /// No token matches across the seam but the right window heard
     /// something inside the left window's span: the midpoint split drops
-    /// the flushed piece along with the rest of the left tail (and, as it
-    /// always has, the right window's pieces before the cutoff).
+    /// the flushed piece along with the rest of the left tail. "um" starts
+    /// within the matcher's tolerance of "here", so it may be the same
+    /// audio heard by both windows (their timestamps drift) and the windows
+    /// are not joined: joining there doubles a word ("in Is", "frío El frío").
     func testFlushedPieceIsDroppedWhenTheRightWindowHeardTheOverlap() {
         let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 30.0))
 
@@ -169,10 +178,85 @@ final class FlushedSeamTokenTests: XCTestCase {
         ]
 
         let merged = processor.mergeTokenWindowsForTesting(
-            left: left, right: right, spliceSafeTokenIds: safeIds
+            left: left, right: right, spliceSafeTokenIds: safeIds, punctuationTokenIds: punctuationIds
         )
 
         XCTAssertEqual(merged.map(\.token), [1, 6, 7])
         XCTAssertEqual(decode(merged), "hello here so")
+    }
+
+    /// The pause ended on the left window's last frame: the right window's
+    /// first word starts on the frame the flushed mark was stamped with.
+    /// The word must survive whole; a midpoint split drops its first piece
+    /// and the splice guard its continuation ("Vakot Vihekhmi" -> "Vakot.").
+    func testFlushedMarkOnTheRightWindowsFirstFrameKeepsTheWord() {
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 30.0))
+
+        let left: [Token] = [
+            (token: 1, timestamp: 100, confidence: 0.98, duration: 1),
+            (token: 6, timestamp: 108, confidence: 0.97, duration: 1),
+            (token: 90, timestamp: 124, confidence: 0.60, duration: 0),  // flushed at the last frame
+        ]
+        let right: [Token] = [
+            (token: 7, timestamp: 124, confidence: 0.95, duration: 1),
+            (token: 10, timestamp: 126, confidence: 0.95, duration: 1),
+            (token: 8, timestamp: 130, confidence: 0.97, duration: 1),
+        ]
+
+        let merged = processor.mergeTokenWindowsForTesting(
+            left: left, right: right, spliceSafeTokenIds: safeIds, punctuationTokenIds: punctuationIds
+        )
+
+        XCTAssertEqual(merged.map(\.token), [1, 6, 7, 10, 8])
+        XCTAssertEqual(decode(merged), "hello here some this")
+    }
+
+    /// The right window heard the sentence close and emitted its own mark
+    /// before the left window's flushed one: the right window's mark and
+    /// timing win ("amor" + flushed "." | "." "End" lost both marks).
+    func testFlushedMarkGivesWayToTheRightWindowsOwnMark() {
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 30.0))
+
+        let left: [Token] = [
+            (token: 1, timestamp: 100, confidence: 0.98, duration: 1),
+            (token: 6, timestamp: 105, confidence: 0.97, duration: 1),
+            (token: 90, timestamp: 124, confidence: 0.60, duration: 0),  // flushed at the last frame
+        ]
+        // The two marks sit 1.44 s apart, past the matcher's time tolerance.
+        let right: [Token] = [
+            (token: 90, timestamp: 106, confidence: 0.90, duration: 0),
+            (token: 7, timestamp: 130, confidence: 0.97, duration: 1),
+        ]
+
+        let merged = processor.mergeTokenWindowsForTesting(
+            left: left, right: right, spliceSafeTokenIds: safeIds, punctuationTokenIds: punctuationIds
+        )
+
+        XCTAssertEqual(merged.map(\.token), [1, 6, 90, 7])
+        XCTAssertEqual(merged.map(\.timestamp), [100, 105, 106, 130])
+        XCTAssertEqual(decode(merged), "hello here. so")
+    }
+
+    /// Two windows in a row ended in the same pause and each flushed the
+    /// pending mark: it is kept once, with the left window's timing.
+    func testMarkFlushedByBothWindowsIsKeptOnce() {
+        let processor = ChunkProcessor(audioSamples: createMockAudioSamples(durationSeconds: 30.0))
+
+        let left: [Token] = [
+            (token: 1, timestamp: 100, confidence: 0.98, duration: 1),
+            (token: 6, timestamp: 110, confidence: 0.97, duration: 1),
+            (token: 90, timestamp: 124, confidence: 0.60, duration: 0),
+        ]
+        let right: [Token] = [
+            (token: 90, timestamp: 140, confidence: 0.60, duration: 0)
+        ]
+
+        let merged = processor.mergeTokenWindowsForTesting(
+            left: left, right: right, spliceSafeTokenIds: safeIds, punctuationTokenIds: punctuationIds
+        )
+
+        XCTAssertEqual(merged.map(\.token), [1, 6, 90])
+        XCTAssertEqual(merged.map(\.timestamp), [100, 110, 124])
+        XCTAssertEqual(decode(merged), "hello here.")
     }
 }

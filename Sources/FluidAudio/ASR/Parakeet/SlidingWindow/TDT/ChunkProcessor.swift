@@ -763,11 +763,12 @@ struct ChunkProcessor {
         right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)],
         spliceSafeTokenIds: Set<Int>? = nil,
         caseVariantIds: [Int: Int]? = nil,
+        punctuationTokenIds: Set<Int>? = nil,
         seam: SeamWindows? = nil
     ) -> [(token: Int, timestamp: Int, confidence: Float, duration: Int)] {
         mergeChunks(
             left, right, spliceSafeTokenIds: spliceSafeTokenIds, caseVariantIds: caseVariantIds,
-            seam: seam)
+            punctuationTokenIds: punctuationTokenIds, seam: seam)
     }
     #endif
 
@@ -972,12 +973,14 @@ struct ChunkProcessor {
             let vocabulary = await manager.vocabulary
             let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary, modelVersion: modelVersion)
             let caseVariantIds = Self.caseVariantCanonicalIds(vocabulary: vocabulary)
+            let punctuationTokenIds = Self.punctuationTokenIds(vocabulary: vocabulary)
             for (index, chunk) in orderedChunkOutputs.enumerated().dropFirst() {
                 mergedTokens = mergeChunks(
                     mergedTokens,
                     chunk,
                     spliceSafeTokenIds: spliceSafeTokenIds,
                     caseVariantIds: caseVariantIds,
+                    punctuationTokenIds: punctuationTokenIds,
                     seam: seamTimingRealignment
                         ? SeamWindows(left: chunkWindows[index - 1], right: chunkWindows[index]) : nil
                 )
@@ -1280,6 +1283,7 @@ struct ChunkProcessor {
         _ right: [TokenWindow],
         spliceSafeTokenIds: Set<Int>? = nil,
         caseVariantIds: [Int: Int]? = nil,
+        punctuationTokenIds: Set<Int>? = nil,
         seam: SeamWindows?
     ) -> [TokenWindow] {
         if left.isEmpty { return right }
@@ -1301,7 +1305,28 @@ struct ChunkProcessor {
         let rightStartTime = startTime(of: right.first!)
 
         if leftEndTime <= rightStartTime {
-            return left + right
+            return joinAtPause(left, right, punctuationTokenIds: punctuationTokenIds)
+        }
+
+        if let punctuationTokenIds,
+            let lastWord = left.lastIndex(where: { !punctuationTokenIds.contains($0.token) }),
+            let firstWord = right.first(where: { !punctuationTokenIds.contains($0.token) })
+        {
+            // A mark flushed at the left window's last frame (issue #1110) has
+            // no extent in the audio. When only trailing marks reach the right
+            // window's first token, and the right window's first word is too far
+            // from the left window's last word to be the same audio (the
+            // matcher's tolerance), the right window heard that stretch: drop
+            // the marks and join, as if the left window had not flushed.
+            var end = left.count
+            while end > lastWord + 1, endTime(of: left[end - 1]) > rightStartTime {
+                end -= 1
+            }
+            if end < left.count, endTime(of: left[end - 1]) <= rightStartTime,
+                startTime(of: firstWord) - endTime(of: left[lastWord]) >= halfOverlapWindow
+            {
+                return joinAtPause(Array(left[..<end]), right, punctuationTokenIds: punctuationTokenIds)
+            }
         }
 
         let overlapLeft: [IndexedToken] = left.enumerated().compactMap { offset, token in
@@ -1377,6 +1402,19 @@ struct ChunkProcessor {
             spliceSafeTokenIds: spliceSafeTokenIds,
             seam: seam
         )
+    }
+
+    /// `left + right` for windows that share no speech. A mark both windows
+    /// closed the same pause with (each flushed its own) is kept once.
+    private func joinAtPause(
+        _ left: [TokenWindow],
+        _ right: [TokenWindow],
+        punctuationTokenIds: Set<Int>?
+    ) -> [TokenWindow] {
+        guard let punctuationTokenIds, let last = left.last, let first = right.first,
+            last.token == first.token, punctuationTokenIds.contains(first.token)
+        else { return left + right }
+        return left + right.dropFirst()
     }
 
     private func tokensMatch(
@@ -1680,6 +1718,12 @@ struct ChunkProcessor {
             CharacterSet.punctuationCharacters.contains(scalar)
                 || CharacterSet.symbols.contains(scalar)
         }
+    }
+
+    /// Every punctuation-only piece in the vocabulary. Nil for an empty vocabulary.
+    static func punctuationTokenIds(vocabulary: [Int: String]) -> Set<Int>? {
+        guard !vocabulary.isEmpty else { return nil }
+        return Set(vocabulary.keys.filter { isPunctuationOnlyPiece($0, vocabulary: vocabulary) })
     }
 
     /// The token of the word bordering a gap, walking past punctuation-only

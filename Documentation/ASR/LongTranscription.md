@@ -571,11 +571,28 @@ admitted a window ending in soft trailing speech on a quiet narration
 
 The flushed mark carries the window's last frame as its timestamp, as a
 late in-window mark already does, so the closing word's span runs to the
-window end. The merge needs no change: a flushed piece at the window's last
-frame survives only when the right window has nothing before the left
-window ends — the pause — and is dropped whenever the right window heard
-the same stretch (`FlushedSeamTokenTests`). The flush is V3-family only;
-`TdtDecoderV2` has none.
+window end. A flushed piece at the window's last frame survives only when
+the right window has nothing before the left window ends — the pause — and
+is dropped whenever the right window heard the same stretch
+(`FlushedSeamTokenTests`). The flush is V3-family only; `TdtDecoderV2` has
+none.
+
+Two merge rules limit what a flushed mark can cost the right window
+(`mergeChunks` / `joinAtPause`). A mark has no extent in the
+audio, but stamped at the last frame it can reach past the right window's
+first token, which turned a plain join into a midpoint split: a 50-file
+MUSAN run (v3, mel context) lost a word whose onset sat on that frame
+(`Vakot Vihekhmi` → `Vakot.`) and both copies of a period the right window
+had emitted itself (`amor. End` → `amor End`). So trailing marks that
+reach past the right window's first token are dropped and the windows
+join, provided the right window's first word starts at least the
+matcher's tolerance (half the overlap) after the left window's last word.
+Inside that tolerance it may be the same audio heard by both windows —
+their timestamps drift by a few hundred ms — and joining there doubles a
+word (`in Is dat`, `frío El frío`), so the seam merges as before. And when
+two windows in a row close the same pause with the same mark, which
+happens once both of them flush (`tadamine..`), the join keeps one. That
+also removes the `..` main already produced at a few seams.
 
 What it does not recover: a window that ends less than 0.48 s after the
 word (the mark may still be pending, but the tail is too short to tell a
@@ -998,7 +1015,9 @@ The rules that follow from that:
     (`lastChunkWarmupSamples`, issue #747)
   - a piece flushed at an interior window's last frame survives the merge
     only across a pause — never when the right window heard the same
-    stretch (`FlushedSeamTokenTests`, issue #1110)
+    stretch — and when the right window's first word is clear of the left
+    window's last word, it costs the right window nothing
+    (`FlushedSeamTokenTests`, issue #1110)
 
 ## How This Path Evolved
 
