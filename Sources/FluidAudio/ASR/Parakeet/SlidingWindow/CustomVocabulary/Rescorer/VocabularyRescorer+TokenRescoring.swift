@@ -1302,9 +1302,10 @@ extension VocabularyRescorer {
                 continue
             }
 
-            // If the TDT phrase already equals the canonical, there's nothing
-            // to replace; an exact alias is scored by the term-centric pass.
-            // The stopword guard below therefore never sees a term form (#1115).
+            // A span that spells the canonical has nothing to replace, and one
+            // that equals an alias is left to the term-centric pass (which skips
+            // terms whose multi-word forms all have five or more words), so the
+            // stopword guard below never sees a term form (#1115).
             if Self.isCanonicalMatch(originalPhrase, canonical: vocabTerm) { continue }
             if normalizedCurrentSet.contains(normalizedPhrase) { continue }
 
