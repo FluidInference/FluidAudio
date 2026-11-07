@@ -704,7 +704,9 @@ public actor SlidingWindowAsrManager {
                 tokenTimings: displayResult.tokenTimings ?? [],
                 ctcDetectedTerms: displayResult.ctcDetectedTerms,
                 ctcAppliedTerms: displayResult.ctcAppliedTerms,
-                ctcReplacements: displayResult.ctcReplacements
+                ctcReplacements: displayResult.ctcReplacements,
+                confirmedTranscript: confirmedTranscript,
+                volatileTranscript: volatileTranscript
             )
 
             if tokenContinuation != nil {
@@ -1159,6 +1161,12 @@ public struct SlidingWindowTranscriptionUpdate: Sendable {
     /// scores the decision was made on, so callers can tell a recognizer error
     /// from a bad vocabulary replacement. `nil` when nothing was replaced.
     public let ctcReplacements: [VocabularyRescorer.RescoringResult]?
+    /// The manager's `confirmedTranscript` and `volatileTranscript` after this
+    /// update. Unlike `text`, they carry the edits the window made to earlier
+    /// text — a retired or re-spelled seam word (#897, #1113), a mid-word join
+    /// (#912) — so joining update texts is not needed to follow the manager.
+    public let confirmedTranscript: String
+    public let volatileTranscript: String
 
     public init(
         text: String,
@@ -1169,7 +1177,9 @@ public struct SlidingWindowTranscriptionUpdate: Sendable {
         tokenTimings: [TokenTiming] = [],
         ctcDetectedTerms: [String]? = nil,
         ctcAppliedTerms: [String]? = nil,
-        ctcReplacements: [VocabularyRescorer.RescoringResult]? = nil
+        ctcReplacements: [VocabularyRescorer.RescoringResult]? = nil,
+        confirmedTranscript: String = "",
+        volatileTranscript: String = ""
     ) {
         self.text = text
         self.isConfirmed = isConfirmed
@@ -1180,5 +1190,7 @@ public struct SlidingWindowTranscriptionUpdate: Sendable {
         self.ctcDetectedTerms = ctcDetectedTerms
         self.ctcAppliedTerms = ctcAppliedTerms
         self.ctcReplacements = ctcReplacements
+        self.confirmedTranscript = confirmedTranscript
+        self.volatileTranscript = volatileTranscript
     }
 }

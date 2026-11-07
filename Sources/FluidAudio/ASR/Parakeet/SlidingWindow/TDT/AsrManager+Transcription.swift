@@ -138,12 +138,12 @@ extension AsrManager {
         return head
     }
 
-    /// The words of `pieces[0..<upTo]` as (core text, start frame), for matching
-    /// re-emitted words at the seam. Pure.
+    /// The words of `pieces[0..<upTo]` as (core text, start frame, start index),
+    /// for matching re-emitted words at the seam. Pure.
     nonisolated internal static func words(
         in pieces: [String], timestamps: [Int], upTo: Int
-    ) -> [(core: String, frame: Int)] {
-        var result: [(core: String, frame: Int)] = []
+    ) -> [(core: String, frame: Int, start: Int)] {
+        var result: [(core: String, frame: Int, start: Int)] = []
         var index = 0
         let limit = min(upTo, pieces.count, timestamps.count)
         while index < limit {
@@ -152,7 +152,7 @@ extension AsrManager {
                 continue
             }
             let end = min(wordExtent(in: pieces, from: index), limit)
-            result.append((wordCore(Array(pieces[index..<end])), timestamps[index]))
+            result.append((wordCore(Array(pieces[index..<end])), timestamps[index], index))
             index = end
         }
         return result
@@ -252,6 +252,44 @@ extension AsrManager {
         return Array(pieces[start..<wordExtent(in: pieces, from: start)])
     }
 
+    /// The kept word (before the last word) that a differently spelled
+    /// re-emitted word starting at `frame` re-reads (#1113), or nil. Exact
+    /// re-emissions after it anchor the alignment: in `the knowledge` over a kept
+    /// `a knowledge`, `the` re-reads `a` though it starts on `knowledge`'s frame.
+    /// Otherwise, the kept word starting nearest it within the jitter margin —
+    /// the later one on a tie — when that is nearer than the last word. Emission
+    /// frames jitter, so frames alone mis-pair adjacent words. Pure.
+    nonisolated internal static func respelledWord(
+        at frame: Int,
+        following: [(core: String, frame: Int)],
+        keptWords: [(core: String, frame: Int, start: Int)],
+        lastWord: (core: String, frame: Int),
+        jitterFrames: Int = redecodeEmissionJitterFrames,
+        frameTolerance: Int = 2 * redecodeEmissionJitterFrames
+    ) -> (core: String, frame: Int, start: Int)? {
+        let candidates = keptWords.map { (core: $0.core, frame: $0.frame) } + [lastWord]
+        for (offset, word) in following.enumerated() {
+            guard
+                let anchor = candidates.lastIndex(where: {
+                    $0.core == word.core && abs($0.frame - word.frame) <= frameTolerance
+                })
+            else { continue }
+            // A split or merged word (`forever` → `for ever`) shifts the
+            // alignment; the start frames then disagree and the nearest word decides.
+            let target = anchor - offset - 1
+            if target >= 0, abs(keptWords[target].frame - frame) <= jitterFrames { return keptWords[target] }
+            break
+        }
+        func distance(_ word: (core: String, frame: Int, start: Int)) -> Int { abs(word.frame - frame) }
+        guard
+            let nearest = keptWords.min(by: {
+                distance($0) < distance($1) || (distance($0) == distance($1) && $0.frame > $1.frame)
+            }),
+            distance(nearest) <= jitterFrames, distance(nearest) < abs(lastWord.frame - frame)
+        else { return nil }
+        return nearest
+    }
+
     /// Seam reconciliation for the final streaming window (#897).
     ///
     /// The previous window's trailing word may be a fragment cut by the window
@@ -287,8 +325,9 @@ extension AsrManager {
     ///    included — that duplicate a kept previous token within
     ///    `frameTolerance` inside the jitter region.
     ///
-    /// Returns how many trailing previous tokens to drop (the whole last word
-    /// or none) and how many leading current tokens to drop. Pure, for
+    /// Returns how many trailing previous tokens to drop (from a re-spelled
+    /// earlier word, the whole last word, or none) and how many leading current
+    /// tokens to drop. Nothing below `stableTokenFloor` is dropped. Pure, for
     /// testability; timestamps are global frames. Both piece arrays must be
     /// aligned with their token arrays, otherwise the result is a no-op.
     nonisolated internal static func reconcileFinalWindowSeam(
@@ -301,6 +340,7 @@ extension AsrManager {
         previousPieces: [String] = [],
         suppressedPieces: [String] = [],
         suppressedTimestamps: [Int] = [],
+        stableTokenFloor: Int = 0,
         jitterFrames: Int = redecodeEmissionJitterFrames,
         frameTolerance: Int = 2 * redecodeEmissionJitterFrames
     ) -> (droppedPrevious: Int, droppedCurrent: Int) {
@@ -351,8 +391,15 @@ extension AsrManager {
         // the retire rules below would read a re-emitted `new` as the
         // replacement for `code`, and a jitter duplicate whose continuation
         // piece falls a frame outside the margin would leave `uld` behind.
+        // A re-emitted word spelled differently (`thirty` → `30`, #1113) replaces
+        // the kept words from the one it re-reads (`respelledWord`): the
+        // re-decode heard more context. A word a token subscriber already holds
+        // as stable keeps its spelling, and the re-reading goes instead.
         let previousWords = words(in: previousPieces, timestamps: previousTimestamps, upTo: trailingWordStart)
+        let lastWord = (core: wordCore(previousPieces.dropFirst(trailingWordStart)), frame: lastWordStartFrame)
+        let currentWords = words(in: currentPieces, timestamps: currentTimestamps, upTo: currentPieces.count)
         var consumed = head
+        var respelledStart: Int?
         while consumed < currentTokens.count {
             if isPunctuation(consumed), !startsWordPiece(in: currentPieces, at: consumed),
                 currentTimestamps[consumed] <= lastWordStartFrame
@@ -364,9 +411,21 @@ extension AsrManager {
             let end = wordExtent(in: currentPieces, from: consumed)
             let core = wordCore(Array(currentPieces[consumed..<end]))
             let frame = currentTimestamps[consumed]
-            guard frame <= lastWordStartFrame + jitterFrames, !core.isEmpty,
-                previousWords.contains(where: { $0.core == core && abs($0.frame - frame) <= frameTolerance })
+            guard frame <= lastWordStartFrame + jitterFrames, !core.isEmpty else { break }
+            if previousWords.contains(where: { $0.core == core && abs($0.frame - frame) <= frameTolerance }) {
+                consumed = end
+                continue
+            }
+            let following = currentWords.filter { $0.start >= end && $0.frame <= lastWordStartFrame + frameTolerance }
+            guard
+                let target = respelledWord(
+                    at: frame, following: following.map { ($0.core, $0.frame) }, keptWords: previousWords,
+                    lastWord: lastWord, jitterFrames: jitterFrames, frameTolerance: frameTolerance)
             else { break }
+            if target.start >= stableTokenFloor, extendsBeyondPrevious {
+                respelledStart = target.start
+                break
+            }
             consumed = end
         }
 
@@ -401,9 +460,10 @@ extension AsrManager {
             retire = false
         }
 
-        let droppedPrevious = retire ? previousTokens.count - trailingWordStart : 0
+        let retireStart = respelledStart ?? (retire ? trailingWordStart : nil)
+        let droppedPrevious = retireStart.map { previousTokens.count - $0 } ?? 0
         let keptPrevious = Array(
-            zip(previousTokens, previousTimestamps).prefix(retire ? trailingWordStart : previousTokens.count))
+            zip(previousTokens, previousTimestamps).prefix(retireStart ?? previousTokens.count))
         let keptLastFrame = keptPrevious.last?.1 ?? -1
 
         // 4. Strip the seam artifacts from the re-decode's head. When the
@@ -425,7 +485,7 @@ extension AsrManager {
             && words(in: suppressedPieces, timestamps: suppressedTimestamps, upTo: suppressedPieces.count)
                 .contains { $0.core == previousWord && abs($0.frame - lastWordStartFrame) <= frameTolerance }
         var droppedCurrent = consumed
-        if !retire, currentWord == previousWord, !previousWordSuppressed, let firstIndex = firstWordIndex,
+        if retireStart == nil, currentWord == previousWord, !previousWordSuppressed, let firstIndex = firstWordIndex,
             abs(currentTimestamps[firstIndex] - lastWordStartFrame) <= frameTolerance
         {
             var end = wordExtent(in: currentPieces, from: firstIndex)
@@ -587,7 +647,8 @@ extension AsrManager {
                 currentPieces: currentTokens.map { vocabulary[$0] ?? "" },
                 previousPieces: previousTokens.map { vocabulary[$0] ?? "" },
                 suppressedPieces: hypothesis.suppressedTokens.map { vocabulary[$0] ?? "" },
-                suppressedTimestamps: hypothesis.suppressedTimestamps
+                suppressedTimestamps: hypothesis.suppressedTimestamps,
+                stableTokenFloor: stableTokenFloor
             )
             droppedPrevious = seam.droppedPrevious
             if seam.droppedCurrent > 0 {
@@ -595,8 +656,9 @@ extension AsrManager {
                 currentTimestamps.removeFirst(seam.droppedCurrent)
                 currentConfidences.removeFirst(min(seam.droppedCurrent, currentConfidences.count))
             }
-            effectivePrevious = Array(previousTokens.prefix(trailingWordStart))
-            effectivePreviousTimestamps = Array(previousTimestamps.prefix(trailingWordStart))
+            let keptCount = min(trailingWordStart, previousTokens.count - droppedPrevious)
+            effectivePrevious = Array(previousTokens.prefix(keptCount))
+            effectivePreviousTimestamps = Array(previousTimestamps.prefix(keptCount))
             if droppedPrevious > 0 || seam.droppedCurrent > 0 {
                 logger.debug(
                     "Window seam: dropped \(droppedPrevious) trailing previous token(s), \(seam.droppedCurrent) leading current token(s)"
