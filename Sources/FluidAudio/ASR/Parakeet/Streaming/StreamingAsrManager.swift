@@ -1,5 +1,15 @@
 @preconcurrency import AVFoundation
+@preconcurrency import CoreML
 import Foundation
+
+/// Receives each streaming encoder step's raw outputs, so feature consumers can share the
+/// ASR encoder pass. `outputs` holds the encoder's outputs by name, except state a manager
+/// feeds back into its next step (see each setter), and includes extra outputs a re-exported
+/// encoder declares (e.g. `tap_*` layer taps). Treat the arrays as read-only.
+/// `localFrames` is the range of the step's encoder time axis that is new, and
+/// `globalOrigin + local` gives the global encoder frame used by `TokenTiming`.
+public typealias StreamingEncoderOutputCallback =
+    @Sendable (_ outputs: [String: MLMultiArray], _ localFrames: Range<Int>, _ globalOrigin: Int) -> Void
 
 /// Universal protocol for true streaming ASR engines.
 ///

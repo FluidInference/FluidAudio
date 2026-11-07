@@ -457,7 +457,7 @@ let vocabulary = CustomVocabularyContext(terms: [
 ])
 ```
 
-Terms without `ctcTokenIds` are tokenized with the CTC tokenizer when boosting is configured (`configureVocabularyBoosting` on any engine, or `VocabularyBoostingSession.init`), so the plain `CustomVocabularyTerm(text:)` form above works as written. Pre-tokenized terms (from `loadWithCtcTokens(from:)`, or an explicit `ctcTokenIds:`) are used as-is; a term that encodes to nothing is dropped with a warning. Each term is then scored against CTC log-probabilities, and high-scoring terms correct the transcript. (Before #851 this path was a silent no-op: untokenized terms were skipped without any log.)
+Terms without `ctcTokenIds` are tokenized with the CTC tokenizer when boosting is configured (`configureVocabularyBoosting` on any engine, or `VocabularyBoostingSession.init`), so the plain `CustomVocabularyTerm(text:)` form above works as written. Pre-tokenized terms (from `loadWithCtcTokens(from:)`, or an explicit `ctcTokenIds:`) are used as-is; a term that encodes to nothing is dropped with a warning. Boosting reads `tokenizer.json` from the folder the CTC models were loaded from (`CtcModels.directory`, or the default cache folder when that is `nil`), so CTC models kept in your own folder need their `tokenizer.json` beside them (#1114). Each term is then scored against CTC log-probabilities, and high-scoring terms correct the transcript. (Before #851 this path was a silent no-op: untokenized terms were skipped without any log.)
 
 **Streaming (`SlidingWindowAsrManager`).** Every window is rescored, including windows that are still volatile (a clip shorter than `minContextForConfirmation`, a low-confidence window, the final flush) — confirmation only governs display promotion, and a window's text is promoted verbatim later.
 
@@ -873,7 +873,7 @@ The BK-tree path is experimental. In benchmarks, the default term-centric algori
 - Keep vocabularies focused on domain-specific terms that ASR commonly misrecognizes
 - Avoid adding common words that the ASR already handles well
 - Terms should be at least 4 characters (configurable via `minTermLength`)
-- The system automatically skips stopwords (a, the, and, etc.) to prevent false matches
+- The system automatically skips stopwords (a, the, and, etc.) to prevent false matches. A lone stopword that exactly matches a registered alias (e.g. `say` for `Sie`) is still scored, and replaced only if the CTC comparison favors the term
 
 ## File Reference
 
