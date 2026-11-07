@@ -861,22 +861,12 @@ public struct PocketTtsSynthesizer {
                 language: language))
 
         if !isMidSentence {
-            // Strip trailing clause punctuation (commas, semicolons, colons, dashes)
-            // before adding sentence-ending punctuation
-            while let last = result.last, ",;:\u{2014}\u{2013}-".contains(last) {
-                result = String(result.dropLast())
-            }
-            result = result.trimmingCharacters(in: .whitespaces)
-
             // Capitalize first letter
             if let first = result.first, first.isLetter {
                 result = first.uppercased() + result.dropFirst()
             }
 
-            // Add period if no terminal punctuation
-            if let last = result.last, !".!?".contains(last) {
-                result += "."
-            }
+            result = withTerminalPunctuation(result)
         }
 
         // Pad short texts for better prosody — but only for full sentences.
@@ -894,6 +884,32 @@ public struct PocketTtsSynthesizer {
         }
 
         return (result, framesAfterEos)
+    }
+
+    /// Closing quotes and brackets. Right after a sentence's terminal punctuation
+    /// they belong to that sentence, as in `"Stop!"` or `(quietly.)`.
+    static let closingPunctuation: Set<Character> = ["\"", "'", ")", "]", "\u{00BB}", "\u{201D}", "\u{2019}"]
+
+    /// End `text` with sentence-final punctuation, as Python's
+    /// `_ensure_terminal_punctuation` does.
+    ///
+    /// Text that ends with `.`, `!`, `?` or `…`, possibly followed by closing quotes
+    /// or brackets, is left alone. A trailing comma, semicolon, colon or dash
+    /// becomes a period, inside the closing quotes. Anything else gets a period.
+    static func withTerminalPunctuation(_ text: String) -> String {
+        var core = Substring(text)
+        while let last = core.last, last == " " || closingPunctuation.contains(last) {
+            core = core.dropLast()
+        }
+        guard let last = core.last, !".!?\u{2026}".contains(last) else { return text }
+        guard ",;:\u{2014}\u{2013}-".contains(last) else { return text + "." }
+
+        while let last = core.last, ",;:\u{2014}\u{2013}- ".contains(last) {
+            core = core.dropLast()
+        }
+        guard !core.isEmpty else { return "" }
+        let closers = text[core.endIndex...].filter { closingPunctuation.contains($0) }
+        return String(core) + "." + closers
     }
 
     /// Split text into chunks that fit within the KV cache token limit.
@@ -1342,6 +1358,8 @@ public struct PocketTtsSynthesizer {
     /// Split text into sentences at `.!?` boundaries.
     ///
     /// Handles abbreviations (e.g., "Dr.", "Prof.") by not splitting after them.
+    /// Closing quotes and brackets right after the punctuation stay with the
+    /// sentence they close (`"Stop!"`, `(quietly.)`).
     ///
     /// The `language` parameter selects the abbreviation table; English is the
     /// default. French (`.french24L`) uses `frenchAbbreviations` for civility
@@ -1354,8 +1372,11 @@ public struct PocketTtsSynthesizer {
         var sentences: [String] = []
         var current = ""
         let chars = Array(text)
+        // Characters before this index are already in `current`.
+        var resumeAt = 0
 
         for (i, char) in chars.enumerated() {
+            guard i >= resumeAt else { continue }
             current.append(char)
 
             guard ".!?".contains(char) else { continue }
@@ -1386,6 +1407,14 @@ public struct PocketTtsSynthesizer {
                 if i + 1 < chars.count, chars[i + 1].isNumber {
                     continue
                 }
+            }
+
+            // Closing quotes and brackets right after the punctuation end the
+            // sentence with it, so the next sentence does not start with them.
+            resumeAt = i + 1
+            while resumeAt < chars.count, closingPunctuation.contains(chars[resumeAt]) {
+                current.append(chars[resumeAt])
+                resumeAt += 1
             }
 
             let trimmed = current.trimmingCharacters(in: .whitespaces)
