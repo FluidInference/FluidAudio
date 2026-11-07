@@ -578,14 +578,22 @@ public actor SlidingWindowAsrManager {
                 accumulatedTokenTimestamps.removeLast(min(droppedPreviousTokens, accumulatedTokenTimestamps.count))
                 if let droppedText = await asrManager?.convertTokensToText(dropped), !droppedText.isEmpty {
                     // The text state may hold a vocabulary-rescored replacement
-                    // for that word rather than its raw token text.
-                    let candidates = [droppedText] + (lastWindowRenderedLastWord.map { [$0] } ?? [])
+                    // for that word rather than its raw token text. An unspaced
+                    // model retires a time tail, which ends the text without a space
+                    // before it, and its rendered "last word" is the whole window.
+                    let unspaced = !AsrManager.marksWordStarts(await asrManager?.modelVersion)
+                    let candidates =
+                        [droppedText] + (unspaced ? [] : lastWindowRenderedLastWord.map { [$0] } ?? [])
                     for candidate in candidates {
-                        if let trimmed = Self.removingTrailingWord(candidate, from: volatileTranscript) {
+                        if let trimmed = Self.removingTrailingWord(
+                            candidate, from: volatileTranscript, unspaced: unspaced)
+                        {
                             volatileTranscript = trimmed
                             break
                         }
-                        if let trimmed = Self.removingTrailingWord(candidate, from: confirmedTranscript) {
+                        if let trimmed = Self.removingTrailingWord(
+                            candidate, from: confirmedTranscript, unspaced: unspaced)
+                        {
                             confirmedTranscript = trimmed
                             break
                         }
@@ -719,7 +727,8 @@ public actor SlidingWindowAsrManager {
                     throw SlidingWindowTokenStreamError.invalidNativeUpdate
                 }
                 let stable = max(
-                    await manager.stableStreamingTokenCount(accumulatedTokens), publishedStableTokenCount)
+                    await manager.stableStreamingTokenCount(accumulatedTokens, timestamps: accumulatedTokenTimestamps),
+                    publishedStableTokenCount)
                 let end = windowStartSample + windowSamples.count
                 let centerEnd = min(end, nextWindowCenterStart + config.chunkSamples)
                 try publishTokenUpdate(
@@ -857,9 +866,14 @@ public actor SlidingWindowAsrManager {
     }
 
     /// `text` without its trailing `word` when `text` ends with that word as a
-    /// whole word (equal, or preceded by a space); nil otherwise. Pure.
-    static func removingTrailingWord(_ word: String, from text: String) -> String? {
+    /// whole word (equal, or preceded by a space — any suffix when `unspaced`);
+    /// nil otherwise. Pure.
+    static func removingTrailingWord(_ word: String, from text: String, unspaced: Bool = false) -> String? {
         if text == word { return "" }
+        if unspaced {
+            guard text.hasSuffix(word) else { return nil }
+            return String(text.dropLast(word.count))
+        }
         guard text.hasSuffix(" " + word) else { return nil }
         return String(text.dropLast(word.count + 1))
     }
