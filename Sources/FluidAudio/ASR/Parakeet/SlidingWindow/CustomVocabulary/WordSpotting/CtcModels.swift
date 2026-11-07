@@ -40,6 +40,10 @@ public struct CtcModels: Sendable {
     public let configuration: MLModelConfiguration
     public let vocabulary: [Int: String]
     public let variant: CtcModelVariant
+    /// Folder the Core ML models were loaded from, set by `load(from:)`, `loadDirect(from:)` and
+    /// `downloadAndLoad(to:)`. Vocabulary boosting reads `tokenizer.json` from this folder, or from
+    /// `defaultCacheDirectory(for:)` when it is `nil`.
+    public let directory: URL?
 
     private static let logger = AppLogger(category: "CtcModels")
 
@@ -48,13 +52,15 @@ public struct CtcModels: Sendable {
         encoder: MLModel,
         configuration: MLModelConfiguration,
         vocabulary: [Int: String],
-        variant: CtcModelVariant = .ctc110m
+        variant: CtcModelVariant = .ctc110m,
+        directory: URL? = nil
     ) {
         self.melSpectrogram = melSpectrogram
         self.encoder = encoder
         self.configuration = configuration
         self.vocabulary = vocabulary
         self.variant = variant
+        self.directory = directory
     }
 }
 
@@ -69,6 +75,7 @@ extension CtcModels {
     /// - MelSpectrogram.mlmodelc/
     /// - AudioEncoder.mlmodelc/
     /// - vocab.json
+    /// - tokenizer.json (required for vocabulary boosting, which reads it from this directory)
     ///
     /// - Parameters:
     ///   - directory: Directory containing the CoreML bundles and vocab.json
@@ -134,11 +141,16 @@ extension CtcModels {
             encoder: encoderModel,
             configuration: config,
             vocabulary: vocab,
-            variant: variant
+            variant: variant,
+            directory: directory
         )
     }
 
     /// Load CTC models from a directory.
+    ///
+    /// The models load through ModelHub from `<parent of directory>/<variant.repo.folderName>`, which is
+    /// `directory` itself when it has the repo's folder name, and missing ones are downloaded there. That
+    /// folder is recorded in `CtcModels.directory`; `vocab.json` is read from `directory`.
     ///
     /// - Parameters:
     ///   - directory: Directory containing the downloaded CoreML bundles.
@@ -151,6 +163,7 @@ extension CtcModels {
         logger.info("Loading CTC models (\(variant.displayName)) from: \(directory.path)")
 
         let parentDirectory = directory.deletingLastPathComponent()
+        let modelDirectory = parentDirectory.appendingPathComponent(variant.repo.folderName, isDirectory: true)
         let config = defaultConfiguration()
 
         // ModelHub expects the base directory (without the repo folder) and
@@ -184,7 +197,8 @@ extension CtcModels {
             encoder: encoderModel,
             configuration: config,
             vocabulary: vocab,
-            variant: variant
+            variant: variant,
+            directory: modelDirectory
         )
     }
 
@@ -293,6 +307,12 @@ extension CtcModels {
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
             .appendingPathComponent(variant.repo.folderName, isDirectory: true)
+    }
+
+    /// Directory holding the `tokenizer.json` that matches CTC models loaded from `directory`: that directory,
+    /// or `defaultCacheDirectory(for:)` when it is unknown (#1114).
+    static func tokenizerDirectory(loadedFrom directory: URL?, variant: CtcModelVariant) -> URL {
+        directory ?? defaultCacheDirectory(for: variant)
     }
 
     /// Load vocabulary from vocab.json in the given directory.
