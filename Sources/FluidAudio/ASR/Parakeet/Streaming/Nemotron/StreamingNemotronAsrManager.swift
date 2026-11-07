@@ -65,14 +65,8 @@ public actor StreamingNemotronAsrManager {
     // Callbacks
     internal var partialCallback: NemotronPartialCallback?
 
-    /// Raw encoder-outputs hook for feature consumers (e.g. an intermediate-tap
-    /// consumer like a turn-decision model): each streaming encoder prediction's
-    /// outputs (including any extra outputs a re-exported encoder declares, such
-    /// as `tap_*` layer taps) plus the step's local frame range and the global
-    /// frame origin (global = origin + local).
-    internal var onEncoderOutput: (@Sendable ([String: MLMultiArray], Range<Int>, Int) -> Void)?
-    /// Global encoder-frame origin of the next chunk (drives `onEncoderOutput`).
-    internal var tapFrameOrigin: Int = 0
+    /// See `setEncoderOutputCallback(_:)`.
+    internal var onEncoderOutput: StreamingEncoderOutputCallback?
 
     /// Chunk size for auto-download. Set by `StreamingModelVariant.createManager()`
     /// to determine which HuggingFace repo to download from in `loadModels()`.
@@ -242,7 +236,6 @@ public actor StreamingNemotronAsrManager {
         decoderJoint = nil
         tokenizer = nil
         cacheChannel = nil
-        tapFrameOrigin = 0
         cacheTime = nil
         cacheLen = nil
         melCache = nil
@@ -402,10 +395,16 @@ extension StreamingNemotronAsrManager: StreamingAsrManager {
         self.partialCallback = callback
     }
 
-    /// Register a raw encoder-outputs hook (see `onEncoderOutput`). Pass nil to remove.
-    public func setEncoderOutputCallback(
-        _ callback: (@Sendable ([String: MLMultiArray], Range<Int>, Int) -> Void)?
-    ) {
+    /// Register a hook that receives each encoder step's raw outputs (see
+    /// `StreamingEncoderOutputCallback`). Pass nil to remove.
+    ///
+    /// `localFrames` indexes the time axis (axis 2) of `encoded` and is always the whole chunk;
+    /// the last chunk of `finish()` includes the zero padding that fills it. Global frames
+    /// restart at 0 after `reset()`. The encoder cache outputs are not included.
+    ///
+    /// Runs synchronously on this actor before the chunk is decoded: copy what you need and
+    /// return quickly.
+    public func setEncoderOutputCallback(_ callback: StreamingEncoderOutputCallback?) {
         self.onEncoderOutput = callback
     }
 }

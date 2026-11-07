@@ -6,6 +6,9 @@ import Foundation
 /// Contains all tensor manipulation and model inference logic
 extension StreamingNemotronAsrManager {
 
+    /// Encoder outputs that carry the streaming cache (see `EncoderCacheManager.extractCachesFromOutput`).
+    static let encoderCacheOutputNames: Set<String> = ["cache_channel_out", "cache_time_out", "cache_len_out"]
+
     /// Process a single audio chunk through the full pipeline
     internal func processChunk(_ samples: [Float]) async throws {
         guard let melExtractor = melExtractor,
@@ -67,18 +70,17 @@ extension StreamingNemotronAsrManager {
         // 4. RNNT decode loop for each encoder frame
         let numEncoderFrames = encoded.shape[2].intValue
 
-        // Feature-consumer hook: raw outputs + frame mapping (global = origin + local)
-        // so intermediate features cost no second encoder pass.
+        // Feature-consumer hook. The cache outputs are left out: they are the next chunk's
+        // encoder inputs, not features.
         if let onEncoderOutput {
             var outputs: [String: MLMultiArray] = [:]
-            for name in encoderOutput.featureNames {
+            for name in encoderOutput.featureNames where !Self.encoderCacheOutputNames.contains(name) {
                 if let value = encoderOutput.featureValue(for: name)?.multiArrayValue {
                     outputs[name] = value
                 }
             }
-            onEncoderOutput(outputs, 0..<numEncoderFrames, tapFrameOrigin)
+            onEncoderOutput(outputs, 0..<numEncoderFrames, absoluteFrameBase)
         }
-        tapFrameOrigin += numEncoderFrames
 
         var newTokens: [Int] = []
 

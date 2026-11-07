@@ -63,12 +63,8 @@ public actor StreamingUnifiedAsrManager {
 
     private var partialCallback: (@Sendable (String) -> Void)?
 
-    /// Raw encoder-outputs hook for feature consumers (e.g. an intermediate-tap
-    /// consumer like a turn-decision model): receives each streaming encoder
-    /// prediction's outputs — including any extra outputs a re-exported encoder
-    /// declares, such as `tap_*` layer taps — plus the local frame range this step
-    /// decodes and the window's global frame origin (global = origin + local).
-    private var onEncoderOutput: (@Sendable ([String: MLMultiArray], Range<Int>, Int) -> Void)?
+    /// See `setEncoderOutputCallback(_:)`.
+    private var onEncoderOutput: StreamingEncoderOutputCallback?
     private var processedChunks: Int = 0
 
     // Vocabulary boosting (issue #851). The CTC spotter needs the segment's
@@ -400,8 +396,7 @@ public actor StreamingUnifiedAsrManager {
             return
         }
 
-        // Feature-consumer hook: hand over the raw outputs and their frame mapping
-        // so intermediate features cost no second encoder pass.
+        // Feature-consumer hook
         if let onEncoderOutput {
             var outputs: [String: MLMultiArray] = [:]
             for name in encoderOutput.featureNames {
@@ -613,10 +608,17 @@ extension StreamingUnifiedAsrManager: StreamingAsrManager {
         self.partialCallback = callback
     }
 
-    /// Register a raw encoder-outputs hook (see `onEncoderOutput`). Pass nil to remove.
-    public func setEncoderOutputCallback(
-        _ callback: (@Sendable ([String: MLMultiArray], Range<Int>, Int) -> Void)?
-    ) {
+    /// Register a hook that receives each encoder step's raw outputs (see
+    /// `StreamingEncoderOutputCallback`). Pass nil to remove.
+    ///
+    /// Each step re-encodes a window with left and right context. `localFrames` indexes the
+    /// time axis (axis 2) of `encoder` and covers only the frames that are new; the rest of the
+    /// window up to `encoder_length` is context that other steps report, and frames past it are
+    /// padding. Global frames restart at 0 after `reset()`.
+    ///
+    /// Runs synchronously on this actor before the window is decoded: copy what you need and
+    /// return quickly.
+    public func setEncoderOutputCallback(_ callback: StreamingEncoderOutputCallback?) {
         self.onEncoderOutput = callback
     }
 }
