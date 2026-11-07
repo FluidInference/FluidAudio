@@ -168,4 +168,39 @@ final class VocabularyCandidateDiscoveryTests: XCTestCase {
             spotter: spotter, vocabulary: CustomVocabularyContext(terms: []), ctcModelDirectory: directory)
         XCTAssertFalse(empty.hasCTCRescoringCandidates(transcript: "unrelated", tokenTimings: unrelatedTimings))
     }
+
+    func testLoneStopwordReachesScoringOnlyAsExactAliasWithInstalledModels() async throws {
+        let directory = CtcModels.defaultCacheDirectory(for: .ctc110m)
+        guard FileManager.default.fileExists(atPath: directory.appendingPathComponent("tokenizer.json").path) else {
+            throw XCTSkip("Install CTC 110M to exercise stopword alias discovery")
+        }
+        let models = try await CtcModels.loadDirect(from: directory)
+        let spotter = CtcKeywordSpotter(models: models)
+        let tokenizer = try await CtcTokenizer.load(from: directory)
+        // #1115: "say", "saw" and "see" are stopwords; each is within the similarity floor of "Sie" or "say".
+        let cases: [(transcript: String, aliases: [String], expected: Bool)] = [
+            ("the word say for you", ["say"], true),
+            ("the word Say, for you", ["say"], true),
+            ("the word saw for you", ["say"], false),
+            ("the word say for you", [], false),
+            ("the word see for you", ["say"], false),
+            ("the word sigh for you", ["sigh"], true),
+        ]
+        for (transcript, aliases, expected) in cases {
+            let context = CustomVocabularyContext(terms: [
+                CustomVocabularyTerm(text: "Sie", aliases: aliases, ctcTokenIds: tokenizer.encode("Sie"))
+            ])
+            let rescorer = try await VocabularyRescorer.create(
+                spotter: spotter, vocabulary: context,
+                config: .init(spotterRescueEnabled: false), ctcModelDirectory: directory)
+            let timings = transcript.split(separator: " ").enumerated().map { index, word in
+                TokenTiming(
+                    token: "▁" + word, tokenId: index + 1, startTime: Double(index), endTime: Double(index + 1),
+                    confidence: 1)
+            }
+            XCTAssertEqual(
+                rescorer.hasCTCRescoringCandidates(transcript: transcript, tokenTimings: timings), expected,
+                "'\(transcript)' with aliases \(aliases)")
+        }
+    }
 }

@@ -873,7 +873,7 @@ The BK-tree path is experimental. In benchmarks, the default term-centric algori
 - Keep vocabularies focused on domain-specific terms that ASR commonly misrecognizes
 - Avoid adding common words that the ASR already handles well
 - Terms should be at least 4 characters (configurable via `minTermLength`)
-- The system automatically skips stopwords (a, the, and, etc.) to prevent false matches
+- The system automatically skips stopwords (a, the, and, etc.) to prevent false matches. A lone stopword that exactly matches a registered alias (e.g. `say` for `Sie`) is still scored, and replaced only if the CTC comparison favors the term
 
 ## File Reference
 

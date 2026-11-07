@@ -363,6 +363,7 @@ extension VocabularyRescorer {
     ///   - spanLength: Length of the span (1 for single word)
     ///   - spanWords: All normalized words in the span (for multi-word checks)
     ///   - vocabTerm: The vocabulary term being considered
+    ///   - termForms: The term's normalized canonical and alias forms
     ///   - currentSimilarity: Current similarity threshold
     /// - Returns: Tuple of (shouldSkip, adjustedMinSimilarity)
     func checkStopwordRules(
@@ -370,12 +371,13 @@ extension VocabularyRescorer {
         spanLength: Int,
         spanWords: [String],
         vocabTerm: String,
+        termForms: Set<String>,
         currentSimilarity: Float
     ) -> (shouldSkip: Bool, adjustedMinSimilarity: Float) {
         var minSimilarity = currentSimilarity
 
         // Single-word stopword check - skip entirely
-        if spanLength == 1 && Self.stopwords.contains(normalizedWord) {
+        if spanLength == 1 && Self.isSkippedStopword(normalizedWord, termForms: termForms) {
             debugLog("    [STOPWORD] '\(normalizedWord)' is a stopword, skipping replacement with '\(vocabTerm)'")
             return (shouldSkip: true, adjustedMinSimilarity: minSimilarity)
         }
@@ -393,6 +395,13 @@ extension VocabularyRescorer {
         }
 
         return (shouldSkip: false, adjustedMinSimilarity: minSimilarity)
+    }
+
+    /// Whether a lone word is skipped as a stopword. A word that exactly spells one of the term's normalized
+    /// forms (canonical or a registered alias) is not: that spelling was listed on purpose (#1115). The
+    /// similarity and CTC gates still apply to it.
+    static func isSkippedStopword(_ normalizedWord: String, termForms: Set<String>) -> Bool {
+        stopwords.contains(normalizedWord) && !termForms.contains(normalizedWord)
     }
 
     /// Check length ratio rules for single-word matches.
