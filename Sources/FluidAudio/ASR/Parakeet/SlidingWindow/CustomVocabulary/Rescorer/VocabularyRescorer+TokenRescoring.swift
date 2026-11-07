@@ -707,6 +707,7 @@ extension VocabularyRescorer {
                     spanLength: spanLength,
                     spanWords: spanWords,
                     vocabTerm: vocabTerm,
+                    termForms: normalizedCurrentSet,
                     currentSimilarity: minSimilarityForSpan
                 )
                 if shouldSkipStopword { continue }
@@ -1102,6 +1103,7 @@ extension VocabularyRescorer {
                         spanLength: matchedSpanLength,
                         spanWords: spanWords,
                         vocabTerm: vocabTerm,
+                        termForms: normalizedCurrentSet,
                         currentSimilarity: minSimilarityForSpan
                     )
                     if shouldSkipStopword { continue }
@@ -1300,8 +1302,10 @@ extension VocabularyRescorer {
                 continue
             }
 
-            // If the TDT phrase already equals the canonical (or an
-            // alias), there's nothing to replace.
+            // A span that spells the canonical has nothing to replace, and one
+            // that equals an alias is left to the term-centric pass (which skips
+            // terms whose multi-word forms all have five or more words), so the
+            // stopword guard below never sees a term form (#1115).
             if Self.isCanonicalMatch(originalPhrase, canonical: vocabTerm) { continue }
             if normalizedCurrentSet.contains(normalizedPhrase) { continue }
 

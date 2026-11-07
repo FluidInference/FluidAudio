@@ -65,6 +65,9 @@ public actor StreamingNemotronAsrManager {
     // Callbacks
     internal var partialCallback: NemotronPartialCallback?
 
+    /// See `setEncoderOutputCallback(_:)`.
+    internal var onEncoderOutput: StreamingEncoderOutputCallback?
+
     /// Chunk size for auto-download. Set by `StreamingModelVariant.createManager()`
     /// to determine which HuggingFace repo to download from in `loadModels()`.
     internal var requestedChunkSize: NemotronChunkSize?
@@ -390,5 +393,18 @@ extension StreamingNemotronAsrManager: StreamingAsrManager {
 
     public func setPartialTranscriptCallback(_ callback: @escaping @Sendable (String) -> Void) {
         self.partialCallback = callback
+    }
+
+    /// Register a hook that receives each encoder step's raw outputs (see
+    /// `StreamingEncoderOutputCallback`). Pass nil to remove.
+    ///
+    /// `localFrames` indexes the time axis (axis 2) of `encoded` and is always the whole chunk;
+    /// the last chunk of `finish()` includes the zero padding that fills it. Global frames
+    /// restart at 0 after `reset()`. The encoder cache outputs are not included.
+    ///
+    /// Runs synchronously on this actor before the chunk is decoded: copy what you need and
+    /// return quickly.
+    public func setEncoderOutputCallback(_ callback: StreamingEncoderOutputCallback?) {
+        self.onEncoderOutput = callback
     }
 }

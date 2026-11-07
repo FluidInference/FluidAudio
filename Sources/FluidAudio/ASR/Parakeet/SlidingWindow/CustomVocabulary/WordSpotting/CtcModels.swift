@@ -40,6 +40,10 @@ public struct CtcModels: Sendable {
     public let configuration: MLModelConfiguration
     public let vocabulary: [Int: String]
     public let variant: CtcModelVariant
+    /// Folder the Core ML models were loaded from, set by `load(from:)`, `loadDirect(from:)` and
+    /// `downloadAndLoad(to:)`. Vocabulary boosting reads `tokenizer.json` from this folder, or from
+    /// `defaultCacheDirectory(for:)` when it is `nil`.
+    public let directory: URL?
 
     private static let logger = AppLogger(category: "CtcModels")
 
@@ -48,13 +52,15 @@ public struct CtcModels: Sendable {
         encoder: MLModel,
         configuration: MLModelConfiguration,
         vocabulary: [Int: String],
-        variant: CtcModelVariant = .ctc110m
+        variant: CtcModelVariant = .ctc110m,
+        directory: URL? = nil
     ) {
         self.melSpectrogram = melSpectrogram
         self.encoder = encoder
         self.configuration = configuration
         self.vocabulary = vocabulary
         self.variant = variant
+        self.directory = directory
     }
 }
 
@@ -69,6 +75,7 @@ extension CtcModels {
     /// - MelSpectrogram.mlmodelc/
     /// - AudioEncoder.mlmodelc/
     /// - vocab.json
+    /// - tokenizer.json (required for vocabulary boosting, which reads it from this directory)
     ///
     /// - Parameters:
     ///   - directory: Directory containing the CoreML bundles and vocab.json
@@ -134,23 +141,32 @@ extension CtcModels {
             encoder: encoderModel,
             configuration: config,
             vocabulary: vocab,
-            variant: variant
+            variant: variant,
+            directory: directory
         )
     }
 
     /// Load CTC models from a directory.
     ///
+    /// The models load through ModelHub from `<parent of directory>/<variant.repo.folderName>`, which is
+    /// `directory` itself when it has the repo's folder name, and missing ones are downloaded there. That
+    /// folder is recorded in `CtcModels.directory`; `vocab.json` is read from `directory`.
+    ///
     /// - Parameters:
     ///   - directory: Directory containing the downloaded CoreML bundles.
     ///   - variant: Which CTC model variant to load (default: .ctc110m).
+    ///   - progressHandler: Download (when the cache is incomplete) and compile progress, reported as one sequence
+    ///     from 0 to 1.
     /// - Returns: Loaded `CtcModels` instance.
     public static func load(
         from directory: URL,
-        variant: CtcModelVariant = .ctc110m
+        variant: CtcModelVariant = .ctc110m,
+        progressHandler: ProgressHandler? = nil
     ) async throws -> CtcModels {
         logger.info("Loading CTC models (\(variant.displayName)) from: \(directory.path)")
 
         let parentDirectory = directory.deletingLastPathComponent()
+        let modelDirectory = parentDirectory.appendingPathComponent(variant.repo.folderName, isDirectory: true)
         let config = defaultConfiguration()
 
         // ModelHub expects the base directory (without the repo folder) and
@@ -159,13 +175,15 @@ extension CtcModels {
             variant.repo,
             modelNames: [ModelNames.CTC.melSpectrogramPath],
             directory: parentDirectory,
-            computeUnits: melSpectrogramConfiguration().computeUnits
+            computeUnits: melSpectrogramConfiguration().computeUnits,
+            progressHandler: scaledProgressHandler(progressHandler, step: 0, of: 2)
         )
         let encoderModels = try await ModelHub.loadModels(
             variant.repo,
             modelNames: [ModelNames.CTC.audioEncoderPath],
             directory: parentDirectory,
-            computeUnits: config.computeUnits
+            computeUnits: config.computeUnits,
+            progressHandler: scaledProgressHandler(progressHandler, step: 1, of: 2)
         )
 
         guard
@@ -184,7 +202,8 @@ extension CtcModels {
             encoder: encoderModel,
             configuration: config,
             vocabulary: vocab,
-            variant: variant
+            variant: variant,
+            directory: modelDirectory
         )
     }
 
@@ -194,12 +213,15 @@ extension CtcModels {
     ///   - directory: Custom cache directory (default: uses defaultCacheDirectory for variant).
     ///   - variant: Which CTC model variant to download (default: .ctc110m).
     ///   - force: Whether to force re-download even if models exist.
+    ///   - progressHandler: Download and compile progress, reported as one sequence from 0 to 1. Not called when the
+    ///     models are already present.
     /// - Returns: The directory where models were downloaded.
     @discardableResult
     public static func download(
         to directory: URL? = nil,
         variant: CtcModelVariant = .ctc110m,
-        force: Bool = false
+        force: Bool = false,
+        progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let targetDir = directory ?? defaultCacheDirectory(for: variant)
         logger.info("Preparing CTC models (\(variant.displayName)) at: \(targetDir.path)")
@@ -223,12 +245,13 @@ extension CtcModels {
             (ModelNames.CTC.audioEncoderPath, defaultConfiguration().computeUnits),
         ]
 
-        for (name, computeUnits) in specs {
+        for (step, (name, computeUnits)) in specs.enumerated() {
             _ = try await ModelHub.loadModels(
                 variant.repo,
                 modelNames: [name],
                 directory: parentDir,
-                computeUnits: computeUnits
+                computeUnits: computeUnits,
+                progressHandler: scaledProgressHandler(progressHandler, step: step, of: specs.count)
             )
         }
 
@@ -241,13 +264,31 @@ extension CtcModels {
     /// - Parameters:
     ///   - directory: Custom cache directory (default: uses defaultCacheDirectory for variant).
     ///   - variant: Which CTC model variant to use (default: .ctc110m).
+    ///   - progressHandler: Download (when needed) and compile progress, reported as one sequence from 0 to 1.
     /// - Returns: Loaded `CtcModels` instance.
     public static func downloadAndLoad(
         to directory: URL? = nil,
-        variant: CtcModelVariant = .ctc110m
+        variant: CtcModelVariant = .ctc110m,
+        progressHandler: ProgressHandler? = nil
     ) async throws -> CtcModels {
-        let targetDir = try await download(to: directory, variant: variant)
-        return try await load(from: targetDir, variant: variant)
+        // `load` downloads an incomplete cache itself, so each model is built once and the handler sees one sequence.
+        try await load(
+            from: directory ?? defaultCacheDirectory(for: variant), variant: variant, progressHandler: progressHandler)
+    }
+
+    /// Wraps `handler` so that load `step` of `count` sequential `ModelHub.loadModels` calls reports into
+    /// `[step / count, (step + 1) / count]`, which makes the calls one sequence from 0 to 1. Only the last load
+    /// reports ModelHub's closing `.compiling(modelName: "")`.
+    static func scaledProgressHandler(_ handler: ProgressHandler?, step: Int, of count: Int) -> ProgressHandler? {
+        guard let handler else { return nil }
+        let lower = Double(step) / Double(count)
+        let width = 1.0 / Double(count)
+        let isLast = step == count - 1
+        return { progress in
+            if !isLast, case .compiling(let modelName) = progress.phase, modelName.isEmpty { return }
+            handler(
+                DownloadProgress(fractionCompleted: lower + width * progress.fractionCompleted, phase: progress.phase))
+        }
     }
 
     /// Default CoreML configuration for CTC inference (the audio encoder).
@@ -293,6 +334,12 @@ extension CtcModels {
             .appendingPathComponent("FluidAudio", isDirectory: true)
             .appendingPathComponent("Models", isDirectory: true)
             .appendingPathComponent(variant.repo.folderName, isDirectory: true)
+    }
+
+    /// Directory holding the `tokenizer.json` that matches CTC models loaded from `directory`: that directory,
+    /// or `defaultCacheDirectory(for:)` when it is unknown (#1114).
+    static func tokenizerDirectory(loadedFrom directory: URL?, variant: CtcModelVariant) -> URL {
+        directory ?? defaultCacheDirectory(for: variant)
     }
 
     /// Load vocabulary from vocab.json in the given directory.

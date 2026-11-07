@@ -62,6 +62,9 @@ public actor StreamingUnifiedAsrManager {
     private var pendingTokenTimings: [TokenTiming] = []
 
     private var partialCallback: (@Sendable (String) -> Void)?
+
+    /// See `setEncoderOutputCallback(_:)`.
+    private var onEncoderOutput: StreamingEncoderOutputCallback?
     private var processedChunks: Int = 0
 
     // Vocabulary boosting (issue #851). The CTC spotter needs the segment's
@@ -224,7 +227,9 @@ public actor StreamingUnifiedAsrManager {
     /// - Parameters:
     ///   - vocabulary: Custom vocabulary context with terms to detect
     ///     (tokenize via `CustomVocabularyContext.loadWithCtcTokens`)
-    ///   - ctcModels: Pre-loaded CTC models for keyword spotting
+    ///   - ctcModels: Pre-loaded CTC models for keyword spotting;
+    ///     `tokenizer.json` is read from `ctcModels.directory` (or
+    ///     `CtcModels.defaultCacheDirectory(for:)` when `nil`)
     ///   - config: Optional rescorer configuration (default:
     ///     `VocabularyBoostingSession.itnDefaultConfig` — this engine's ITN
     ///     output needs the #702 spotter-rescue similarity floors)
@@ -392,6 +397,18 @@ public actor StreamingUnifiedAsrManager {
             processedChunks += 1
             return
         }
+
+        // Feature-consumer hook
+        if let onEncoderOutput {
+            var outputs: [String: MLMultiArray] = [:]
+            for name in encoderOutput.featureNames {
+                if let value = encoderOutput.featureValue(for: name)?.multiArrayValue {
+                    outputs[name] = value
+                }
+            }
+            onEncoderOutput(outputs, range, plan.bufferStartFrame)
+        }
+
         let emissions = try rnntDecoder.decode(
             encoded: encoded, frameRange: range, globalFrameOffset: plan.bufferStartFrame
         )
@@ -591,5 +608,19 @@ extension StreamingUnifiedAsrManager: StreamingAsrManager {
 
     public func setPartialTranscriptCallback(_ callback: @escaping @Sendable (String) -> Void) {
         self.partialCallback = callback
+    }
+
+    /// Register a hook that receives each encoder step's raw outputs (see
+    /// `StreamingEncoderOutputCallback`). Pass nil to remove.
+    ///
+    /// Each step re-encodes a window with left and right context. `localFrames` indexes the
+    /// time axis (axis 2) of `encoder` and covers only the frames that are new; the rest of the
+    /// window up to `encoder_length` is context that other steps report, and frames past it are
+    /// padding. Global frames restart at 0 after `reset()`.
+    ///
+    /// Runs synchronously on this actor before the window is decoded: copy what you need and
+    /// return quickly.
+    public func setEncoderOutputCallback(_ callback: StreamingEncoderOutputCallback?) {
+        self.onEncoderOutput = callback
     }
 }
