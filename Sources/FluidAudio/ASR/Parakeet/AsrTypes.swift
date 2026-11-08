@@ -64,6 +64,12 @@ public struct ASRConfig: Sendable {
     /// rule itself; set `false` to reproduce pre-change timings.
     public let seamTimingRealignment: Bool
 
+    /// Resampler for audio that is not already at `sampleRate` (default
+    /// `.balanced`). `transcribe(url)` uses it on every path; a host that
+    /// converts audio itself and calls `transcribe(samples)` gets the same
+    /// transcript by passing the same quality to its `AudioConverter`.
+    public let resamplerQuality: AudioConverter.ResamplerQuality
+
     public static let `default` = ASRConfig()
 
     public init(
@@ -77,7 +83,8 @@ public struct ASRConfig: Sendable {
         dualDecodeArbitration: Bool = false,
         seamGapRepair: Bool = true,
         seamGapRepairMinGapSeconds: Double = 0.5,
-        seamTimingRealignment: Bool = true
+        seamTimingRealignment: Bool = true,
+        resamplerQuality: AudioConverter.ResamplerQuality = .balanced
     ) {
         self.sampleRate = sampleRate
         self.tdtConfig = tdtConfig
@@ -90,6 +97,7 @@ public struct ASRConfig: Sendable {
         self.seamGapRepair = seamGapRepair
         self.seamGapRepairMinGapSeconds = max(0.5, seamGapRepairMinGapSeconds)
         self.seamTimingRealignment = seamTimingRealignment
+        self.resamplerQuality = resamplerQuality
     }
 
     /// Resolve the mel-context tri-state against the loaded model version.
@@ -113,7 +121,8 @@ public struct ASRConfig: Sendable {
             dualDecodeArbitration: dualDecodeArbitration,
             seamGapRepair: seamGapRepair,
             seamGapRepairMinGapSeconds: seamGapRepairMinGapSeconds,
-            seamTimingRealignment: seamTimingRealignment
+            seamTimingRealignment: seamTimingRealignment,
+            resamplerQuality: resamplerQuality
         )
     }
 }

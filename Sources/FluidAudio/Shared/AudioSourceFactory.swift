@@ -7,9 +7,15 @@ public struct AudioSourceFactory {
 
     public init() {}
 
+    /// - Parameters:
+    ///   - url: Audio file to convert
+    ///   - targetSampleRate: Sample rate of the mono Float32 samples written to disk
+    ///   - resamplerQuality: Resampler for the conversion; use the same one as
+    ///     any `AudioConverter` whose samples must match these
     public func makeDiskBackedSource(
         from url: URL,
-        targetSampleRate: Int
+        targetSampleRate: Int,
+        resamplerQuality: AudioConverter.ResamplerQuality = .balanced
     ) throws -> (source: DiskBackedAudioSampleSource, loadDuration: TimeInterval) {
         do {
             let startTime = Date()
@@ -54,7 +60,9 @@ public struct AudioSourceFactory {
             // and transcribe(samples) see the same samples (#1112).
             var totalSamples = 0
             do {
-                try AudioConverter(targetFormat: targetFormat).convertFile(audioFile) { chunk in
+                try AudioConverter(targetFormat: targetFormat, resamplerQuality: resamplerQuality).convertFile(
+                    audioFile
+                ) { chunk in
                     try handle.write(contentsOf: Data(buffer: chunk))
                     totalSamples += chunk.count
                 }

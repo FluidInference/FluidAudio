@@ -434,19 +434,56 @@ final class AudioConverterTests: XCTestCase {
             try file.write(from: buffer)
         }
 
-        let inMemory = try audioConverter.resampleAudioFile(url)
-        let (source, _) = try AudioSourceFactory().makeDiskBackedSource(from: url, targetSampleRate: 16_000)
-        defer { source.cleanup() }
-        var diskBacked = [Float](repeating: 0, count: source.sampleCount)
-        try diskBacked.withUnsafeMutableBufferPointer {
-            try source.copySamples(into: $0.baseAddress!, offset: 0, count: $0.count)
+        var outputs: [[Float]] = []
+        for quality in [AudioConverter.ResamplerQuality.fast, .balanced, .best] {
+            let converter = AudioConverter(resamplerQuality: quality)
+            let inMemory = try converter.resampleAudioFile(url)
+            let (source, _) = try AudioSourceFactory().makeDiskBackedSource(
+                from: url, targetSampleRate: 16_000, resamplerQuality: quality)
+            defer { source.cleanup() }
+            var diskBacked = [Float](repeating: 0, count: source.sampleCount)
+            try diskBacked.withUnsafeMutableBufferPointer {
+                try source.copySamples(into: $0.baseAddress!, offset: 0, count: $0.count)
+            }
+            let fromBuffer = try converter.resampleBuffer(buffer)
+            for (name, other) in [("disk-backed", diskBacked), ("buffer", fromBuffer)] {
+                XCTAssertEqual(other.count, inMemory.count, "\(quality): \(name) conversion gave a different length")
+                var maxDiff: Float = 0
+                for (a, b) in zip(other, inMemory) { maxDiff = max(maxDiff, abs(a - b)) }
+                XCTAssertLessThan(maxDiff, 1e-5, "\(quality): \(name) conversion gave different samples")
+            }
+            outputs.append(inMemory)
         }
-        let fromBuffer = try audioConverter.resampleBuffer(buffer)
-        for (name, other) in [("disk-backed", diskBacked), ("buffer", fromBuffer)] {
-            XCTAssertEqual(other.count, inMemory.count, "\(name) conversion gave a different length")
-            var maxDiff: Float = 0
-            for (a, b) in zip(other, inMemory) { maxDiff = max(maxDiff, abs(a - b)) }
-            XCTAssertLessThan(maxDiff, 1e-5, "\(name) conversion gave different samples")
+        // The setting must reach the converter: the 5.1 kHz tone comes out
+        // differently through the fast and the Mastering resamplers.
+        var fastVsBalanced: Float = 0
+        for (a, b) in zip(outputs[0], outputs[1]) { fastVsBalanced = max(fastVsBalanced, abs(a - b)) }
+        XCTAssertGreaterThan(fastVsBalanced, 1e-3, "the resampler quality did not change the conversion")
+    }
+
+    /// Files convert to mono Float32 at the target rate whatever else the
+    /// target format says, as `resampleAudioFile` always returned.
+    func testResampleAudioFileReturnsMonoFloatForAnyTargetFormat() async throws {
+        let rate = 48_000.0
+        let count = Int(rate)
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 1, interleaved: false)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count))!
+        for i in 0..<count { buffer.floatChannelData![0][i] = Float(0.5 * sin(2 * .pi * 440 * Double(i) / rate)) }
+        buffer.frameLength = AVAudioFrameCount(count)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("fluidaudio-target-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+        do {
+            let file = try AVAudioFile(forWriting: url, settings: format.settings)
+            try file.write(from: buffer)
+        }
+
+        let int16 = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: false)!
+        let stereo = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 2, interleaved: false)!
+        let reference = try audioConverter.resampleAudioFile(url)
+        for target in [int16, stereo] {
+            let samples = try AudioConverter(targetFormat: target).resampleAudioFile(url)
+            XCTAssertEqual(samples, reference, "\(target) changed the samples resampleAudioFile returns")
         }
     }
 
