@@ -43,6 +43,19 @@ final class KokoroAneV3Tests: XCTestCase {
         XCTAssertFalse(loaded)
     }
 
+    func testRejectsFp32VocoderBeforeDownloading() async throws {
+        // The fp32 Vocoder is legacy-only for now (#1135); v3 must not ignore it silently.
+        let store = KokoroAneModelStore(version: .v3, vocoderPrecision: .float32)
+        do {
+            try await store.loadIfNeeded()
+            XCTFail("fp32 vocoder request was silently ignored by v3")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("fp32 vocoder"))
+        }
+        let loaded = await store.isLoaded
+        XCTAssertFalse(loaded)
+    }
+
     // #1103: a Metal-free routing (the OS 27 default) skips the fast vocoder,
     // whose SourceGenerator only pays off on the GPU, and never fetches its assets.
     func testMetalFreeRoutingSkipsFastVocoderAndItsAssets() {
