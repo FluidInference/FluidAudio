@@ -16,6 +16,12 @@ final class KokoroAneStageBundleNameTests: XCTestCase {
         XCTAssertEqual(KokoroAneStage.prosody.bundleName, "KokoroProsody_v2.mlmodelc")
         XCTAssertEqual(ModelNames.KokoroAne.prosody, "KokoroProsody_v2.mlmodelc")
     }
+
+    func testVocoderUsesFp32ComputeBundle() {
+        // v1 fp16 Vocoder corrupts the onset of long utterances on SME CPUs (#1135).
+        XCTAssertEqual(KokoroAneStage.vocoder.bundleName, "KokoroVocoder_v2.mlmodelc")
+        XCTAssertEqual(ModelNames.KokoroAne.vocoder, "KokoroVocoder_v2.mlmodelc")
+    }
 }
 
 /// Joining per-chunk results for long text input (#712, #940).
