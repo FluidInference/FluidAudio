@@ -60,20 +60,23 @@ public actor KokoroAneManager {
 
     /// Select `.v3` for the pinned static-bucket pipeline (macOS 15 / iOS 18+).
     /// A supplied model store owns the runtime version and compute policy.
+    /// Pass `vocoderPrecision: .float32` to fix robotic onsets on SME chips (#1135).
     public init(
         variant: KokoroAneVariant = .english,
         defaultVoice: String? = nil,
         directory: URL? = nil,
         computeUnits: KokoroAneComputeUnits = .default,
         modelStore: KokoroAneModelStore? = nil,
-        version: KokoroAneVersion = .legacy
+        version: KokoroAneVersion = .legacy,
+        vocoderPrecision: KokoroAneVocoderPrecision = .float16
     ) {
         self.variant = variant
         self.defaultVoice = defaultVoice ?? variant.defaultVoice
         let store =
             modelStore
             ?? KokoroAneModelStore(
-                directory: directory, computeUnits: computeUnits, variant: variant, version: version)
+                directory: directory, computeUnits: computeUnits, variant: variant, version: version,
+                vocoderPrecision: vocoderPrecision)
         self.store = store
         self.englishG2P = G2PModel.shared(directory: store.directory)
     }

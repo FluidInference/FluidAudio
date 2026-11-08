@@ -479,7 +479,8 @@ final class AudioConverterTests: XCTestCase {
         }
 
         let int16 = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: false)!
-        let stereo = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 2, interleaved: false)!
+        let stereo = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 2, interleaved: false)!
         let reference = try audioConverter.resampleAudioFile(url)
         for target in [int16, stereo] {
             let samples = try AudioConverter(targetFormat: target).resampleAudioFile(url)
