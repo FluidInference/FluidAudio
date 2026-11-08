@@ -7,7 +7,7 @@ public actor AsrManager {
 
     internal let logger = AppLogger(category: "ASR")
     internal let config: ASRConfig
-    private let audioConverter: AudioConverter = AudioConverter()
+    private let audioConverter: AudioConverter
 
     internal var preprocessorModel: MLModel?
     internal var encoderModel: MLModel?
@@ -95,6 +95,7 @@ public actor AsrManager {
 
     public init(config: ASRConfig = .default, models: AsrModels? = nil) {
         self.config = config
+        self.audioConverter = AudioConverter(resamplerQuality: config.resamplerQuality)
 
         if let models {
             self.asrModels = models
@@ -475,7 +476,8 @@ public actor AsrManager {
         let factory = AudioSourceFactory()
         let (sampleSource, _) = try factory.makeDiskBackedSource(
             from: url,
-            targetSampleRate: config.sampleRate
+            targetSampleRate: config.sampleRate,
+            resamplerQuality: config.resamplerQuality
         )
 
         let totalSamples = sampleSource.sampleCount
