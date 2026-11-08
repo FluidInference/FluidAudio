@@ -215,6 +215,17 @@ public actor StreamingEouAsrManager {
     private var eouFirstDetectedAt: Int?  // in processed samples
     /// Total samples processed (for timing)
     private var totalSamplesProcessed: Int = 0
+    /// Audio shifted out since the debounce anchor, replayed by `rearm(keepTranscript:)`.
+    private var replayTail = EouReplayTail(maxSamples: 30 * 16000)
+    /// True while a chunk is between its first and last suspension point in `processChunkAndDecode`.
+    private var chunkInFlight = false
+    /// A `rearm` requested while a chunk was in flight, applied once that chunk has been consumed.
+    private var pendingRearmKeepsTranscript: Bool?
+    /// True while `drainBufferedChunks` runs. The actor can start a second drain while the first is suspended in a
+    /// decode, and both would read the same unshifted chunk, so drains run one at a time.
+    private var isDraining = false
+    /// Callers waiting for the running drain to end, resumed in order when it does.
+    private var drainWaiters: [CheckedContinuation<Void, Never>] = []
 
     public private(set) var configuration: MLModelConfiguration
     public let debugFeatures: Bool
@@ -449,26 +460,7 @@ public actor StreamingEouAsrManager {
 
         // 2. Process chunks with 50% overlap (NeMo-style)
         // We accumulate encoder outputs and decode at the end
-        while true {
-            try Task.checkCancellation()
-
-            // Check buffer size before processing
-            guard self.audioBuffer.count >= chunkSamples else { break }
-
-            // Extract chunk and calculate how many samples we'll shift
-            let chunk = Array(self.audioBuffer.prefix(self.chunkSamples))
-            let samplesToShift = self.shiftSamples
-
-            // 3. Run encoder and decode incrementally (NeMo-style)
-            try await processChunkAndDecode(chunk)
-
-            // 4. Shift buffer by 80ms (50% overlap) - re-check count after await
-            // Another actor method (e.g., reset()) could have modified the buffer during the await
-            let actualShift = min(samplesToShift, self.audioBuffer.count)
-            if actualShift > 0 {
-                self.audioBuffer.removeFirst(actualShift)
-            }
-        }
+        try await drainBufferedChunks()
 
         // Return empty - actual transcription happens in finish()
         return ""
@@ -476,6 +468,8 @@ public actor StreamingEouAsrManager {
 
     public func finish() async throws -> String {
         try Task.checkCancellation()
+        await waitForRunningDrain()
+        pendingRearmKeepsTranscript = nil
 
         // 1. Process remaining audio (padded) if any
         if !audioBuffer.isEmpty {
@@ -523,8 +517,94 @@ public actor StreamingEouAsrManager {
         eouDetected = false
         eouFirstDetectedAt = nil
         totalSamplesProcessed = 0
+        replayTail.clear()
+        pendingRearmKeepsTranscript = nil
         try? resetStates()
         rnntDecoder?.resetState()
+    }
+
+    /// Rebuilds the decoding state after a raw `<EOU>` and replays the audio since the debounce anchor.
+    ///
+    /// The RNN-T loop stops at the `<EOU>` token without consuming the rest of the chunk, and the encoder caches and
+    /// decoder state it leaves behind decode nothing until speech outweighs them, so words spoken after a raw
+    /// `<EOU>` and before the debounce confirms are lost. NeMo's voice agent resets the audio buffer, encoder
+    /// caches and decoder hypothesis on every raw `<EOU>`; `rearm` does the same and also keeps the audio.
+    ///
+    /// It rebuilds the encoder caches and the decoder state, drops the debounce anchor, clears the `eouDetected`
+    /// latch so the next utterance can confirm, and feeds the audio shifted out since the anchor (plus whatever is
+    /// still buffered) through the fresh state. Token timestamps stay on the conversation clock.
+    ///
+    /// Call it from the EOU callback's task or any time after an end is confirmed. If a chunk is being decoded when
+    /// it arrives, the rearm is applied as soon as that chunk has been consumed and this method returns at once;
+    /// otherwise the replay runs before it returns.
+    ///
+    /// - Parameter keepTranscript: `true` keeps the accumulated tokens, timestamps and EOU timestamps, so the
+    ///   transcript continues across the rearm. `false` clears them, like `reset()` does, but keeps the audio.
+    public func rearm(keepTranscript: Bool = true) async throws {
+        guard !chunkInFlight, !isDraining else {
+            pendingRearmKeepsTranscript = keepTranscript
+            return
+        }
+        try applyRearm(keepTranscript: keepTranscript)
+        try await drainBufferedChunks()
+    }
+
+    private func applyRearm(keepTranscript: Bool) throws {
+        try resetStates()
+        rnntDecoder?.resetState()
+
+        let replay = replayTail.take()
+        audioBuffer.insert(contentsOf: replay.samples, at: 0)
+        processedChunks = max(0, processedChunks - replay.chunkCount)
+        totalSamplesProcessed = max(0, totalSamplesProcessed - replay.samples.count)
+
+        eouDetected = false
+        eouFirstDetectedAt = nil
+
+        guard !keepTranscript else { return }
+        accumulatedTokenIds.removeAll()
+        accumulatedTokenTimestampsMs.removeAll()
+        accumulatedRawTokenStrings.removeAll()
+        accumulatedEouTimestampsMs.removeAll()
+    }
+
+    /// Waits until no drain is running. A drain suspends only inside a decode, so this returns between chunks.
+    private func waitForRunningDrain() async {
+        while isDraining {
+            await withCheckedContinuation { drainWaiters.append($0) }
+        }
+    }
+
+    /// Decodes every full chunk in the buffer, shifting it by one hop after each. Drains run one at a time: a call
+    /// made while another is running waits for it, then decodes whatever is still buffered, so the buffered audio
+    /// has been decoded when this returns.
+    private func drainBufferedChunks() async throws {
+        await waitForRunningDrain()
+        isDraining = true
+        defer {
+            isDraining = false
+            let waiters = drainWaiters
+            drainWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+        }
+        while audioBuffer.count >= chunkSamples {
+            try Task.checkCancellation()
+            let chunk = Array(audioBuffer.prefix(chunkSamples))
+            try await processChunkAndDecode(chunk)
+
+            // Re-check the count after the await: reset() may have emptied the buffer meanwhile.
+            let shifted = audioBuffer.prefix(min(shiftSamples, audioBuffer.count))
+            if eouFirstDetectedAt != nil {
+                replayTail.record(shifted)
+            } else {
+                replayTail.clear()
+            }
+            audioBuffer.removeFirst(shifted.count)
+
+            guard let keepTranscript = pendingRearmKeepsTranscript else { continue }
+            pendingRearmKeepsTranscript = nil
+            try applyRearm(keepTranscript: keepTranscript)
+        }
     }
 
     public func cleanup() async {
@@ -557,6 +637,8 @@ public actor StreamingEouAsrManager {
         else {
             throw ASRError.notInitialized
         }
+        chunkInFlight = true
+        defer { chunkInFlight = false }
 
         // A. Compute mel spectrogram with native Swift implementation (NeMo-matching)
         let (melFlat, melLength, numFrames) = melProcessor.computeFlat(audio: samples)
@@ -709,16 +791,7 @@ extension StreamingEouAsrManager: StreamingAsrManager {
     }
 
     public func processBufferedAudio() async throws {
-        while audioBuffer.count >= chunkSamples {
-            try Task.checkCancellation()
-            let chunk = Array(audioBuffer.prefix(chunkSamples))
-            let samplesToShift = shiftSamples
-            try await processChunkAndDecode(chunk)
-            let actualShift = min(samplesToShift, audioBuffer.count)
-            if actualShift > 0 {
-                audioBuffer.removeFirst(actualShift)
-            }
-        }
+        try await drainBufferedChunks()
     }
 
     public func setPartialTranscriptCallback(_ callback: @escaping @Sendable (String) -> Void) {
