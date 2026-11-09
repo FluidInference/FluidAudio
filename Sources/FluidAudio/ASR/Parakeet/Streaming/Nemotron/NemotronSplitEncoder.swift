@@ -14,6 +14,16 @@ enum NemotronMultilingualEncoder: Sendable {
         return nil
     }
 
+    /// A fresh zero-initialized `MLState` when the single model keeps its
+    /// caches as state (macOS 15 / iOS 18+). `nil` otherwise, including for
+    /// the split encoder, so assigning it also clears a stale state.
+    func makeStateIfStateful() -> Any? {
+        guard #available(macOS 15, iOS 18, tvOS 18, *), case .single(let model) = self,
+            !model.modelDescription.stateDescriptionsByName.isEmpty
+        else { return nil }
+        return model.makeState()
+    }
+
     func prediction(from input: MLFeatureProvider) async throws -> MLFeatureProvider {
         switch self {
         case .single(let model): return try await model.prediction(from: input)
@@ -34,13 +44,15 @@ enum NemotronMultilingualEncoder: Sendable {
 ///
 /// On some older Neural Engines (M3 Pro) the single 2240 ms encoder fails
 /// ANE register allocation, so Core ML runs all of it on the CPU (~4 min
-/// first load, ~2 GB resident). Each piece fits. The weights are the shipped
-/// encoder's, and chained outputs match it exactly.
+/// first load, ~2 GB resident). The front end's activations are what does
+/// not fit; split out, the pieces are expected to fit (the reporter's own
+/// split did). The weights are the shipped encoder's, and on M5 Pro the
+/// chained outputs are bit-identical to it. Not yet verified on M3 Pro.
 ///
 /// Takes and returns the single encoder's tensors (`mel`, `mel_length`,
 /// 24-layer `cache_channel` / `cache_time`, `cache_len`, `prompt_id` in;
 /// `encoded`, `encoded_length`, `cache_*_out` out), so callers keep one
-/// 24-layer cache layout.
+/// 24-layer cache layout. It emits no `encoder_proj`.
 final class NemotronSplitEncoder: Sendable {
     static let frontendFile = "encoder_frontend.mlmodelc"
     static let lowerLayersFile = "encoder_body_0_11.mlmodelc"
@@ -62,6 +74,13 @@ final class NemotronSplitEncoder: Sendable {
         self.upperLayers = upperLayers
     }
 
+    /// `true` when every piece under `directory` is a complete compiled
+    /// bundle. Rejects the `*.partial` files an interrupted download leaves,
+    /// which a bare existence check would accept forever (#819).
+    static func isCached(at directory: URL) -> Bool {
+        ModelCache.isCacheComplete(at: directory, requiredFiles: Set(fileNames))
+    }
+
     /// Load the three pieces from `directory` (see ``fileNames``).
     static func load(from directory: URL, configuration: MLModelConfiguration) async throws -> NemotronSplitEncoder {
         func open(_ name: String) async throws -> MLModel {
@@ -75,6 +94,30 @@ final class NemotronSplitEncoder: Sendable {
             frontend: try await open(frontendFile),
             lowerLayers: try await open(lowerLayersFile),
             upperLayers: try await open(upperLayersFile))
+    }
+
+    /// Throws unless the pieces' fixed inputs match the variant's mel and
+    /// cache shapes, so a mismatched model directory fails at load instead
+    /// of on the first chunk.
+    func validate(for config: NemotronMultilingualStreamingConfig) throws {
+        func shape(_ model: MLModel, _ input: String) -> [Int] {
+            model.modelDescription.inputDescriptionsByName[input]?.multiArrayConstraint?.shape.map(\.intValue) ?? []
+        }
+        func half(_ cacheShape: [Int]) -> [Int] {
+            cacheShape.count == 4 ? [cacheShape[0], cacheShape[1] / 2, cacheShape[2], cacheShape[3]] : cacheShape
+        }
+        let mel = shape(frontend, "mel")
+        let channel = shape(lowerLayers, "cache_channel")
+        let time = shape(lowerLayers, "cache_time")
+        guard mel == [1, config.melFeatures, config.totalMelFrames],
+            channel == half(config.cacheChannelShape), time == half(config.cacheTimeShape),
+            shape(upperLayers, "cache_channel") == channel, shape(upperLayers, "cache_time") == time
+        else {
+            throw ASRError.processingFailed(
+                "The split encoder (mel \(mel), per-half caches \(channel) / \(time)) does not match this "
+                    + "model's metadata (mel [1, \(config.melFeatures), \(config.totalMelFrames)], "
+                    + "caches \(config.cacheChannelShape) / \(config.cacheTimeShape))")
+        }
     }
 
     func prediction(from input: MLFeatureProvider) async throws -> MLFeatureProvider {
@@ -112,13 +155,14 @@ final class NemotronSplitEncoder: Sendable {
                 "cache_len": cacheLen, "prompt_id": promptId,
             ]))
 
+        let channelOut = try Self.stackLayers(
+            try array(lower, "cache_channel_out"), try array(upper, "cache_channel_out"))
+        let timeOut = try Self.stackLayers(try array(lower, "cache_time_out"), try array(upper, "cache_time_out"))
         return try MLDictionaryFeatureProvider(dictionary: [
             "encoded": try array(upper, "encoded"),
             "encoded_length": try array(upper, "encoded_length"),
-            "cache_channel_out": try Self.stackLayers(
-                try array(lower, "cache_channel_out"), try array(upper, "cache_channel_out")),
-            "cache_time_out": try Self.stackLayers(
-                try array(lower, "cache_time_out"), try array(upper, "cache_time_out")),
+            "cache_channel_out": channelOut,
+            "cache_time_out": timeOut,
             "cache_len_out": try array(upper, "cache_len_out"),
         ])
     }
@@ -131,7 +175,24 @@ final class NemotronSplitEncoder: Sendable {
         }
         let result = try MLMultiArray(
             shape: [1, NSNumber(value: range.count), cache.shape[2], cache.shape[3]], dataType: .float32)
-        copyLayers(from: cache, layers: range, into: result, at: 0)
+        let rows = shape[2]
+        let width = shape[3]
+        let srcStrides = cache.strides.map(\.intValue)
+        let dstStrides = result.strides.map(\.intValue)
+        let src = cache.dataPointer.assumingMemoryBound(to: Float.self)
+        let dst = result.dataPointer.assumingMemoryBound(to: Float.self)
+        // Row-wise copy that honours the source's strides (Core ML outputs may be padded).
+        for (index, layer) in range.enumerated() {
+            for row in 0..<rows {
+                let s = src + layer * srcStrides[1] + row * srcStrides[2]
+                let d = dst + index * dstStrides[1] + row * dstStrides[2]
+                if srcStrides[3] == 1 {
+                    d.update(from: s, count: width)
+                } else {
+                    for column in 0..<width { d[column] = s[column * srcStrides[3]] }
+                }
+            }
+        }
         return result
     }
 
@@ -139,38 +200,11 @@ final class NemotronSplitEncoder: Sendable {
     static func stackLayers(_ first: MLMultiArray, _ second: MLMultiArray) throws -> MLMultiArray {
         let a = first.shape.map(\.intValue)
         let b = second.shape.map(\.intValue)
-        guard a.count == 4, b.count == 4, a[2] == b[2], a[3] == b[3],
+        guard a.count == 4, b.count == 4, a[0] == b[0], a[2] == b[2], a[3] == b[3],
             first.dataType == .float32, second.dataType == .float32
         else {
             throw ASRError.processingFailed("Split encoder: cannot stack caches \(a) and \(b)")
         }
-        let result = try MLMultiArray(
-            shape: [1, NSNumber(value: a[1] + b[1]), first.shape[2], first.shape[3]], dataType: .float32)
-        copyLayers(from: first, layers: 0..<a[1], into: result, at: 0)
-        copyLayers(from: second, layers: 0..<b[1], into: result, at: a[1])
-        return result
-    }
-
-    /// Row-wise copy that honours the source's strides (Core ML outputs may be padded).
-    private static func copyLayers(
-        from source: MLMultiArray, layers: Range<Int>, into destination: MLMultiArray, at offset: Int
-    ) {
-        let rows = source.shape[2].intValue
-        let width = source.shape[3].intValue
-        let srcStrides = source.strides.map(\.intValue)
-        let dstStrides = destination.strides.map(\.intValue)
-        let src = source.dataPointer.assumingMemoryBound(to: Float.self)
-        let dst = destination.dataPointer.assumingMemoryBound(to: Float.self)
-        for (index, layer) in layers.enumerated() {
-            for row in 0..<rows {
-                let s = src + layer * srcStrides[1] + row * srcStrides[2]
-                let d = dst + (offset + index) * dstStrides[1] + row * dstStrides[2]
-                if srcStrides[3] == 1 && dstStrides[3] == 1 {
-                    d.update(from: s, count: width)
-                } else {
-                    for column in 0..<width { d[column * dstStrides[3]] = s[column * srcStrides[3]] }
-                }
-            }
-        }
+        return MLMultiArray(concatenating: [first, second], axis: 1, dataType: .float32)
     }
 }

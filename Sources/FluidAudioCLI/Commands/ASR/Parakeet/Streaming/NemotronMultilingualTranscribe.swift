@@ -98,6 +98,13 @@ public class NemotronMultilingualTranscribe {
             return
         }
 
+        if config.splitEncoder,
+            let problem = splitEncoderTierProblem(modelDir: config.modelDir, chunkMs: config.chunkMs)
+        {
+            logger.error(problem)
+            return
+        }
+
         if config.modelDir == nil {
             // Auto-download the requested <language>/<chunkMs>ms variant
             // (compiled .mlmodelc only) from HuggingFace.
@@ -108,7 +115,8 @@ public class NemotronMultilingualTranscribe {
                 )
                 let dir = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
                     languageCode: config.language ?? "auto",
-                    chunkMs: config.chunkMs
+                    chunkMs: config.chunkMs,
+                    includeEncoder: !config.splitEncoder
                 )
                 config.modelDir = dir
                 logger.info("Downloaded to \(dir.path)")
@@ -120,6 +128,26 @@ public class NemotronMultilingualTranscribe {
 
         let transcriber = NemotronMultilingualTranscribe(config: config)
         await transcriber.run()
+    }
+
+    /// Why `--split-encoder` can't be used with this model directory (or, without one,
+    /// the `--chunk-ms` tier), or nil. Checked before any download: the split exists
+    /// for one tier only (#1116).
+    static func splitEncoderTierProblem(modelDir: URL?, chunkMs: Int) -> String? {
+        let tier: Int
+        if let modelDir {
+            let metadata = modelDir.appendingPathComponent(ModelNames.NemotronMultilingualStreaming.metadata)
+            do {
+                tier = try NemotronMultilingualStreamingConfig(from: metadata).chunkMs
+            } catch {
+                return "Cannot read \(metadata.path): \(error.localizedDescription)"
+            }
+        } else {
+            tier = chunkMs
+        }
+        let splitTier = StreamingNemotronMultilingualAsrManager.splitEncoderChunkMs
+        guard tier != splitTier else { return nil }
+        return "--split-encoder is only available for the \(splitTier) ms tier, not \(tier) ms"
     }
 
     private static func printUsage() {
@@ -194,8 +222,7 @@ public class NemotronMultilingualTranscribe {
             logger.info("Loading Nemotron multilingual models from \(modelDir.path)...")
             let manager = StreamingNemotronMultilingualAsrManager()
             let splitDir =
-                config.splitEncoder
-                ? try await StreamingNemotronMultilingualAsrManager.downloadSplitEncoder(chunkMs: config.chunkMs) : nil
+                config.splitEncoder ? try await StreamingNemotronMultilingualAsrManager.downloadSplitEncoder() : nil
             try await manager.loadModels(from: modelDir, splitEncoderDirectory: splitDir)
             logger.info("Models loaded successfully")
 

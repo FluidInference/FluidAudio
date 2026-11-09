@@ -270,13 +270,10 @@ extension StreamingNemotronMultilingualAsrManager {
             }
         }
 
-        // Per-stream MLState instance (each stream gets its own).
-        // makeState() returns a fresh zero-initialized state.
-        if #available(macOS 15, iOS 18, tvOS 18, *) {
-            if shared.encoderIsStateful {
-                self.encoderState = shared.encoder.makeState()
-            }
-        }
+        // Per-stream MLState instance (each stream gets its own): a fresh
+        // zero-initialized state, or nil for a stateless encoder (which also
+        // clears a state left by a previously loaded stateful one).
+        self.encoderState = self.encoder?.makeStateIfStateful()
 
         // Per-stream cache/state init
         try resetStates()
@@ -356,30 +353,39 @@ extension StreamingNemotronMultilingualAsrManager {
     /// Download the requested `<language>/<chunkMs>ms` variant from the
     /// HuggingFace repo (compiled `.mlmodelc` only) and return the local
     /// variant directory. Cached downloads are reused.
+    ///
+    /// - Parameter includeEncoder: Pass `false` when loading with the opt-in
+    ///   split encoder (``downloadSplitEncoder(to:progressHandler:)``): the
+    ///   single `encoder.mlmodelc` (~565 MB), which split mode never opens, is
+    ///   then not downloaded. A later call with `true` fetches it.
     public static func downloadVariant(
         languageCode: String = "auto",
         chunkMs: Int = 2240,
         to directory: URL? = nil,
+        includeEncoder: Bool = true,
         progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         let logger = AppLogger(category: "NemotronMultilingualStreaming")
         let langDir = languageDirectory(for: languageCode)
         let subdirectory = "\(langDir)/\(chunkMs)ms"
 
-        let modelsBaseDir =
-            directory
-            ?? FileManager.default.urls(
-                for: .applicationSupportDirectory, in: .userDomainMask
-            ).first!
-            .appendingPathComponent("FluidAudio", isDirectory: true)
-            .appendingPathComponent("Models", isDirectory: true)
+        let modelsBaseDir = directory ?? MLModelConfigurationUtils.defaultModelsDirectory()
 
         let repoCacheDir = modelsBaseDir.appendingPathComponent(Repo.nemotronMultilingual.folderName)
         let variantDir = repoCacheDir.appendingPathComponent(subdirectory)
         let metadataPath = variantDir.appendingPathComponent(
             ModelNames.NemotronMultilingualStreaming.metadata)
+        let skip: @Sendable (String) -> Bool = { path in
+            path.contains(".mlpackage") || (!includeEncoder && Self.isSingleEncoderPath(path))
+        }
+        // A variant fetched with includeEncoder: false has metadata but no
+        // encoder; fetch it when the single encoder is wanted again.
+        let encoderMissing =
+            includeEncoder
+            && !ModelCache.isCacheComplete(
+                at: variantDir, requiredFiles: [ModelNames.NemotronMultilingualStreaming.encoderFile])
 
-        if FileManager.default.fileExists(atPath: metadataPath.path) {
+        if FileManager.default.fileExists(atPath: metadataPath.path) && !encoderMissing {
             // Repair pass for variants cached before 2026-05-31: the latin
             // tokenizer.json shipped with a corrupt entry — id 2224 read
             // "<blank>" (duplicating the real blank at 2828) instead of
@@ -404,7 +410,7 @@ extension StreamingNemotronMultilingualAsrManager {
                         subdirectory: subdirectory,
                         to: repoCacheDir,
                         progressHandler: progressHandler,
-                        shouldSkip: { $0.contains(".mlpackage") }
+                        shouldSkip: skip
                     )
                     try? FileManager.default.removeItem(at: backupPath)
                     logger.info("Repaired tokenizer.json for \(subdirectory)")
@@ -418,45 +424,41 @@ extension StreamingNemotronMultilingualAsrManager {
                 logger.info("Using cached multilingual variant at \(variantDir.path)")
             }
         } else {
-            logger.info("Downloading multilingual variant \(subdirectory) (.mlmodelc only)...")
+            let scope = includeEncoder ? ".mlmodelc only" : ".mlmodelc only, no encoder"
+            logger.info("Downloading multilingual variant \(subdirectory) (\(scope))...")
             try await ModelHub.download(
                 .nemotronMultilingual,
                 subdirectory: subdirectory,
                 to: repoCacheDir,
                 progressHandler: progressHandler,
-                shouldSkip: { $0.contains(".mlpackage") }
+                shouldSkip: skip
             )
         }
         return variantDir
     }
 
-    /// Download the opt-in split 2240 ms encoder (#1116) and return its local
-    /// directory, for ``loadModels(from:splitEncoderDirectory:)``. One copy
-    /// serves both the `latin` and `multilingual` models (their encoders are
-    /// identical). Cached downloads are reused.
+    /// The tier the opt-in split encoder is published for (#1116).
+    public static let splitEncoderChunkMs = NemotronSplitEncoder.chunkMs
+
+    /// `true` for the single `encoder.mlmodelc` and the files in it (relative
+    /// repo paths such as `latin/2240ms/encoder.mlmodelc/weights/weight.bin`).
+    static func isSingleEncoderPath(_ path: String) -> Bool {
+        path.split(separator: "/").contains { $0 == ModelNames.NemotronMultilingualStreaming.encoderFile }
+    }
+
+    /// Download the opt-in split encoder for the ``splitEncoderChunkMs`` tier
+    /// (#1116) and return its local directory, for
+    /// ``loadModels(from:splitEncoderDirectory:)``. One copy serves both the
+    /// `latin` and `multilingual` models (their encoders are identical).
+    /// Cached downloads are reused; an interrupted one resumes.
     public static func downloadSplitEncoder(
-        chunkMs: Int = 2240,
         to directory: URL? = nil,
         progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
-        guard chunkMs == NemotronSplitEncoder.chunkMs else {
-            throw ASRError.processingFailed(
-                "The split encoder is published for the \(NemotronSplitEncoder.chunkMs) ms tier only")
-        }
-        let modelsBaseDir =
-            directory
-            ?? FileManager.default.urls(
-                for: .applicationSupportDirectory, in: .userDomainMask
-            ).first!
-            .appendingPathComponent("FluidAudio", isDirectory: true)
-            .appendingPathComponent("Models", isDirectory: true)
+        let modelsBaseDir = directory ?? MLModelConfigurationUtils.defaultModelsDirectory()
         let repoCacheDir = modelsBaseDir.appendingPathComponent(Repo.nemotronMultilingual.folderName)
         let splitDir = repoCacheDir.appendingPathComponent(NemotronSplitEncoder.subdirectory)
-        let cached = NemotronSplitEncoder.fileNames.allSatisfy {
-            FileManager.default.fileExists(
-                atPath: splitDir.appendingPathComponent($0).appendingPathComponent("coremldata.bin").path)
-        }
-        if !cached {
+        if !NemotronSplitEncoder.isCached(at: splitDir) {
             try await ModelHub.download(
                 .nemotronMultilingual,
                 subdirectory: NemotronSplitEncoder.subdirectory,
