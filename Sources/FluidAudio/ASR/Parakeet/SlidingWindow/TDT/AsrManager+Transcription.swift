@@ -167,9 +167,10 @@ extension AsrManager {
     /// Whether the first token of an unspaced re-decode is a single-token copy of
     /// the last kept previous token (`全` re-emitted ahead of a replaced tail, `る`
     /// just past a kept one), which dedup leaves: it matches runs of two or more.
-    /// The re-decode emits in order from its cutoff, so a copy can only be of the
-    /// last kept token; an equal character further back (the `い` of `多い` ahead
-    /// of `いわれ`) is the re-decode's own. Timestamps are global frames. Pure.
+    /// It matches only the last kept token; an equal character further back (the
+    /// `い` of `多い` ahead of `いわれ`) is the re-decode's own. `unspacedKeptCopyCount`
+    /// builds on it for the other kept tokens a re-decode re-hears (#1139).
+    /// Timestamps are global frames. Pure.
     nonisolated internal static func isUnspacedJitterCopy(
         keptTokens: [Int],
         keptTimestamps: [Int],
@@ -183,6 +184,69 @@ extension AsrManager {
         else { return false }
         return token == lastToken && abs(timestamp - lastFrame) <= frameTolerance
             && timestamp <= lastFrame + jitterFrames
+    }
+
+    /// How many leading tokens of an unspaced re-decode re-hear kept previous
+    /// tokens, which dedup leaves when they are single or segmented another way
+    /// (#1139). The re-decode emits from `jitterFrames` ahead of the replaced tail,
+    /// so it can re-emit the last kept tokens: `心 的な` over kept `心 的`, or `的な`
+    /// over kept `的 で`. A token copies the kept token it starts inside (from
+    /// `jitterFrames` before it through the next previous token's frame, where a
+    /// merged `的な` often lands) when both begin with the same character, unless
+    /// that next token begins with it too and is at least as close (an early
+    /// re-emission of a retired `でき` after a kept `で`).
+    /// A jitter copy of the last kept token also counts (`isUnspacedJitterCopy`).
+    /// Copies go in order and use each kept token once, so the second `こ` of
+    /// `ここ` stays. `previous*` hold the accumulated tokens, of which the first
+    /// `keptCount` stay. Timestamps are global frames. Pure, for testability.
+    nonisolated internal static func unspacedKeptCopyCount(
+        previousTokens: [Int],
+        previousPieces: [String],
+        previousTimestamps: [Int],
+        keptCount: Int,
+        currentTokens: [Int],
+        currentPieces: [String],
+        currentTimestamps: [Int],
+        jitterFrames: Int = redecodeEmissionJitterFrames
+    ) -> Int {
+        guard keptCount > 0, keptCount <= previousTokens.count,
+            previousPieces.count == previousTokens.count, previousTimestamps.count == previousTokens.count,
+            currentPieces.count == currentTokens.count, currentTimestamps.count == currentTokens.count,
+            let firstFrame = currentTimestamps.first
+        else { return 0 }
+        func leadingCharacter(_ piece: String) -> Character? {
+            guard piece != ASRConstants.sentencePieceUnknownToken else { return nil }
+            return piece.drop(while: { String($0) == ASRConstants.sentencePieceWordBoundary || $0 == " " }).first
+        }
+        let last = keptCount - 1
+        // A copy starts no earlier than inside the last kept token before the
+        // re-decode's first token.
+        var next = previousTimestamps.prefix(keptCount).lastIndex(where: { $0 < firstFrame }) ?? 0
+        var copies = 0
+        while copies < currentTokens.count, next < keptCount {
+            let frame = currentTimestamps[copies]
+            let character = leadingCharacter(currentPieces[copies])
+            let copied = (next..<keptCount).first { kept in
+                if kept == last,
+                    isUnspacedJitterCopy(
+                        keptTokens: [previousTokens[last]], keptTimestamps: [previousTimestamps[last]],
+                        token: currentTokens[copies], timestamp: frame)
+                {
+                    return true
+                }
+                guard let character, kept + 1 < previousTimestamps.count else { return false }
+                let start = previousTimestamps[kept]
+                let following = previousTimestamps[kept + 1]
+                guard frame >= start - jitterFrames, frame <= following,
+                    character == leadingCharacter(previousPieces[kept])
+                else { return false }
+                return character != leadingCharacter(previousPieces[kept + 1]) || following - frame > abs(frame - start)
+            }
+            guard let copied else { break }
+            next = copied + 1
+            copies += 1
+        }
+        return copies
     }
 
     /// How many leading current tokens re-emit the stable start of a word the
@@ -850,16 +914,22 @@ extension AsrManager {
                 currentTimestamps: currentGlobalTimestamps,
                 frameTolerance: tolerance,
                 punctuationTokens: punctuationTokenIds)
-            // A copy dedup left behind is a single token; after a matched run, an
-            // equal token is the next character (`こ` of `ここ`).
-            if stripsJitterCopies, removedCount == 0, let first = deduped.first,
-                let keptTimestamps = effectivePreviousTimestamps, let currentGlobalTimestamps,
-                Self.isUnspacedJitterCopy(
-                    keptTokens: effectivePrevious, keptTimestamps: keptTimestamps,
-                    token: first, timestamp: currentGlobalTimestamps[0])
+            // Copies dedup left behind are single tokens or re-segmented ones
+            // (#1139); after a matched run, an equal token is the next character
+            // (`こ` of `ここ`).
+            if stripsJitterCopies, removedCount == 0, let previousTimestamps = previousTokenTimestamps,
+                let currentGlobalTimestamps
             {
-                deduped.removeFirst()
-                removedCount = 1
+                let copies = Self.unspacedKeptCopyCount(
+                    previousTokens: previousTokens,
+                    previousPieces: previousTokens.map { vocabulary[$0] ?? "" },
+                    previousTimestamps: previousTimestamps,
+                    keptCount: effectivePrevious.count,
+                    currentTokens: deduped,
+                    currentPieces: deduped.map { vocabulary[$0] ?? "" },
+                    currentTimestamps: currentGlobalTimestamps)
+                deduped.removeFirst(copies)
+                removedCount = copies
             }
             let adjustedTimestamps =
                 removedCount > 0 ? Array(currentTimestamps.dropFirst(removedCount)) : currentTimestamps
