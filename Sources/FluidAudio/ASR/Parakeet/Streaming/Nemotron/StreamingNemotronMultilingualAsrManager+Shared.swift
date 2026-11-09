@@ -453,7 +453,8 @@ extension StreamingNemotronMultilingualAsrManager {
         let repoCacheDir = modelsBaseDir.appendingPathComponent(Repo.nemotronMultilingual.folderName)
         let splitDir = repoCacheDir.appendingPathComponent(NemotronSplitEncoder.subdirectory)
         let cached = NemotronSplitEncoder.fileNames.allSatisfy {
-            FileManager.default.fileExists(atPath: splitDir.appendingPathComponent($0).appendingPathComponent("coremldata.bin").path)
+            FileManager.default.fileExists(
+                atPath: splitDir.appendingPathComponent($0).appendingPathComponent("coremldata.bin").path)
         }
         if !cached {
             try await ModelHub.download(

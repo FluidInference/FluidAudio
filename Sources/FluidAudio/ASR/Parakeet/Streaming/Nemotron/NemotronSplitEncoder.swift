@@ -117,7 +117,8 @@ final class NemotronSplitEncoder: Sendable {
             "encoded_length": try array(upper, "encoded_length"),
             "cache_channel_out": try Self.stackLayers(
                 try array(lower, "cache_channel_out"), try array(upper, "cache_channel_out")),
-            "cache_time_out": try Self.stackLayers(try array(lower, "cache_time_out"), try array(upper, "cache_time_out")),
+            "cache_time_out": try Self.stackLayers(
+                try array(lower, "cache_time_out"), try array(upper, "cache_time_out")),
             "cache_len_out": try array(upper, "cache_len_out"),
         ])
     }
