@@ -393,7 +393,8 @@ public actor StreamingNemotronMultilingualAsrManager {
         if let splitEncoderDirectory {
             guard config.chunkMs == NemotronSplitEncoder.chunkMs else {
                 throw ASRError.processingFailed(
-                    "The split encoder is built for the \(NemotronSplitEncoder.chunkMs) ms tier, not \(config.chunkMs) ms")
+                    "The split encoder is built for the \(NemotronSplitEncoder.chunkMs) ms tier, not \(config.chunkMs) ms"
+                )
             }
             self.encoder = .split(
                 try await NemotronSplitEncoder.load(from: splitEncoderDirectory, configuration: encoderConfiguration))
