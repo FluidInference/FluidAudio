@@ -83,6 +83,38 @@ let detected = await manager.detectedLanguage()   // e.g. "fr-FR"
 await manager.reset()
 ```
 
+### Split 2240 ms encoder (opt-in, older Neural Engines)
+
+On some Macs the Neural Engine compiler rejects the single 2240 ms encoder
+(M3 Pro, macOS 27.3: ANE register allocation fails on the conv front end's
+activations), so Core ML runs it on the CPU: about 4 minutes on first load,
+about 2 GB resident and CPU speed (#1116). The opt-in split runs the same
+encoder as three models (conv front end, layers 0-11, layers 12-23); split
+this way, the reporter's own build fit that ANE. The published pieces use the
+shipped encoder's weights and, on M5 Pro, produce bit-identical outputs; they
+are not yet verified on an M3 Pro. The default keeps the single encoder.
+
+```swift
+let modelDir = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
+    languageCode: "en-US", chunkMs: 2240, includeEncoder: false)  // skip the unused single encoder
+let splitDir = try await StreamingNemotronMultilingualAsrManager.downloadSplitEncoder()
+try await manager.loadModels(from: modelDir, splitEncoderDirectory: splitDir)
+```
+
+CLI: `nemotron-multilingual-transcribe --input audio.wav --split-encoder`, and
+`--split-encoder` on `nemotron-multilingual-benchmark` for WER/RTFx. The
+pieces live in `encoder-split/2240ms/` on Hugging Face (one copy for the
+`latin` and `multilingual` models), so default downloads never fetch them. On
+M5 Pro (macOS 27.0) end-to-end streaming speed is unchanged or slightly better
+with the split (FLEURS en 155x vs 146x RTFx, es 102x vs 100x).
+
+Limits: only the 2240 ms tier is split (4480 ms has the same front end at
+twice the activation size and may hit the same limit); only
+`loadModels(from:splitEncoderDirectory:)` takes it, not the shared
+`preloadShared` / `downloadAndPreloadShared` multi-stream path; the split
+emits no `encoder_proj`, so B3 (`decoder_joint_noencproj`) and the smart-spec
+batched joint are not used with it.
+
 ### Custom vocabulary (hotword biasing)
 
 The Nemotron exports ship no CTC head, so the sliding-window path's CTC

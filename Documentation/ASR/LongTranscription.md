@@ -626,6 +626,18 @@ On the two FLEURS `ja_jp` files from the issue (142 s / 180 s) streaming CER
 goes 67.4% / 38.7% → 3.4% / 6.4% (batch: 4.8% / 7.3%), and the 25 single clips
 4.4% → 4.2%.
 
+**Re-heard kept tokens (#1139).** The re-decode emits from 5 frames ahead of the
+replaced tail, so it can also re-emit the last one or two kept tokens, often
+segmented its own way: `心 的な` over a kept `心 的` read "自己中心的心的な", and
+`的な` over a kept `的 で` read "自己中心的で的な". Dedup matches neither (a single
+token, then a different id). `unspacedKeptCopyCount` drops the re-decode's leading
+tokens that start inside a kept token — from 5 frames before it through the next
+previous token's frame, where a merged `的な` often lands — and begin with the same
+character, in order and once per kept token, so the second `こ` of `ここ` stays.
+A token that begins like the retired token after it and is at least as close to it
+is that token's early re-emission and stays (`でき` after a kept `で`). The
+single-token jitter copies above are its special case.
+
 **End-aligned final window.** A short final flush window (a 16.9 s clip at
 an 8 s chunk leaves 0.9 s of new audio behind 2 s of left context) yields
 nothing from a fresh state, dropping the last words — the dominant remaining

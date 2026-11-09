@@ -1850,6 +1850,10 @@ public enum ModelNames {
         // re-download. See mobius laishere-coreml docs/trials-and-errors.md.
         public static let noise = "KokoroNoise_v2.mlmodelc"
         public static let vocoder = "KokoroVocoder.mlmodelc"
+        // Opt-in v2 (`KokoroAneVocoderPrecision.float32`): fp32 compute. The fp16
+        // Core ML CPU path on SME chips (A19 Pro, A20, M5) corrupts the first
+        // ~1 s of long utterances (robotic onset). See issue #1135.
+        public static let vocoderFloat32 = "KokoroVocoder_v2.mlmodelc"
         // v2: COLA-normalized iSTFT deconv weights (raw output was exactly 1.5x
         // the PyTorch reference). Renamed (not overwritten) so cached clients
         // re-download. See issue #852.

@@ -35,7 +35,7 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// the extractor's (non-thread-safe) FFT scratch buffers.
     internal var melExtractor: NemotronMelExtractor?
     internal var prefetchMelExtractor: NemotronMelExtractor?
-    internal var encoder: MLModel?
+    internal var encoder: NemotronMultilingualEncoder?
     internal var decoder: MLModel?
     internal var joint: MLModel?
     /// Optional fused decoder+joint mlpackage. If non-nil, the RNN-T inner
@@ -349,7 +349,16 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// Load models from a directory containing preprocessor, encoder, decoder,
     /// joint, plus `metadata.json` and `tokenizer.json`. Accepts either
     /// `.mlmodelc` (preferred) or uncompiled `.mlpackage` bundles.
-    public func loadModels(from directory: URL) async throws {
+    ///
+    /// - Parameter splitEncoderDirectory: Opt-in (#1116). A directory from
+    ///   ``downloadSplitEncoder(to:progressHandler:)``. The encoder then runs as
+    ///   three models instead of `encoder.mlmodelc`, which is not loaded. Use it
+    ///   for the 2240 ms tier on Macs whose Neural Engine rejects the single
+    ///   encoder (M3 Pro: ~4 min first load, ~2 GB, CPU speed). Same weights;
+    ///   bit-identical outputs on M5 Pro. Throws, leaving the manager as it
+    ///   was, if the pieces don't match this model's metadata. `nil` (default)
+    ///   keeps the single encoder.
+    public func loadModels(from directory: URL, splitEncoderDirectory: URL? = nil) async throws {
         guard SystemInfo.isAppleSilicon else {
             throw ASRError.unsupportedPlatform(
                 "Nemotron multilingual int8 streaming models require Apple Silicon (ANE). Intel Macs are not supported."
@@ -357,9 +366,6 @@ public actor StreamingNemotronMultilingualAsrManager {
         }
 
         logger.info("Loading Nemotron multilingual CoreML models from \(directory.path)...")
-        // Remembered so vocabulary biasing can lazily load a logits-producing
-        // step decoder the tier priority skipped (see rebuildVocabularyBias).
-        self.modelDirectory = directory
 
         // Load config from metadata.json (required — the prompt dictionary lives here)
         let metadataPath = directory.appendingPathComponent(ModelNames.NemotronMultilingualStreaming.metadata)
@@ -368,7 +374,29 @@ public actor StreamingNemotronMultilingualAsrManager {
                 "metadata.json not found at \(metadataPath.path). The multilingual variant requires it for prompt_dictionary and lang_tag_token_ids."
             )
         }
-        self.config = try NemotronMultilingualStreamingConfig(from: metadataPath)
+        let loadedConfig = try NemotronMultilingualStreamingConfig(from: metadataPath)
+
+        // Opt-in split encoder (#1116): checked and loaded before any state
+        // changes, so a rejected split leaves an already-loaded manager intact.
+        let encoderConfiguration = Self.computeUnitOverride(
+            name: "FLUIDAUDIO_ENCODER_CU", base: mlConfiguration, logger: logger)
+        var splitEncoder: NemotronSplitEncoder?
+        if let splitEncoderDirectory {
+            guard loadedConfig.chunkMs == NemotronSplitEncoder.chunkMs else {
+                throw ASRError.processingFailed(
+                    "The split encoder is built for the \(NemotronSplitEncoder.chunkMs) ms tier, "
+                        + "not \(loadedConfig.chunkMs) ms")
+            }
+            let split = try await NemotronSplitEncoder.load(
+                from: splitEncoderDirectory, configuration: encoderConfiguration)
+            try split.validate(for: loadedConfig)
+            splitEncoder = split
+        }
+
+        // Remembered so vocabulary biasing can lazily load a logits-producing
+        // step decoder the tier priority skipped (see rebuildVocabularyBias).
+        self.modelDirectory = directory
+        self.config = loadedConfig
         self.lastToken = Int32(config.blankIdx)
         self.currentPromptId = Int32(config.defaultPromptId)
         logger.info(
@@ -381,23 +409,31 @@ public actor StreamingNemotronMultilingualAsrManager {
         self.melExtractor = NemotronMelExtractor(nMels: config.melFeatures)
         self.prefetchMelExtractor = NemotronMelExtractor(nMels: config.melFeatures)
 
-        let encoderURL = try await locateModelBundle(
-            in: directory,
-            compiled: ModelNames.NemotronMultilingualStreaming.encoderFile,
-            uncompiled: ModelNames.NemotronMultilingualStreaming.encoderPackage
-        )
-        self.encoder = try await MLModel.load(
-            contentsOf: encoderURL,
-            configuration: Self.computeUnitOverride(
-                name: "FLUIDAUDIO_ENCODER_CU", base: mlConfiguration, logger: logger)
-        )
+        if let splitEncoder, let splitEncoderDirectory {
+            self.encoder = .split(splitEncoder)
+            logger.info("Loaded split encoder (front end + layers 0-11 + 12-23) from \(splitEncoderDirectory.path)")
+        } else {
+            let encoderURL = try await locateModelBundle(
+                in: directory,
+                compiled: ModelNames.NemotronMultilingualStreaming.encoderFile,
+                uncompiled: ModelNames.NemotronMultilingualStreaming.encoderPackage
+            )
+            self.encoder = .single(try await MLModel.load(contentsOf: encoderURL, configuration: encoderConfiguration))
+        }
         // Detect stateful encoder (cache_channel/cache_time as MLState rather
-        // than I/O tensors). makeState() returns a fresh zero-initialized state.
-        if #available(macOS 15, iOS 18, tvOS 18, *) {
-            if let enc = self.encoder, !enc.modelDescription.stateDescriptionsByName.isEmpty {
-                self.encoderState = enc.makeState()
-                logger.info("Loaded stateful encoder (MLState cache) — using ANE-resident cache path")
-            }
+        // than I/O tensors). nil for stateless and split encoders, which also
+        // clears a state left by a previously loaded stateful encoder.
+        self.encoderState = self.encoder?.makeStateIfStateful()
+        if self.encoderState != nil {
+            logger.info("Loaded stateful encoder (MLState cache) — using ANE-resident cache path")
+        }
+        // The split encoder emits no `encoder_proj`, so the decode paths that
+        // need it (B3 decoder_joint_noencproj, smart-spec batched joint) are
+        // not loaded with it and B1/B2 or the bare pair are used instead.
+        let usesSplitEncoder = splitEncoder != nil
+        if usesSplitEncoder {
+            self.decoderJointNoEncProj = nil
+            self.jointNoEncProjBatched = nil
         }
 
         // Bare decoder + joint are optional (lean B1 ships omit them).
@@ -443,7 +479,7 @@ public actor StreamingNemotronMultilingualAsrManager {
         // Optional B3+B1 fused decoder+joint-without-encproj mlpackage. Takes
         // precedence over plain B1 decoder_joint when present (requires the
         // encoder to also emit `encoder_proj`).
-        if self.decoderJointArgmax == nil,
+        if self.decoderJointArgmax == nil, !usesSplitEncoder,
             let noEncProjURL = try await locateOptionalModelBundle(
                 in: directory, compiled: "decoder_joint_noencproj.mlmodelc",
                 uncompiled: "decoder_joint_noencproj.mlpackage"
@@ -470,10 +506,12 @@ public actor StreamingNemotronMultilingualAsrManager {
         // Takes pre-projected encoder_proj [1, K, 640] + decoder
         // [1, 640, 1] → logits [1, K, 1, V]. K is auto-detected from the
         // input shape further down.
-        if let specBatchedURL = try await locateOptionalModelBundle(
-            in: directory, compiled: "joint_noencproj_batched.mlmodelc",
-            uncompiled: "joint_noencproj_batched.mlpackage"
-        ) {
+        if !usesSplitEncoder,
+            let specBatchedURL = try await locateOptionalModelBundle(
+                in: directory, compiled: "joint_noencproj_batched.mlmodelc",
+                uncompiled: "joint_noencproj_batched.mlpackage"
+            )
+        {
             let specConfig = Self.computeUnitOverride(
                 name: "FLUIDAUDIO_JOINT_BATCHED_CU", base: mlConfiguration, logger: logger)
             self.jointNoEncProjBatched = try await MLModel.load(contentsOf: specBatchedURL, configuration: specConfig)
@@ -504,7 +542,9 @@ public actor StreamingNemotronMultilingualAsrManager {
             return v == "0" || v == "false" || v == "no"
         }()
         var smartSpecMissing: [String] = []
-        if self.jointNoEncProjBatched == nil {
+        if usesSplitEncoder {
+            smartSpecMissing.append("encoder_proj (the split encoder does not emit it)")
+        } else if self.jointNoEncProjBatched == nil {
             smartSpecMissing.append("joint_noencproj_batched.mlpackage")
         }
         if smartSpecExplicitlyDisabled {
@@ -540,7 +580,7 @@ public actor StreamingNemotronMultilingualAsrManager {
         // Build output-backing prediction options for each model. All output
         // shapes are static, so we can allocate once and pass via
         // MLPredictionOptions.outputBackings to skip per-call allocation.
-        self.encoderPredictionOptions = Self.makePredictionOptions(for: self.encoder)
+        self.encoderPredictionOptions = Self.makePredictionOptions(for: self.encoder?.singleModel)
         self.decoderPredictionOptions = Self.makePredictionOptions(for: self.decoder)
         self.jointPredictionOptions = Self.makePredictionOptions(for: self.joint)
         self.decoderJointPredictionOptions = Self.makePredictionOptions(for: self.decoderJoint)
@@ -916,12 +956,9 @@ public actor StreamingNemotronMultilingualAsrManager {
         cacheTime = caches.time
         cacheLen = caches.len
         // Stateful encoder: a fresh state has zero-initialized buffers, which
-        // matches what createInitialCaches produces. Recreate it on reset.
-        if #available(macOS 15, iOS 18, tvOS 18, *) {
-            if let enc = encoder, !enc.modelDescription.stateDescriptionsByName.isEmpty {
-                encoderState = enc.makeState()
-            }
-        }
+        // matches what createInitialCaches produces. Recreate it on reset
+        // (nil for stateless and split encoders).
+        encoderState = encoder?.makeStateIfStateful()
         // Seed cache_len with 1 instead of 0 so the encoder's
         // `ios17.slice_by_index` op never sees a zero-length slice, which would
         // fail CoreML shape inference and skip MPSGraph caching on every
