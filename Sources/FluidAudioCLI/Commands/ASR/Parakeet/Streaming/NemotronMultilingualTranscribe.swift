@@ -25,6 +25,9 @@ public class NemotronMultilingualTranscribe {
         /// Custom vocabulary file (JSON config or one-term-per-line text) for
         /// decode-time hotword biasing.
         var customVocabPath: String?
+        /// Opt-in split 2240 ms encoder (#1116), for Neural Engines that reject
+        /// the single encoder.
+        var splitEncoder = false
 
         public init() {}
     }
@@ -73,6 +76,8 @@ public class NemotronMultilingualTranscribe {
                 if i < arguments.count, let ms = Int(arguments[i]) {
                     config.chunkMs = ms
                 }
+            case "--split-encoder":
+                config.splitEncoder = true
             case "--custom-vocab":
                 i += 1
                 if i < arguments.count {
@@ -135,6 +140,8 @@ public class NemotronMultilingualTranscribe {
                 --prompt-id <int>         Raw prompt id (overrides --language)
                 --custom-vocab <path>     Vocabulary file for decode-time hotword biasing
                                           (JSON config or one-term-per-line text)
+                --split-encoder           Opt-in: run the 2240 ms encoder as three models, for
+                                          Neural Engines that reject the single one (#1116)
                 --help, -h                Show this help
 
             Notes:
@@ -186,7 +193,10 @@ public class NemotronMultilingualTranscribe {
         do {
             logger.info("Loading Nemotron multilingual models from \(modelDir.path)...")
             let manager = StreamingNemotronMultilingualAsrManager()
-            try await manager.loadModels(from: modelDir)
+            let splitDir =
+                config.splitEncoder
+                ? try await StreamingNemotronMultilingualAsrManager.downloadSplitEncoder(chunkMs: config.chunkMs) : nil
+            try await manager.loadModels(from: modelDir, splitEncoderDirectory: splitDir)
             logger.info("Models loaded successfully")
 
             // Apply language / prompt-id selection (prompt-id wins)

@@ -35,7 +35,7 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// the extractor's (non-thread-safe) FFT scratch buffers.
     internal var melExtractor: NemotronMelExtractor?
     internal var prefetchMelExtractor: NemotronMelExtractor?
-    internal var encoder: MLModel?
+    internal var encoder: NemotronMultilingualEncoder?
     internal var decoder: MLModel?
     internal var joint: MLModel?
     /// Optional fused decoder+joint mlpackage. If non-nil, the RNN-T inner
@@ -349,7 +349,14 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// Load models from a directory containing preprocessor, encoder, decoder,
     /// joint, plus `metadata.json` and `tokenizer.json`. Accepts either
     /// `.mlmodelc` (preferred) or uncompiled `.mlpackage` bundles.
-    public func loadModels(from directory: URL) async throws {
+    ///
+    /// - Parameter splitEncoderDirectory: Opt-in (#1116). A directory from
+    ///   ``downloadSplitEncoder(chunkMs:to:progressHandler:)``. The encoder then
+    ///   runs as three models instead of `encoder.mlmodelc`, which is not
+    ///   loaded. Use it for the 2240 ms tier on Macs whose Neural Engine
+    ///   rejects the single encoder (M3 Pro: ~4 min first load, ~2 GB, CPU
+    ///   speed). Outputs are identical. `nil` (default) keeps the single encoder.
+    public func loadModels(from directory: URL, splitEncoderDirectory: URL? = nil) async throws {
         guard SystemInfo.isAppleSilicon else {
             throw ASRError.unsupportedPlatform(
                 "Nemotron multilingual int8 streaming models require Apple Silicon (ANE). Intel Macs are not supported."
@@ -381,20 +388,28 @@ public actor StreamingNemotronMultilingualAsrManager {
         self.melExtractor = NemotronMelExtractor(nMels: config.melFeatures)
         self.prefetchMelExtractor = NemotronMelExtractor(nMels: config.melFeatures)
 
-        let encoderURL = try await locateModelBundle(
-            in: directory,
-            compiled: ModelNames.NemotronMultilingualStreaming.encoderFile,
-            uncompiled: ModelNames.NemotronMultilingualStreaming.encoderPackage
-        )
-        self.encoder = try await MLModel.load(
-            contentsOf: encoderURL,
-            configuration: Self.computeUnitOverride(
-                name: "FLUIDAUDIO_ENCODER_CU", base: mlConfiguration, logger: logger)
-        )
+        let encoderConfiguration = Self.computeUnitOverride(
+            name: "FLUIDAUDIO_ENCODER_CU", base: mlConfiguration, logger: logger)
+        if let splitEncoderDirectory {
+            guard config.chunkMs == NemotronSplitEncoder.chunkMs else {
+                throw ASRError.processingFailed(
+                    "The split encoder is built for the \(NemotronSplitEncoder.chunkMs) ms tier, not \(config.chunkMs) ms")
+            }
+            self.encoder = .split(
+                try await NemotronSplitEncoder.load(from: splitEncoderDirectory, configuration: encoderConfiguration))
+            logger.info("Loaded split encoder (front end + layers 0-11 + 12-23) from \(splitEncoderDirectory.path)")
+        } else {
+            let encoderURL = try await locateModelBundle(
+                in: directory,
+                compiled: ModelNames.NemotronMultilingualStreaming.encoderFile,
+                uncompiled: ModelNames.NemotronMultilingualStreaming.encoderPackage
+            )
+            self.encoder = .single(try await MLModel.load(contentsOf: encoderURL, configuration: encoderConfiguration))
+        }
         // Detect stateful encoder (cache_channel/cache_time as MLState rather
         // than I/O tensors). makeState() returns a fresh zero-initialized state.
         if #available(macOS 15, iOS 18, tvOS 18, *) {
-            if let enc = self.encoder, !enc.modelDescription.stateDescriptionsByName.isEmpty {
+            if let enc = self.encoder?.singleModel, !enc.modelDescription.stateDescriptionsByName.isEmpty {
                 self.encoderState = enc.makeState()
                 logger.info("Loaded stateful encoder (MLState cache) — using ANE-resident cache path")
             }
@@ -540,7 +555,7 @@ public actor StreamingNemotronMultilingualAsrManager {
         // Build output-backing prediction options for each model. All output
         // shapes are static, so we can allocate once and pass via
         // MLPredictionOptions.outputBackings to skip per-call allocation.
-        self.encoderPredictionOptions = Self.makePredictionOptions(for: self.encoder)
+        self.encoderPredictionOptions = Self.makePredictionOptions(for: self.encoder?.singleModel)
         self.decoderPredictionOptions = Self.makePredictionOptions(for: self.decoder)
         self.jointPredictionOptions = Self.makePredictionOptions(for: self.joint)
         self.decoderJointPredictionOptions = Self.makePredictionOptions(for: self.decoderJoint)
@@ -918,7 +933,7 @@ public actor StreamingNemotronMultilingualAsrManager {
         // Stateful encoder: a fresh state has zero-initialized buffers, which
         // matches what createInitialCaches produces. Recreate it on reset.
         if #available(macOS 15, iOS 18, tvOS 18, *) {
-            if let enc = encoder, !enc.modelDescription.stateDescriptionsByName.isEmpty {
+            if let enc = encoder?.singleModel, !enc.modelDescription.stateDescriptionsByName.isEmpty {
                 encoderState = enc.makeState()
             }
         }

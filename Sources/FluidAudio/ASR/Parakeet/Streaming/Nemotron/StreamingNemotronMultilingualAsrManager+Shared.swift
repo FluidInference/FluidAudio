@@ -251,7 +251,7 @@ extension StreamingNemotronMultilingualAsrManager {
         self.prefetchMelExtractor = NemotronMelExtractor(nMels: shared.config.melFeatures)
 
         // Adopt shared MLModel references
-        self.encoder = shared.encoder
+        self.encoder = .single(shared.encoder)
         self.decoder = shared.decoder
         self.joint = shared.joint
         self.decoderJoint = shared.decoderJoint
@@ -283,7 +283,7 @@ extension StreamingNemotronMultilingualAsrManager {
 
         // Per-stream MLPredictionOptions (each contains pre-allocated
         // output buffers — CANNOT be shared across streams).
-        self.encoderPredictionOptions = Self.makePredictionOptions(for: self.encoder)
+        self.encoderPredictionOptions = Self.makePredictionOptions(for: self.encoder?.singleModel)
         self.decoderPredictionOptions = Self.makePredictionOptions(for: self.decoder)
         self.jointPredictionOptions = Self.makePredictionOptions(for: self.joint)
         self.decoderJointPredictionOptions = Self.makePredictionOptions(for: self.decoderJoint)
@@ -428,6 +428,43 @@ extension StreamingNemotronMultilingualAsrManager {
             )
         }
         return variantDir
+    }
+
+    /// Download the opt-in split 2240 ms encoder (#1116) and return its local
+    /// directory, for ``loadModels(from:splitEncoderDirectory:)``. One copy
+    /// serves both the `latin` and `multilingual` models (their encoders are
+    /// identical). Cached downloads are reused.
+    public static func downloadSplitEncoder(
+        chunkMs: Int = 2240,
+        to directory: URL? = nil,
+        progressHandler: ProgressHandler? = nil
+    ) async throws -> URL {
+        guard chunkMs == NemotronSplitEncoder.chunkMs else {
+            throw ASRError.processingFailed(
+                "The split encoder is published for the \(NemotronSplitEncoder.chunkMs) ms tier only")
+        }
+        let modelsBaseDir =
+            directory
+            ?? FileManager.default.urls(
+                for: .applicationSupportDirectory, in: .userDomainMask
+            ).first!
+            .appendingPathComponent("FluidAudio", isDirectory: true)
+            .appendingPathComponent("Models", isDirectory: true)
+        let repoCacheDir = modelsBaseDir.appendingPathComponent(Repo.nemotronMultilingual.folderName)
+        let splitDir = repoCacheDir.appendingPathComponent(NemotronSplitEncoder.subdirectory)
+        let cached = NemotronSplitEncoder.fileNames.allSatisfy {
+            FileManager.default.fileExists(atPath: splitDir.appendingPathComponent($0).appendingPathComponent("coremldata.bin").path)
+        }
+        if !cached {
+            try await ModelHub.download(
+                .nemotronMultilingual,
+                subdirectory: NemotronSplitEncoder.subdirectory,
+                to: repoCacheDir,
+                progressHandler: progressHandler,
+                shouldSkip: { $0.contains(".mlpackage") }
+            )
+        }
+        return splitDir
     }
 
     /// Detect the known tokenizer.json corruption shipped with latin variants

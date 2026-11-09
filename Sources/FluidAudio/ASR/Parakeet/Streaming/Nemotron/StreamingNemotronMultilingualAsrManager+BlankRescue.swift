@@ -443,7 +443,7 @@ extension StreamingNemotronMultilingualAsrManager {
         cacheTime = caches.time
         cacheLen = caches.len
         if #available(macOS 15, iOS 18, tvOS 18, *) {
-            if let enc = encoder, !enc.modelDescription.stateDescriptionsByName.isEmpty {
+            if let enc = encoder?.singleModel, !enc.modelDescription.stateDescriptionsByName.isEmpty {
                 encoderState = enc.makeState()
             }
         }

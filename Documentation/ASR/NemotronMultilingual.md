@@ -83,6 +83,28 @@ let detected = await manager.detectedLanguage()   // e.g. "fr-FR"
 await manager.reset()
 ```
 
+### Split 2240 ms encoder (opt-in, older Neural Engines)
+
+On some Macs the Neural Engine compiler rejects the single 2240 ms encoder
+(M3 Pro, macOS 27.3: ANE register allocation fails), so Core ML runs it on the
+CPU: about 4 minutes on first load, about 2 GB resident and CPU speed (#1116).
+The same encoder split into three models (conv front end, layers 0-11,
+layers 12-23) fits. Weights are the shipped encoder's and outputs are identical.
+It is opt-in; the default keeps the single encoder.
+
+```swift
+let modelDir = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
+    languageCode: "en-US", chunkMs: 2240)
+let splitDir = try await StreamingNemotronMultilingualAsrManager.downloadSplitEncoder()
+try await manager.loadModels(from: modelDir, splitEncoderDirectory: splitDir)
+```
+
+CLI: `fluidaudiocli nemotron-multilingual-transcribe --input audio.wav --split-encoder`.
+The pieces live in `encoder-split/2240ms/` on Hugging Face (one copy for the
+`latin` and `multilingual` models), so default downloads never fetch them.
+Only the 2240 ms tier is split. On M5 Pro (macOS 27.0) the split runs 8.2 ms
+per chunk against 9.8 ms for the single encoder.
+
 ### Custom vocabulary (hotword biasing)
 
 The Nemotron exports ship no CTC head, so the sliding-window path's CTC

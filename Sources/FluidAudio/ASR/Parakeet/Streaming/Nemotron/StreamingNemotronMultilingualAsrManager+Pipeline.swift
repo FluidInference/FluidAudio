@@ -144,7 +144,9 @@ extension StreamingNemotronMultilingualAsrManager {
             promptIdArray[0] = NSNumber(value: currentPromptIdValue())
 
             let encoderOutput: MLFeatureProvider
-            if #available(macOS 15, iOS 18, tvOS 18, *), let state = encoderState as? MLState {
+            if #available(macOS 15, iOS 18, tvOS 18, *), let state = encoderState as? MLState,
+                let model = encoder.singleModel
+            {
                 let statefulInput = try MLDictionaryFeatureProvider(dictionary: [
                     "mel": MLFeatureValue(multiArray: inputMel),
                     "mel_length": MLFeatureValue(multiArray: melLen),
@@ -152,9 +154,9 @@ extension StreamingNemotronMultilingualAsrManager {
                     "prompt_id": MLFeatureValue(multiArray: promptIdArray),
                 ])
                 if let opts = encoderPredictionOptions {
-                    encoderOutput = try await encoder.prediction(from: statefulInput, using: state, options: opts)
+                    encoderOutput = try await model.prediction(from: statefulInput, using: state, options: opts)
                 } else {
-                    encoderOutput = try await encoder.prediction(from: statefulInput, using: state)
+                    encoderOutput = try await model.prediction(from: statefulInput, using: state)
                 }
                 if let newLen = encoderOutput.featureValue(for: "cache_len_out")?.multiArrayValue {
                     self.cacheLen = newLen
