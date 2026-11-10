@@ -1091,6 +1091,19 @@ public enum ModelNames {
         public static let decoderFile = decoder + ".mlmodelc"
         public static let jointFile = joint + ".mlmodelc"
 
+        /// `encoder.mlmodelc` with the conv-cache slice of a concat rewritten so
+        /// M2 and M3 Neural Engines compile it; the original makes Core ML run
+        /// the encoder on the CPU there (issue #1141). Same weights, inputs and
+        /// outputs, byte-identical results. Published once per tier in
+        /// `encoder-v2/<tier>ms/` for both `latin` and `multilingual`, outside
+        /// the tier folders that older releases download whole. Loaded in place
+        /// of `encoder.mlmodelc` when a model directory has it.
+        public static let encoderV2File = "encoder_v2.mlmodelc"
+        /// Tiers with ``encoderV2File``. 4480 ms has no such slice.
+        public static let encoderV2ChunkMs: Set<Int> = [560, 1120, 2240]
+
+        static func encoderV2Subdirectory(chunkMs: Int) -> String { "encoder-v2/\(chunkMs)ms" }
+
         /// Same model names with the uncompiled `.mlpackage` extension that
         /// `mobius/.../coreml/build_int8/` ships before CoreML compilation.
         /// `StreamingNemotronMultilingualAsrManager` accepts either layout

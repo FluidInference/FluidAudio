@@ -83,6 +83,32 @@ let detected = await manager.detectedLanguage()   // e.g. "fr-FR"
 await manager.reset()
 ```
 
+### Encoder v2 (M2 and M3 Neural Engines)
+
+The Neural Engine compiler rejects the original 560, 1120 and 2240 ms
+encoders on an M2 Pro (#1141) and the 2240 ms one on an M3 Pro (#1116), and
+Core ML silently runs the whole encoder on the CPU: 20 s to 6.5 min first
+load, 1-2 GB more memory and about 200 ms per step. On the M2 the trigger is
+the conv-cache update in each Conformer layer, a slice of a concat
+(`concat(cache, x)[..., T:T+8]`). `encoder_v2.mlmodelc` is the same encoder
+with each of those slices rewritten as slices of the concat's inputs, which
+also fixes the M3's 2240 ms compile. Weights, inputs and outputs are unchanged,
+and the outputs are byte-identical to the original encoder's. On the M2 Pro
+all three tiers compile for the ANE (12.4 / 13.2 / 17.3 ms per step, 13-16 s
+cold load); on the M3 Pro the 2240 ms tier runs at 11.9 ms per step. On an
+M5 Pro the 560 ms tier costs 0.4 ms more per step (one extra concat per
+layer); 1120 and 2240 ms are unchanged.
+
+`downloadVariant` fetches it for those tiers instead of the tier folder's
+`encoder.mlmodelc`, and `loadModels(from:)` / `preloadShared(from:)` load it
+whenever the model directory has it. It lives in `encoder-v2/<tier>ms/` on
+Hugging Face (one copy for both models), outside the tier folders that
+earlier releases download whole. A variant cached by an earlier release
+downloads it once (~565 MB); while offline, the cached `encoder.mlmodelc`
+keeps loading. The 4480 ms tier has no such slice and keeps `encoder.mlmodelc`.
+For a local `--model-dir`, copy `encoder-v2/<tier>ms/encoder_v2.mlmodelc` into
+the tier folder.
+
 ### Split 2240 ms encoder (opt-in, older Neural Engines)
 
 On some Macs the Neural Engine compiler rejects the single 2240 ms encoder
@@ -91,8 +117,9 @@ activations), so Core ML runs it on the CPU: about 4 minutes on first load,
 about 2 GB resident and CPU speed (#1116). The opt-in split runs the same
 encoder as three models (conv front end, layers 0-11, layers 12-23); split
 this way, the reporter's own build fit that ANE. The published pieces use the
-shipped encoder's weights and, on M5 Pro, produce bit-identical outputs; they
-are not yet verified on an M3 Pro. The default keeps the single encoder.
+shipped encoder's weights and, on M5 Pro, produce bit-identical outputs. The
+default keeps the single encoder. On the M2 Pro and M3 Pro, layers 12-23 of
+the split still run on the CPU; `encoder_v2.mlmodelc` (above) is the fix there.
 
 ```swift
 let modelDir = try await StreamingNemotronMultilingualAsrManager.downloadVariant(

@@ -79,6 +79,8 @@ extension StreamingNemotronMultilingualAsrManager {
     /// - With shared+loadFromShared(): 1 × ~1.5 GB models + N × ~50 MB state
     ///
     /// `configuration` defaults to `.cpuAndNeuralEngine` (ANE path).
+    /// `encoder_v2.mlmodelc` (#1141) is loaded in place of `encoder.mlmodelc`
+    /// when `directory` has it.
     public static func preloadShared(
         from directory: URL,
         configuration: MLModelConfiguration? = nil
@@ -107,7 +109,7 @@ extension StreamingNemotronMultilingualAsrManager {
 
         let encoder = try await Self.loadShared(
             directory: directory,
-            compiledName: ModelNames.NemotronMultilingualStreaming.encoderFile,
+            compiledName: Self.compiledEncoderName(in: directory),
             packageName: ModelNames.NemotronMultilingualStreaming.encoderPackage,
             configuration: mlConfiguration
         )
@@ -354,10 +356,15 @@ extension StreamingNemotronMultilingualAsrManager {
     /// HuggingFace repo (compiled `.mlmodelc` only) and return the local
     /// variant directory. Cached downloads are reused.
     ///
+    /// The 560, 1120 and 2240 ms tiers get `encoder_v2.mlmodelc` (#1141) in
+    /// place of the tier folder's `encoder.mlmodelc`. A variant cached by an
+    /// earlier release fetches it once; if that fails (offline), the cached
+    /// `encoder.mlmodelc` is kept and loaded.
+    ///
     /// - Parameter includeEncoder: Pass `false` when loading with the opt-in
     ///   split encoder (``downloadSplitEncoder(to:progressHandler:)``): the
-    ///   single `encoder.mlmodelc` (~565 MB), which split mode never opens, is
-    ///   then not downloaded. A later call with `true` fetches it.
+    ///   single encoder (~565 MB), which split mode never opens, is then not
+    ///   downloaded. A later call with `true` fetches it.
     public static func downloadVariant(
         languageCode: String = "auto",
         chunkMs: Int = 2240,
@@ -375,15 +382,22 @@ extension StreamingNemotronMultilingualAsrManager {
         let variantDir = repoCacheDir.appendingPathComponent(subdirectory)
         let metadataPath = variantDir.appendingPathComponent(
             ModelNames.NemotronMultilingualStreaming.metadata)
+        let usesEncoderV2 =
+            includeEncoder && ModelNames.NemotronMultilingualStreaming.encoderV2ChunkMs.contains(chunkMs)
         let skip: @Sendable (String) -> Bool = { path in
-            path.contains(".mlpackage") || (!includeEncoder && Self.isSingleEncoderPath(path))
+            Self.skipsVariantPath(path, includeEncoder: includeEncoder, chunkMs: chunkMs)
         }
         // A variant fetched with includeEncoder: false has metadata but no
         // encoder; fetch it when the single encoder is wanted again.
         let encoderMissing =
-            includeEncoder
+            includeEncoder && !usesEncoderV2
             && !ModelCache.isCacheComplete(
                 at: variantDir, requiredFiles: [ModelNames.NemotronMultilingualStreaming.encoderFile])
+        let encoderV2Missing =
+            usesEncoderV2
+            && !ModelCache.isCacheComplete(
+                at: variantDir, requiredFiles: [ModelNames.NemotronMultilingualStreaming.encoderV2File])
+        var downloadedVariant = false
 
         if FileManager.default.fileExists(atPath: metadataPath.path) && !encoderMissing {
             // Repair pass for variants cached before 2026-05-31: the latin
@@ -430,11 +444,69 @@ extension StreamingNemotronMultilingualAsrManager {
                 .nemotronMultilingual,
                 subdirectory: subdirectory,
                 to: repoCacheDir,
-                progressHandler: progressHandler,
+                progressHandler: encoderV2Missing
+                    ? CtcModels.scaledProgressHandler(progressHandler, step: 0, of: 2) : progressHandler,
                 shouldSkip: skip
             )
+            downloadedVariant = true
+        }
+        if encoderV2Missing {
+            logger.info("Downloading \(ModelNames.NemotronMultilingualStreaming.encoderV2File) for \(chunkMs) ms...")
+            do {
+                try await downloadEncoderV2(
+                    chunkMs: chunkMs, into: variantDir,
+                    progressHandler: downloadedVariant
+                        ? CtcModels.scaledProgressHandler(progressHandler, step: 1, of: 2) : progressHandler)
+            } catch let error
+                where ModelCache.isCacheComplete(
+                    at: variantDir, requiredFiles: [ModelNames.NemotronMultilingualStreaming.encoderFile])
+            {
+                logger.warning(
+                    "Could not download \(ModelNames.NemotronMultilingualStreaming.encoderV2File) (\(error.localizedDescription)); keeping the cached encoder.mlmodelc"
+                )
+            }
         }
         return variantDir
+    }
+
+    /// Paths a variant download skips: `.mlpackage` sources, and the tier
+    /// folder's `encoder.mlmodelc` when the split encoder is used instead
+    /// (`includeEncoder: false`) or the tier gets `encoder_v2.mlmodelc`.
+    static func skipsVariantPath(_ path: String, includeEncoder: Bool, chunkMs: Int) -> Bool {
+        let skipsEncoder =
+            !includeEncoder || ModelNames.NemotronMultilingualStreaming.encoderV2ChunkMs.contains(chunkMs)
+        return path.contains(".mlpackage") || (skipsEncoder && isSingleEncoderPath(path))
+    }
+
+    /// Download `encoder_v2.mlmodelc` (#1141) for the `chunkMs` tier into
+    /// `variantDir`. It is published once per tier outside the tier folders,
+    /// so it lands under `variantDir/encoder-v2/` first (where an interrupted
+    /// download resumes) and is then moved next to the other models.
+    /// `configuration` is the test seam of `ModelHub.download`.
+    static func downloadEncoderV2(
+        chunkMs: Int, into variantDir: URL, progressHandler: ProgressHandler?,
+        configuration: URLSessionConfiguration? = nil
+    ) async throws {
+        let subdirectory = ModelNames.NemotronMultilingualStreaming.encoderV2Subdirectory(chunkMs: chunkMs)
+        try await ModelHub.download(
+            .nemotronMultilingual, subdirectory: subdirectory, to: variantDir, progressHandler: progressHandler,
+            configuration: configuration)
+        let name = ModelNames.NemotronMultilingualStreaming.encoderV2File
+        let staged = variantDir.appendingPathComponent(subdirectory)
+        let destination = variantDir.appendingPathComponent(name)
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: destination.path) {
+            try fileManager.removeItem(at: destination)
+        }
+        try fileManager.moveItem(at: staged.appendingPathComponent(name), to: destination)
+        try? fileManager.removeItem(at: staged.deletingLastPathComponent())
+    }
+
+    /// `encoder_v2.mlmodelc` (#1141) when `directory` has it, else `encoder.mlmodelc`.
+    static func compiledEncoderName(in directory: URL) -> String {
+        let encoderV2 = ModelNames.NemotronMultilingualStreaming.encoderV2File
+        return FileManager.default.fileExists(atPath: directory.appendingPathComponent(encoderV2).path)
+            ? encoderV2 : ModelNames.NemotronMultilingualStreaming.encoderFile
     }
 
     /// The tier the opt-in split encoder is published for (#1116).
