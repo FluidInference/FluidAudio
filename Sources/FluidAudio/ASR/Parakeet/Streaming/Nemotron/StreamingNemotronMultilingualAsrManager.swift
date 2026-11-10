@@ -349,6 +349,8 @@ public actor StreamingNemotronMultilingualAsrManager {
     /// Load models from a directory containing preprocessor, encoder, decoder,
     /// joint, plus `metadata.json` and `tokenizer.json`. Accepts either
     /// `.mlmodelc` (preferred) or uncompiled `.mlpackage` bundles.
+    /// `encoder_v2.mlmodelc` (#1141) is loaded in place of `encoder.mlmodelc`
+    /// when the directory has it.
     ///
     /// - Parameter splitEncoderDirectory: Opt-in (#1116). A directory from
     ///   ``downloadSplitEncoder(to:progressHandler:)``. The encoder then runs as
@@ -415,7 +417,7 @@ public actor StreamingNemotronMultilingualAsrManager {
         } else {
             let encoderURL = try await locateModelBundle(
                 in: directory,
-                compiled: ModelNames.NemotronMultilingualStreaming.encoderFile,
+                compiled: Self.compiledEncoderName(in: directory),
                 uncompiled: ModelNames.NemotronMultilingualStreaming.encoderPackage
             )
             self.encoder = .single(try await MLModel.load(contentsOf: encoderURL, configuration: encoderConfiguration))
