@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import XCTest
 
@@ -151,5 +152,114 @@ final class CohereLongFormTests: XCTestCase {
         let suffix = Array(300..<344) + phrase + Array(400..<460)
         let merged = CoherePipeline.mergeTokenStreams(prefix: prefix, suffix: suffix)
         XCTAssertEqual(merged, prefix + suffix)
+    }
+
+    // MARK: - Pause-aligned chunks (languages written without spaces, #1140)
+
+    private let fixtures = [
+        "01-validation-request-21.4s.wav",
+        "02-release-readiness-19.8s.wav",
+        "03-diff-explanation-16.9s.wav",
+    ]
+
+    func testPauseChunksFitTheEncoderWindow() {
+        XCTAssertLessThanOrEqual(CohereAsrConfig.pauseChunkSeconds, CohereAsrConfig.maxAudioSeconds)
+        XCTAssertLessThan(CohereAsrConfig.pauseSearchSeconds, CohereAsrConfig.pauseChunkSeconds)
+        // Upstream `min_energy_window_samples`.
+        XCTAssertEqual(CohereAsrConfig.pauseEnergyWindowSamples, 1_600)
+    }
+
+    func testOnlyJapaneseAndChineseWriteWithoutSpaces() {
+        for language in CohereAsrConfig.Language.allCases {
+            XCTAssertEqual(
+                language.writesWithoutSpaces, language == .japanese || language == .chinese,
+                language.rawValue)
+        }
+    }
+
+    func testPauseChunksTileRealSpeechAndCutAtTheQuietestWindow() throws {
+        // Three recordings back to back: ~58 s of speech, so the splitter has
+        // to find pauses inside speech rather than at file boundaries.
+        let audio = try fixtures.flatMap { try loadSamples(fixtureURL($0)) }
+        let sr = Float(CohereAsrConfig.sampleRate)
+        let maxChunk = Int(CohereAsrConfig.pauseChunkSeconds * sr)
+        let search = Int(CohereAsrConfig.pauseSearchSeconds * sr)
+        let window = CohereAsrConfig.pauseEnergyWindowSamples
+
+        let chunks = CoherePipeline.pauseAlignedChunks(
+            audio, maxChunkSamples: maxChunk, searchSamples: search, windowSamples: window)
+
+        XCTAssertGreaterThanOrEqual(chunks.count, 3)
+        XCTAssertEqual(chunks.first?.lowerBound, 0)
+        XCTAssertEqual(chunks.last?.upperBound, audio.count)
+        for (previous, next) in zip(chunks, chunks.dropFirst()) {
+            XCTAssertEqual(previous.upperBound, next.lowerBound, "chunks must be contiguous")
+        }
+        for chunk in chunks {
+            XCTAssertFalse(chunk.isEmpty)
+            XCTAssertLessThanOrEqual(chunk.count, maxChunk)
+        }
+        for chunk in chunks.dropLast() {
+            let limit = chunk.lowerBound + maxChunk
+            let searchStart = limit - search
+            XCTAssertGreaterThanOrEqual(chunk.upperBound, searchStart)
+            XCTAssertLessThan(chunk.upperBound, limit)
+            // The cut is the start of the lowest-energy window in the search.
+            var lowest = Float.infinity
+            var quietest = searchStart
+            var offset = searchStart
+            while offset + window < limit {
+                let energy = audio[offset..<(offset + window)].reduce(0) { $0 + $1 * $1 }
+                if energy < lowest {
+                    lowest = energy
+                    quietest = offset
+                }
+                offset += window
+            }
+            XCTAssertEqual(chunk.upperBound, quietest)
+        }
+    }
+
+    func testAudioThatFitsOnePauseChunkStaysWhole() throws {
+        let audio = try loadSamples(fixtureURL(fixtures[2]))  // 16.9 s
+        let chunks = CoherePipeline.pauseAlignedChunks(
+            audio, maxChunkSamples: 20 * 16_000, searchSamples: 10 * 16_000, windowSamples: 1_600)
+        XCTAssertEqual(chunks, [0..<audio.count])
+    }
+
+    func testPauseSearchShorterThanOneWindowCutsAtItsMidpoint() throws {
+        let audio = try loadSamples(fixtureURL(fixtures[0]))
+        XCTAssertEqual(
+            CoherePipeline.quietestWindowStart(audio, from: 16_000, to: 17_000, windowSamples: 1_600),
+            16_500)
+    }
+
+    private func fixtureURL(_ name: String) throws -> URL {
+        guard
+            let url = Bundle.module.url(forResource: "Fixtures/\(name)", withExtension: nil)
+                ?? Bundle.module.url(forResource: name, withExtension: nil)
+        else {
+            throw XCTSkip("fixture \(name) missing from test bundle")
+        }
+        return url
+    }
+
+    /// Decode a fixture to 16 kHz mono Float32 samples.
+    private func loadSamples(_ url: URL) throws -> [Float] {
+        let file = try AVAudioFile(forReading: url)
+        let format = file.processingFormat
+        XCTAssertEqual(format.sampleRate, 16_000, "fixtures are 16 kHz")
+        XCTAssertEqual(format.channelCount, 1, "fixtures are mono")
+        guard
+            let buffer = AVAudioPCMBuffer(
+                pcmFormat: format, frameCapacity: AVAudioFrameCount(file.length))
+        else {
+            throw XCTSkip("could not allocate a buffer for \(url.lastPathComponent)")
+        }
+        try file.read(into: buffer)
+        guard let channel = buffer.floatChannelData?[0] else {
+            throw XCTSkip("fixture \(url.lastPathComponent) is not float PCM")
+        }
+        return Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
     }
 }

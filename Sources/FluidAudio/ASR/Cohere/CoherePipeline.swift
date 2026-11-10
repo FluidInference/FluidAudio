@@ -694,6 +694,11 @@ public actor CoherePipeline {
     /// Mirrors the upstream Python pipeline's `overlap_chunk_second: 5`. No
     /// model changes — the encoder still sees a fixed `[1, 128, 3500]` mel and
     /// the decoder cache is reset per chunk.
+    ///
+    /// Languages written without spaces (Japanese, Chinese) take a different
+    /// path: the audio is cut into non-overlapping chunks of at most
+    /// `pauseChunkSeconds` that start and end at pauses, and the chunk texts
+    /// are joined. The sliding window loses whole sentences there (#1140).
     public func transcribeLong(
         audio: [Float],
         models: LoadedModels,
@@ -717,6 +722,17 @@ public actor CoherePipeline {
                 maxNewTokens: maxNewTokens,
                 repetitionPenalty: repetitionPenalty,
                 noRepeatNgram: noRepeatNgram)
+        }
+
+        if language.writesWithoutSpaces {
+            return try await transcribePauseChunks(
+                audio: audio,
+                models: models,
+                language: language,
+                maxNewTokens: maxNewTokens,
+                repetitionPenalty: repetitionPenalty,
+                noRepeatNgram: noRepeatNgram,
+                startTime: total0)
         }
 
         var mergedTokens: [Int] = []
@@ -768,6 +784,128 @@ public actor CoherePipeline {
             decoderSeconds: decoderSecs,
             totalSeconds: CFAbsoluteTimeGetCurrent() - total0,
             cappedWindows: cappedWindows)
+    }
+
+    /// Long-form path for languages written without spaces: decode
+    /// non-overlapping chunks that start and end at pauses, and join their
+    /// texts with no separator.
+    ///
+    /// The 35 s sliding window loses whole sentences of Japanese read speech:
+    /// a window that starts a few seconds into an utterance makes the decoder
+    /// skip ahead to a later sentence and stop, and windows holding several
+    /// sentences drop some. Upstream PyTorch does the same on those windows.
+    /// Chunks of at most `pauseChunkSeconds` cut at the quietest point of the
+    /// `pauseSearchSeconds` before that limit keep almost every sentence (#1140).
+    private func transcribePauseChunks(
+        audio: [Float],
+        models: LoadedModels,
+        language: CohereAsrConfig.Language,
+        maxNewTokens: Int?,
+        repetitionPenalty: Float,
+        noRepeatNgram: Int,
+        startTime: CFAbsoluteTime
+    ) async throws -> TranscriptionResult {
+        let sr = CohereAsrConfig.sampleRate
+        let chunks = Self.pauseAlignedChunks(
+            audio,
+            maxChunkSamples: Int(CohereAsrConfig.pauseChunkSeconds * Float(sr)),
+            searchSamples: Int(CohereAsrConfig.pauseSearchSeconds * Float(sr)),
+            windowSamples: CohereAsrConfig.pauseEnergyWindowSamples)
+
+        var tokens: [Int] = []
+        var texts: [String] = []
+        var encoderSecs: Double = 0
+        var decoderSecs: Double = 0
+        var cappedWindows = 0
+        for (index, range) in chunks.enumerated() {
+            let result = try await transcribe(
+                audio: Array(audio[range]),
+                models: models,
+                language: language,
+                maxNewTokens: maxNewTokens,
+                repetitionPenalty: repetitionPenalty,
+                noRepeatNgram: noRepeatNgram)
+
+            encoderSecs += result.encoderSeconds
+            decoderSecs += result.decoderSeconds
+            cappedWindows += result.cappedWindows
+            pipelineLogger.debug(
+                "Chunk \(index) [\(String(format: "%.2f", Double(range.lowerBound) / Double(sr)))s, "
+                    + "\(String(format: "%.2f", Double(range.upperBound) / Double(sr)))s): "
+                    + "\(result.tokenIds.count) tokens"
+                    + (result.cappedWindows > 0 ? ", hit cap" : ""))
+
+            tokens += result.tokenIds
+            let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty { texts.append(text) }
+        }
+
+        return TranscriptionResult(
+            text: texts.joined(),
+            tokenIds: tokens,
+            encoderSeconds: encoderSecs,
+            decoderSeconds: decoderSecs,
+            totalSeconds: CFAbsoluteTimeGetCurrent() - startTime,
+            cappedWindows: cappedWindows)
+    }
+
+    /// Cut `audio` into contiguous, non-overlapping chunks of at most
+    /// `maxChunkSamples`, each ending at a pause.
+    ///
+    /// Port of upstream `split_audio_chunks_energy` with configurable lengths:
+    /// from each chunk start, the cut goes at the start of the
+    /// `windowSamples`-long window with the least energy among those stepped
+    /// through the `searchSamples` before the chunk limit. Audio that fits in
+    /// one chunk is returned whole.
+    static func pauseAlignedChunks(
+        _ audio: [Float],
+        maxChunkSamples: Int,
+        searchSamples: Int,
+        windowSamples: Int
+    ) -> [Range<Int>] {
+        guard audio.count > maxChunkSamples, maxChunkSamples > 0 else {
+            return audio.isEmpty ? [] : [0..<audio.count]
+        }
+
+        var chunks: [Range<Int>] = []
+        var start = 0
+        while start < audio.count {
+            let limit = start + maxChunkSamples
+            if limit >= audio.count {
+                chunks.append(start..<audio.count)
+                break
+            }
+            let cut = quietestWindowStart(
+                audio, from: max(start, limit - searchSamples), to: limit, windowSamples: windowSamples)
+            // A cut at the chunk start would never advance.
+            let end = max(start + 1, cut)
+            chunks.append(start..<end)
+            start = end
+        }
+        return chunks
+    }
+
+    /// Start of the lowest-energy `windowSamples` window stepped through
+    /// `[from, to)`; the midpoint when the range is shorter than one window.
+    static func quietestWindowStart(
+        _ audio: [Float], from: Int, to: Int, windowSamples: Int
+    ) -> Int {
+        guard to - from > windowSamples, windowSamples > 0 else { return (from + to) / 2 }
+        var quietest = from
+        var lowest = Float.infinity
+        audio.withUnsafeBufferPointer { samples in
+            var offset = from
+            while offset + windowSamples < to {
+                var energy: Float = 0
+                vDSP_svesq(samples.baseAddress! + offset, 1, &energy, vDSP_Length(windowSamples))
+                if energy < lowest {
+                    lowest = energy
+                    quietest = offset
+                }
+                offset += windowSamples
+            }
+        }
+        return quietest
     }
 
     /// Merge two adjacent chunk token streams using longest-common-substring.
