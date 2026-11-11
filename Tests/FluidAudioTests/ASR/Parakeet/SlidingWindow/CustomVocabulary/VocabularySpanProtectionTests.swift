@@ -161,6 +161,30 @@ final class VocabularySpanProtectionTests: XCTestCase {
         }
     }
 
+    // The original phrase is also scored without the punctuation around its words, which CTC may not have
+    // emitted (#1151).
+    func testTheSpokenPhraseDropsOnlyThePunctuationAroundEachWord() {
+        let cases: [(phrase: String, spoken: String)] = [
+            ("brands.", "brands"),
+            ("Okay,", "Okay"),
+            ("you check again?", "you check again"),
+            ("(Speak Mac),", "Speak Mac"),
+            ("“Speak Mac,”", "Speak Mac"),
+            ("¡¿Speak Mac?", "Speak Mac"),
+            ("Mac...", "Mac"),
+            ("well , okay", "well okay"),
+            // Apostrophes, hyphens and marks inside a word stay.
+            ("Quilter's", "Quilter's"),
+            ("Jones'", "Jones'"),
+            ("Shankar-Solansky said", "Shankar-Solansky said"),
+            ("3.5%", "3.5%"),
+            ("test", "test"),
+        ]
+        for (phrase, spoken) in cases {
+            XCTAssertEqual(VocabularyRescorer.strippingBoundaryPunctuation(phrase), spoken, phrase)
+        }
+    }
+
     func testCanonicalMatchAcceptsPossessivesOfTheTermOnly() {
         XCTAssertTrue(VocabularyRescorer.isCanonicalMatch("Quilter's", canonical: "Quilter"))
         XCTAssertTrue(VocabularyRescorer.isCanonicalMatch("Quilter’s,", canonical: "Quilter"))

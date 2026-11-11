@@ -141,6 +141,27 @@ final class VocabularySpanPreservationTests: XCTestCase {
         XCTAssertFalse(result.wasModified)
     }
 
+    /// A one-term vocabulary of a word nobody says must leave the speech alone (#1151). Without the rescue's
+    /// similarity floors, `zzqqxvwj` replaced "is mister Quilter's" on CTC evidence alone.
+    func testAnUnspokenTermDoesNotReplaceSpeechThroughTheRescue() async throws {
+        let (output, _, transcript) = try await rescoreQuilterPossessive(listing: "zzqqxvwj")
+        XCTAssertEqual(output.text, transcript)
+        XCTAssertFalse(output.wasModified)
+    }
+
+    /// "…than his matter.": the transcript's period is not speech, and scored with it `matter.` lost to a listed
+    /// `Matterport` (#1151). The original phrase is also scored as spoken.
+    func testASentenceFinalWordIsScoredWithoutItsPeriod() async throws {
+        let (output, evidence, transcript) = try await rescoreQuilterPossessive(listing: "Matterport")
+        XCTAssertEqual(output.text, transcript)
+        XCTAssertFalse(output.wasModified)
+        // Weighed and rejected, not skipped before the comparison.
+        XCTAssertTrue(
+            evidence.candidates.contains {
+                $0.basePhrase == "matter." && $0.canonicalTerm == "Matterport" && !$0.comparisonPassed
+            })
+    }
+
     func testMisspelledAndSplitNamesAreCorrectedWithoutBorrowingTheirEvidenceTwice() async throws {
         let directory = CtcModels.defaultCacheDirectory()
         let models = try await installedCtcModels()
@@ -228,6 +249,42 @@ final class VocabularySpanPreservationTests: XCTestCase {
             XCTAssertEqual(result.text, "Quilter Quilter's", "coarse=\(coarse)")
             XCTAssertTrue(result.wasModified, "coarse=\(coarse)")
         }
+    }
+
+    /// The `quilter-possessive` recording rescored with a one-term vocabulary, the default config and the
+    /// session's thresholds for one term, with the evidence for every candidate.
+    private func rescoreQuilterPossessive(
+        listing term: String
+    ) async throws -> (
+        output: VocabularyRescorer.RescoreOutput, evidence: VocabularyRescorer.CandidateEvidenceOutput,
+        transcript: String
+    ) {
+        let directory = CtcModels.defaultCacheDirectory()
+        let models = try await installedCtcModels()
+        let spotter = CtcKeywordSpotter(models: models)
+        let tokenizer = try await CtcTokenizer.load(from: directory)
+        let root = try XCTUnwrap(Bundle.module.url(forResource: "Fixtures", withExtension: nil))
+            .appendingPathComponent("Vocabulary")
+        let fixtures = try JSONDecoder().decode(
+            [Fixture].self, from: Data(contentsOf: root.appendingPathComponent("tdt-v3.json")))
+        let fixture = try XCTUnwrap(fixtures.first { $0.id == "quilter-possessive" })
+        let audio = try AudioConverter().resampleAudioFile(root.appendingPathComponent("quilter-possessive.wav"))
+        let probabilities = try await spotter.computeLogProbs(for: audio)
+        let vocabulary = CustomVocabularyContext(terms: [
+            CustomVocabularyTerm(text: term, ctcTokenIds: tokenizer.encode(term))
+        ])
+        let size = ContextBiasingConstants.rescorerConfig(forVocabSize: 1)
+        let rescorer = try await VocabularyRescorer.create(
+            spotter: spotter, vocabulary: vocabulary, config: .default, ctcModelDirectory: directory)
+        let output = rescorer.ctcTokenRescore(
+            transcript: fixture.text, tokenTimings: fixture.tokenTimings,
+            logProbs: probabilities.logProbs, frameDuration: probabilities.frameDuration,
+            cbw: size.cbw, marginSeconds: 0.5, minSimilarity: size.minSimilarity)
+        let evidence = rescorer.ctcTokenEvaluateCandidates(
+            transcript: fixture.text, tokenTimings: fixture.tokenTimings,
+            logProbs: probabilities.logProbs, frameDuration: probabilities.frameDuration,
+            cbw: size.cbw, marginSeconds: 0.5, minSimilarity: size.minSimilarity)
+        return (output, evidence, fixture.text)
     }
 
     private var taperedConfig: VocabularyRescorer.Config {

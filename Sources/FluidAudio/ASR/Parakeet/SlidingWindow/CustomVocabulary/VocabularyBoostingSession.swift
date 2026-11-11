@@ -64,9 +64,9 @@ public struct VocabularyBoostingSession: Sendable {
     /// written words, so short word spans cover long acoustic stretches and
     /// become eligible for the spotter-anchored rescue pass at garbage
     /// spotter scores ('yen, down by 35.3%' → term at sim 0.20). The #702
-    /// similarity floors close exactly that hole; spelled-out engines
-    /// (SlidingWindow TDT) keep `.default`, where the rescue recovers brand
-    /// names the model mangles past the similarity gate.
+    /// similarity floors close exactly that hole. `.default` has the same
+    /// floors since #1151; this config also turns off `confidentWordBiasGate`,
+    /// which is calibrated on TDT token confidences.
     public static let itnDefaultConfig = VocabularyRescorer.Config(
         spotterRescueMinSimilarity: 0.30,
         spotterRescueMultiWordMinSimilarity: 0.50,

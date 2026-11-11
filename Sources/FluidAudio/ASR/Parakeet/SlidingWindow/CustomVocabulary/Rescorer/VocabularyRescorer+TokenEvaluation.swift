@@ -123,12 +123,30 @@ extension VocabularyRescorer {
         let marginFrames = Int(marginSeconds / frameDuration)
         let originalSearchStart = max(0, Int(candidate.spanStartTime / frameDuration) - marginFrames)
         let originalSearchEnd = min(logProbs.count, Int(candidate.spanEndTime / frameDuration) + marginFrames)
-        let (originalCtcScore, _, _) = spotter.ctcWordSpotConstrained(
+        var (originalCtcScore, _, _) = spotter.ctcWordSpotConstrained(
             logProbs: logProbs,
             keywordTokens: originalTokens,
             searchStartFrame: originalSearchStart,
             searchEndFrame: originalSearchEnd
         )
+        // The transcript's punctuation is not speech. CTC emits a mark at some pauses (`Okay,`) and not at others
+        // (a sentence-final `matter.`), and an unspoken mark drags the per-token average down far enough that a
+        // term beats the word that was said (`matter.` -2.96 and `matter` -1.15 against a boosted `Matterport`
+        // -1.52, #1151). Score the phrase as spoken too and keep the better of the two, as the term keeps the
+        // better of its two tokenizations.
+        let spokenPhrase = Self.strippingBoundaryPunctuation(candidate.originalPhrase)
+        if spokenPhrase != candidate.originalPhrase {
+            let spokenTokens = tokenizer.encode(spokenPhrase)
+            if !spokenTokens.isEmpty && spokenTokens != originalTokens {
+                let (spokenScore, _, _) = spotter.ctcWordSpotConstrained(
+                    logProbs: logProbs,
+                    keywordTokens: spokenTokens,
+                    searchStartFrame: originalSearchStart,
+                    searchEndFrame: originalSearchEnd
+                )
+                originalCtcScore = max(originalCtcScore, spokenScore)
+            }
+        }
 
         // Apply adaptive context-biasing weight, scaled to the variant
         // tokenization that actually scored best.
