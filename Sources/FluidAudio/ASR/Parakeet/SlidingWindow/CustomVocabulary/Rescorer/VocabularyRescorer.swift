@@ -58,13 +58,13 @@ public struct VocabularyRescorer: Sendable {
         public let shortTermCbwTaperExponent: Float
 
         /// Minimum string similarity for a single-word spotter-anchored rescue
-        /// (#702, opt-in). `0.0` disables (default), preserving the
-        /// acoustic-only rescue; a positive value (e.g. 0.30) suppresses
-        /// near-zero-similarity over-fires at some recall cost.
+        /// (#702). Default `0.30` (#1151), which stops near-zero-similarity
+        /// over-fires at some recall cost; `0.0` disables the floor, restoring
+        /// the acoustic-only rescue.
         public let spotterRescueMinSimilarity: Float
 
         /// Minimum string similarity for a multi-word spotter-anchored rescue.
-        /// `0.0` disables (default). Recommended opt-in: 0.50.
+        /// Default `0.50` (#1151); `0.0` disables.
         public let spotterRescueMultiWordMinSimilarity: Float
 
         /// Whether the spotter-anchored acoustic rescue pass runs at all (#724).

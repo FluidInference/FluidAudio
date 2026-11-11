@@ -1268,12 +1268,12 @@ enum TranscribeCommand {
                 --vocab-cbw <float>              Context-biasing weight boost (default: auto)
                 --vocab-margin <sec>             CTC frame alignment margin (default: 0.5)
 
-              Short-term over-fire controls (#702, opt-in; default off — these
-              improve precision on SHORT keyword vocabularies at some recall
-              cost on distinctive-name vocabularies):
-                --vocab-short-term-taper-pivot <n>   Reduce boost for terms with < n tokens (e.g. 5)
-                --vocab-spotter-min-sim <0-1>        Min similarity for acoustic single-word rescue (e.g. 0.30)
-                --vocab-spotter-min-sim-multi <0-1>  Min similarity for multi-word rescue (e.g. 0.50)
+              Short-term over-fire controls (#702; these improve precision on
+              SHORT keyword vocabularies at some recall cost on
+              distinctive-name vocabularies):
+                --vocab-short-term-taper-pivot <n>   Reduce boost for terms with < n tokens (e.g. 5; default off)
+                --vocab-spotter-min-sim <0-1>        Min similarity for acoustic one-word rescue (default 0.30; 0 = off)
+                --vocab-spotter-min-sim-multi <0-1>  Min similarity for multi-word rescue (default 0.50; 0 = off)
                 --vocab-disable-spotter-rescue       Turn the acoustic rescue OFF entirely (#724; pre-#634
                                                      behavior — biggest over-fire reduction for short vocabs;
                                                      the rescue only runs for vocabularies of <= 10 terms)

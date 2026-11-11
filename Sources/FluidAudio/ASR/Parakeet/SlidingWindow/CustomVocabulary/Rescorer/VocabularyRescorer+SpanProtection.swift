@@ -89,6 +89,17 @@ extension VocabularyRescorer {
         return result
     }
 
+    /// The phrase as spoken: each word without the punctuation around it ("brands." → "brands", "(Speak Mac),"
+    /// → "Speak Mac"). Punctuation inside a word, apostrophes and hyphens stay.
+    static func strippingBoundaryPunctuation(_ phrase: String) -> String {
+        phrase.split(separator: " ").compactMap { word -> Substring? in
+            var core = word[...]
+            while let first = core.first, openingPunctuation.contains(first) { core = core.dropFirst() }
+            while let last = core.last, closingPunctuation.contains(last) { core = core.dropLast() }
+            return core.isEmpty ? nil : core
+        }.joined(separator: " ")
+    }
+
     private static let closingPunctuation: Set<Character> = [
         ".", ",", "!", "?", ";", ":", "…", ")", "]", "}", "\"", "”", "»",
     ]
