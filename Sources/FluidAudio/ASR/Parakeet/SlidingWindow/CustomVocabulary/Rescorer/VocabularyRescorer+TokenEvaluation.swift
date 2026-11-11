@@ -227,10 +227,15 @@ extension VocabularyRescorer {
     }
 
     /// Whether the TDT decoder heard every word of the candidate's span with at least
-    /// `ContextBiasingConstants.confidentWordMinConfidence`.
+    /// `ContextBiasingConstants.confidentWordMinConfidence`. A word of punctuation alone (a standalone `-`) isn't
+    /// speech and doesn't count either way (#1151).
     static func isConfidentlyHeard(_ candidate: CTCMatchCandidate, wordTimings: [WordTiming]) -> Bool {
-        guard !candidate.spanIndices.isEmpty else { return false }
-        return candidate.spanIndices.allSatisfy { index in
+        let spoken = candidate.spanIndices.filter { index in
+            !wordTimings.indices.contains(index)
+                || wordTimings[index].word.unicodeScalars.contains(where: CharacterSet.alphanumerics.contains)
+        }
+        guard !spoken.isEmpty else { return false }
+        return spoken.allSatisfy { index in
             guard wordTimings.indices.contains(index), let confidence = wordTimings[index].minConfidence else {
                 return false
             }

@@ -423,9 +423,9 @@ public struct VocabularyRescorer: Sendable {
         public let startTime: Double
         public let endTime: Double
         let tokenRange: Range<Int>?
-        /// Lowest TDT token confidence over the word's letters and digits; nil when the timings carry none.
-        /// A punctuation token doesn't count: TDT is often unsure of a sentence-final `.` or a `,` after a word
-        /// it heard at full confidence (#1151).
+        /// Lowest TDT token confidence over the word's letters and digits; nil when the timings carry none or
+        /// the word is punctuation alone. A punctuation token doesn't count: TDT is often unsure of a
+        /// sentence-final `.` or a `,` after a word it heard at full confidence (#1151).
         var minConfidence: Float? = nil
     }
 

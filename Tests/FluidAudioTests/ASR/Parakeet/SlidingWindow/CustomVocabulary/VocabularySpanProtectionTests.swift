@@ -224,6 +224,18 @@ final class VocabularySpanProtectionTests: XCTestCase {
         XCTAssertFalse(
             VocabularyRescorer.isConfidentlyHeard(
                 candidate("sort Sarab", term: "Saurabh", indices: [1, 2], words: words), wordTimings: words))
+        // A standalone mark isn't speech: it neither blocks nor makes a confident span (#1151).
+        let dashed = VocabularyRescorer.buildWordTimings(from: [
+            TokenTiming(token: " well", tokenId: 1, startTime: 0, endTime: 0.16, confidence: 1),
+            TokenTiming(token: " -", tokenId: 2, startTime: 0.16, endTime: 0.24, confidence: 0.4),
+            TokenTiming(token: " known", tokenId: 3, startTime: 0.24, endTime: 0.4, confidence: 0.995),
+        ])
+        XCTAssertTrue(
+            VocabularyRescorer.isConfidentlyHeard(
+                candidate("well - known", term: "Welknown", indices: [0, 1, 2], words: dashed), wordTimings: dashed))
+        XCTAssertFalse(
+            VocabularyRescorer.isConfidentlyHeard(
+                candidate("-", term: "Welknown", indices: [1], words: dashed), wordTimings: dashed))
         // Timings without confidence never count as confidently heard.
         let untimed = [word("sort", frame: 0, frames: 2)]
         XCTAssertFalse(
