@@ -259,4 +259,24 @@ final class FlushedSeamTokenTests: XCTestCase {
         XCTAssertEqual(merged.map(\.timestamp), [100, 110, 124])
         XCTAssertEqual(decode(merged), "hello here.")
     }
+
+    // MARK: - What an interior flush emits
+
+    /// The interior flush releases a held mark or finishes the word in
+    /// progress. A new word would sit at the window's last frame with no audio
+    /// under it: a trailing "nine" over digital silence on a MUSAN recording.
+    func testInteriorFlushKeepsMarksAndWordEndsOnly() {
+        let marks = ASRConstants.punctuationTokenIds(in: vocabulary)
+        func keeps(_ token: Int, _ vocabulary: [Int: String]?) -> Bool {
+            TdtDecoderV3.interiorFlushKeeps(token, vocabulary: vocabulary, punctuationTokenIds: marks)
+        }
+        XCTAssertTrue(keeps(90, vocabulary), "a sentence-final mark")
+        XCTAssertTrue(keeps(10, vocabulary), "a piece that ends the word in progress")
+        XCTAssertFalse(keeps(5, vocabulary), "a piece that starts a new word")
+        // Loaded vocabularies spell the word boundary as a space.
+        XCTAssertFalse(keeps(5, [5: " more"]), "a new word with the boundary as a space")
+        // Without a vocabulary only the marks pass.
+        XCTAssertTrue(keeps(90, nil))
+        XCTAssertFalse(keeps(10, nil))
+    }
 }

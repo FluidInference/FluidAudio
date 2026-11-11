@@ -577,6 +577,15 @@ is dropped whenever the right window heard the same stretch
 (`FlushedSeamTokenTests`). The flush is V3-family only; `TdtDecoderV2` has
 none.
 
+An interior window's flush emits only what the pause left pending: a
+mark, or a piece that ends the word in progress
+(`TdtDecoderV3.interiorFlushKeeps`). It stops at the first piece that
+starts a new word, which has no audio under it at the window's last
+frame: on the same MUSAN run, the second-to-last window of a recording ran
+on past the end-aligned final window into digital silence and flushed
+`▁n ine`, so the transcript ended `Ginger Cucolo nine`. The last window's
+flush is unchanged.
+
 Two merge rules limit what a flushed mark can cost the right window
 (`mergeChunks` / `joinAtPause`). A mark has no extent in the
 audio, but stamped at the last frame it can reach past the right window's
@@ -1018,6 +1027,8 @@ The rules that follow from that:
     stretch — and when the right window's first word is clear of the left
     window's last word, it costs the right window nothing
     (`FlushedSeamTokenTests`, issue #1110)
+  - an interior window's flush never starts a new word: it emits marks and
+    the end of the word in progress only (`interiorFlushKeeps`, issue #1110)
 
 ## How This Path Evolved
 

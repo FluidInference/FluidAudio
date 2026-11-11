@@ -547,6 +547,17 @@ internal struct TdtDecoderV3: Sendable {
                 if token == config.tdtConfig.blankId {
                     consecutiveBlanks += 1
                 } else {
+                    // An interior window flushes only what its pause left
+                    // pending: a mark, or the end of the word in progress. A
+                    // new word at its last frame is not in its audio (a
+                    // trailing "nine" over digital silence), so the flush
+                    // stops there.
+                    if !isLastChunk,
+                        !Self.interiorFlushKeeps(
+                            token, vocabulary: vocabulary, punctuationTokenIds: punctuationTokenIds)
+                    {
+                        break
+                    }
                     consecutiveBlanks = 0  // Reset on non-blank
 
                     let finalTimestamp =
@@ -618,6 +629,20 @@ internal struct TdtDecoderV3: Sendable {
         // the issue #512 Polish samples (0 filter swaps across 7 clips), so no
         // filter call is needed here; post-processing handles deduplication.
         return hypothesis
+    }
+
+    /// Whether the pending-token flush of an interior window keeps `token`
+    /// (issue #1110): a sentence-final mark, or a piece that does not start a
+    /// new word, such as a comma or the end of the word in progress. Without
+    /// a vocabulary only the marks are kept.
+    internal static func interiorFlushKeeps(
+        _ token: Int,
+        vocabulary: [Int: String]?,
+        punctuationTokenIds: Set<Int>?
+    ) -> Bool {
+        if punctuationTokenIds?.contains(token) == true { return true }
+        guard let piece = vocabulary?[token] else { return false }
+        return !isWordBoundary(piece)
     }
 
     internal static func shouldEmitToken(
