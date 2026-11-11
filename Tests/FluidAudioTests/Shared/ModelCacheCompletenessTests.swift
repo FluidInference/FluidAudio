@@ -144,6 +144,33 @@ final class ModelCacheCompletenessTests: XCTestCase {
         XCTAssertFalse(ModelCache.isCacheComplete(at: repoPath, requiredFiles: ["encoder.mlmodelc"]))
     }
 
+    /// A `model.mil` cut short in a download segfaults Core ML like a missing one.
+    func testTruncatedProgramIsIncomplete() throws {
+        let bundle = repoPath.appendingPathComponent("encoder.mlmodelc")
+        try CompiledBundleFixture.writeComplete(at: bundle)
+        let text = CompiledBundleFixture.programText
+        try Data(text.prefix(text.count / 2).utf8).write(to: bundle.appendingPathComponent("model.mil"))
+
+        XCTAssertEqual(ModelCache.missingProgramFile(in: bundle), "model.mil")
+    }
+
+    /// Files behind a symbolic link count by their target; a broken link is missing.
+    func testSymlinkedWeightsCountByTheirTarget() throws {
+        let bundle = repoPath.appendingPathComponent("encoder.mlmodelc")
+        try CompiledBundleFixture.writeComplete(at: bundle)
+        let weights = bundle.appendingPathComponent("weights/weight.bin")
+        let target = repoPath.appendingPathComponent("blobs/weight")
+        try FileManager.default.createDirectory(
+            at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("w".utf8).write(to: target)
+        try FileManager.default.removeItem(at: weights)
+        try FileManager.default.createSymbolicLink(at: weights, withDestinationURL: target)
+        XCTAssertNil(ModelCache.missingProgramFile(in: bundle))
+
+        try FileManager.default.removeItem(at: target)
+        XCTAssertEqual(ModelCache.missingProgramFile(in: bundle), "weights/weight.bin")
+    }
+
     func testNeuralNetworkBundleNeedsItsEspressoNet() throws {
         let bundle = repoPath.appendingPathComponent("legacy.mlmodelc")
         try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)

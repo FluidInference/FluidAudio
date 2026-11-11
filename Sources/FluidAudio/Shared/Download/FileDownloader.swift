@@ -49,8 +49,7 @@ enum FileDownloader {
             // left over from an older or interrupted download (issue #1147: a
             // `weight.bin` 9 MB longer than published). Fetch it again.
             guard recoveringBlockedPaths, file.size > 0,
-                let size = (try? FileManager.default.attributesOfItem(atPath: destination.path))?[.size] as? Int,
-                size != file.size
+                let size = ModelCache.fileSize(at: destination), size != file.size
             else {
                 return .alreadyPresent
             }

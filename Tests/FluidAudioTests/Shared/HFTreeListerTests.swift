@@ -295,6 +295,7 @@ final class HFTreeListerTests: XCTestCase {
             items: [
                 ["path": model, "type": "directory"],
                 ["path": "config.json", "type": "file", "size": 10],
+                ["path": "tokenizer.json", "type": "file", "size": 10],
             ])
         LinkedTreeStubURLProtocol.addJSONPage(
             url: modelDir,
@@ -308,6 +309,13 @@ final class HFTreeListerTests: XCTestCase {
             at: oversized.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data(String(repeating: "y", count: 19).utf8).write(to: oversized)
         try Data(String(repeating: "z", count: 10).utf8).write(to: matching)
+        // A link counts by its target, so a link to a file of the published size stays.
+        let linkTarget = workDir.appendingPathComponent("blobs/tokenizer")
+        try FileManager.default.createDirectory(
+            at: linkTarget.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(String(repeating: "q", count: 10).utf8).write(to: linkTarget)
+        let link = repoPath.appendingPathComponent("tokenizer.json")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: linkTarget)
 
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [LinkedTreeStubURLProtocol.self]
@@ -315,6 +323,9 @@ final class HFTreeListerTests: XCTestCase {
 
         XCTAssertEqual(try Data(contentsOf: oversized), Data(String(repeating: "x", count: 10).utf8))
         XCTAssertEqual(try Data(contentsOf: matching), Data(String(repeating: "z", count: 10).utf8))
+        XCTAssertEqual(
+            try FileManager.default.destinationOfSymbolicLink(atPath: link.path), linkTarget.path)
+        XCTAssertEqual(try Data(contentsOf: linkTarget), Data(String(repeating: "q", count: 10).utf8))
     }
 
     // MARK: - Typed errors

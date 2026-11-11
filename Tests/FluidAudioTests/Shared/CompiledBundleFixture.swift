@@ -5,11 +5,17 @@ import Foundation
 /// that names its weights, and the weights (issue #1147). Filesystem shape
 /// only; no model is created or loaded.
 enum CompiledBundleFixture {
-    /// A `model.mil` line in the shape Core ML compiles: one constant read from
-    /// `weights/weight.bin` through `@model_path/`.
+    /// A `model.mil` in the shape Core ML compiles: a program whose one constant
+    /// is read from `weights/weight.bin` through `@model_path/`.
     static let programText = """
-        tensor<fp16, [1]> w = const()[name = string("w"), val = tensor<fp16, [1]>(BLOBFILE(\
+        program(1.0)
+        {
+            func main<ios17>(tensor<fp16, [1]> x) {
+                tensor<fp16, [1]> w = const()[name = string("w"), val = tensor<fp16, [1]>(BLOBFILE(\
         path = string("@model_path/weights/weight.bin"), offset = uint64(64)))];
+            } -> (w);
+        }
+
         """
 
     /// Writes `model.mil`, naming `weights/weight.bin`, into `bundle`.

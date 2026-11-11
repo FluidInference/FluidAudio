@@ -356,12 +356,14 @@ enum ModelCache {
     static func missingProgramFile(in bundle: URL) -> String? {
         let fileManager = FileManager.default
         func isNonEmptyFile(_ url: URL) -> Bool {
-            ((try? fileManager.attributesOfItem(atPath: url.path))?[.size] as? Int ?? 0) > 0
+            (fileSize(at: url) ?? 0) > 0
         }
 
         let program = bundle.appendingPathComponent("model.mil")
         if let mil = fileManager.contents(atPath: program.path) {
-            guard !mil.isEmpty else { return "model.mil" }
+            // A program ends with the brace that closes it, so a `model.mil` cut
+            // short in a download does not (it segfaults Core ML the same way).
+            guard endsWithClosingBrace(mil) else { return "model.mil" }
             return modelPathReferences(in: mil).sorted().first {
                 !isNonEmptyFile(bundle.appendingPathComponent($0))
             }
@@ -381,6 +383,22 @@ enum ModelCache {
             }
         }
         return nil
+    }
+
+    /// The size of the file at `url`, following symbolic links; nil when there
+    /// is no file there (a missing path or a broken link).
+    static func fileSize(at url: URL) -> Int? {
+        let resolved = url.resolvingSymlinksInPath()
+        guard FileManager.default.fileExists(atPath: resolved.path) else { return nil }
+        return (try? FileManager.default.attributesOfItem(atPath: resolved.path))?[.size] as? Int
+    }
+
+    /// Whether `mil` ends with `}` once trailing whitespace is dropped, as every
+    /// compiled `model.mil` does.
+    static func endsWithClosingBrace(_ mil: Data) -> Bool {
+        let whitespace: Set<UInt8> = [0x09, 0x0A, 0x0D, 0x20]
+        guard let last = mil.lastIndex(where: { !whitespace.contains($0) }) else { return false }
+        return mil[last] == UInt8(ascii: "}")
     }
 
     /// Bundle-relative paths a `model.mil` loads through `@model_path/`, such
