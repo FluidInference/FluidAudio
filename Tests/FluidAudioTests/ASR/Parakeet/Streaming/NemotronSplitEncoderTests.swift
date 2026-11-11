@@ -79,6 +79,7 @@ final class NemotronSplitEncoderTests: XCTestCase {
             let weights = root.appendingPathComponent(name).appendingPathComponent("weights")
             try FileManager.default.createDirectory(at: weights, withIntermediateDirectories: true)
             try Data("x".utf8).write(to: root.appendingPathComponent(name).appendingPathComponent("coremldata.bin"))
+            try CompiledBundleFixture.writeProgram(in: root.appendingPathComponent(name))
             let weightFile = partialWeights ? "weight.bin.partial" : "weight.bin"
             try Data("w".utf8).write(to: weights.appendingPathComponent(weightFile))
         }

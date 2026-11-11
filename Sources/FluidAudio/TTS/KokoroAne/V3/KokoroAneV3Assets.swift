@@ -99,11 +99,12 @@ enum KokoroAneV3Assets {
         data.count == file.bytes && SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() == file.sha256
     }
 
-    /// Same rule as `ModelCache.validateCompiledModelLayout`, without its error
-    /// logging: a compiled bundle is load-ready when its directory holds
+    /// A compiled bundle is load-ready when its directory holds
     /// `coremldata.bin`. `KokoroAneV3Pipeline` publishes each bundle with a
     /// single atomic rename, so the marker alone proves the compile landed;
     /// a `<name>.mlmodelc.<uuid>` staging copy or an empty directory does not.
+    /// (`ModelCache.validateCompiledModelLayout` also checks the program files,
+    /// which a downloaded bundle can be missing.)
     static func isCompiledBundle(at url: URL) -> Bool {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue

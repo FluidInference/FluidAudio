@@ -58,12 +58,14 @@ final class NemotronEncoderV2Tests: XCTestCase {
         TreeStubURLProtocol.trees = [
             "encoder-v2/2240ms": [["path": remote, "type": "directory"]],
             remote: [
-                ["path": "\(remote)/coremldata.bin", "type": "file", "size": 4],
+                ["path": "\(remote)/coremldata.bin", "type": "file", "size": 3],
+                ["path": "\(remote)/model.mil", "type": "file", "size": 3],
                 ["path": "\(remote)/weights", "type": "directory"],
             ],
-            "\(remote)/weights": [["path": "\(remote)/weights/weight.bin", "type": "file", "size": 4]],
+            "\(remote)/weights": [["path": "\(remote)/weights/weight.bin", "type": "file", "size": 3]],
         ]
-        TreeStubURLProtocol.fileBody = Data("xxxx".utf8)
+        // Every file gets this body; as a `model.mil` it is a closed program.
+        TreeStubURLProtocol.fileBody = Data("{ }".utf8)
         // An interrupted copy at the destination is replaced, not merged.
         let destination = workDir.appendingPathComponent(Names.encoderV2File)
         let staleWeights = destination.appendingPathComponent("weights")
@@ -76,7 +78,7 @@ final class NemotronEncoderV2Tests: XCTestCase {
             chunkMs: 2240, into: workDir, progressHandler: nil, configuration: configuration)
 
         XCTAssertTrue(ModelCache.isCacheComplete(at: workDir, requiredFiles: [Names.encoderV2File]))
-        XCTAssertEqual(try Data(contentsOf: destination.appendingPathComponent("weights/weight.bin")).count, 4)
+        XCTAssertEqual(try Data(contentsOf: destination.appendingPathComponent("weights/weight.bin")).count, 3)
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: staleWeights.appendingPathComponent("weight.bin.partial").path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: workDir.appendingPathComponent("encoder-v2").path))
