@@ -488,9 +488,9 @@ final class AsrModelsTests: XCTestCase {
         let fm = FileManager.default
         for name in [ModelNames.CTC.melSpectrogramPath, ModelNames.CTC.audioEncoderPath] {
             let modelDir = repoDir.appendingPathComponent(name)
-            try fm.createDirectory(at: modelDir, withIntermediateDirectories: true)
-            try Data().write(to: modelDir.appendingPathComponent("coremldata.bin"))
+            try CompiledBundleFixture.writeComplete(at: modelDir)
         }
+        try Data("{}".utf8).write(to: repoDir.appendingPathComponent(ModelNames.CTC.vocabularyPath))
 
         // Baseline required set is present on disk.
         let required = ModelNames.getRequiredModelNames(for: .parakeetCtc110m, variant: nil)
@@ -526,8 +526,7 @@ final class AsrModelsTests: XCTestCase {
             .appendingPathComponent(Repo.parakeetV3.folderName)
         for name in ModelNames.ASR.requiredModelsV3(precision: .int8) {
             let modelDir = repoDir.appendingPathComponent(name)
-            try fm.createDirectory(at: modelDir, withIntermediateDirectories: true)
-            try Data().write(to: modelDir.appendingPathComponent("coremldata.bin"))
+            try CompiledBundleFixture.writeComplete(at: modelDir)
         }
 
         // All bundles present but vocab absent -> cache is incomplete.

@@ -304,21 +304,10 @@ extension CtcModels {
         MLModelConfigurationUtils.defaultConfiguration(computeUnits: .cpuOnly)
     }
 
-    /// Check whether required CTC model bundles and vocabulary exist at a directory.
+    /// Check whether the CTC model bundles and vocabulary at a directory are complete and load-ready, by the
+    /// same check `ModelHub` applies before loading them (issue #1147).
     public static func modelsExist(at directory: URL) -> Bool {
-        let fileManager = FileManager.default
-        let repoPath = directory
-
-        let required = ModelNames.CTC.requiredModels
-        let modelsPresent = required.allSatisfy { fileName in
-            let path = repoPath.appendingPathComponent(fileName)
-            return fileManager.fileExists(atPath: path.path)
-        }
-
-        let vocabPath = repoPath.appendingPathComponent(ModelNames.CTC.vocabularyPath)
-        let vocabPresent = fileManager.fileExists(atPath: vocabPath.path)
-
-        return modelsPresent && vocabPresent
+        ModelCache.isCacheComplete(at: directory, requiredFiles: ModelNames.CTC.requiredFiles)
     }
 
     /// Default cache directory for CTC models (within Application Support).

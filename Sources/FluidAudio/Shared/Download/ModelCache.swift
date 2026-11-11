@@ -295,7 +295,8 @@ enum ModelCache {
     }
 
     /// Validate the on-disk shape of a compiled CoreML model before loading:
-    /// it must be a directory containing `coremldata.bin`.
+    /// it must be a directory containing `coremldata.bin` and the program
+    /// files `missingProgramFile(in:)` checks for.
     static func validateCompiledModelLayout(at modelPath: URL, name: String) throws {
         guard FileManager.default.fileExists(atPath: modelPath.path) else {
             throw CocoaError(
@@ -329,6 +330,74 @@ enum ModelCache {
                     NSLocalizedDescriptionKey: "Missing coremldata.bin in model: \(name)",
                 ])
         }
+
+        if let missing = missingProgramFile(in: modelPath) {
+            logger.error("Missing \(missing) in \(name)")
+            throw CocoaError(
+                .fileReadCorruptFile,
+                userInfo: [
+                    NSFilePathErrorKey: modelPath.appendingPathComponent(missing).path,
+                    NSLocalizedDescriptionKey: "Missing \(missing) in model: \(name)",
+                ])
+        }
+    }
+
+    /// The first file a compiled bundle needs to load but lacks (or holds
+    /// empty), as a bundle-relative path; nil when nothing is missing.
+    ///
+    /// An ML Program needs `model.mil` and every file it names through
+    /// `@model_path/` (its weights); a neural network needs
+    /// `model.espresso.net`; a pipeline needs each of its `modelN`
+    /// sub-bundles. With one of these gone, Core ML on the Neural Engine path
+    /// segfaults in `MLModel(contentsOf:)` instead of throwing, so the bundle
+    /// must be caught before the load: an interrupted download left a
+    /// `MelSpectrogram.mlmodelc` with no `model.mil`, and every launch of the
+    /// host app crashed (issue #1147).
+    static func missingProgramFile(in bundle: URL) -> String? {
+        let fileManager = FileManager.default
+        func isNonEmptyFile(_ url: URL) -> Bool {
+            ((try? fileManager.attributesOfItem(atPath: url.path))?[.size] as? Int ?? 0) > 0
+        }
+
+        let program = bundle.appendingPathComponent("model.mil")
+        if let mil = fileManager.contents(atPath: program.path) {
+            guard !mil.isEmpty else { return "model.mil" }
+            return modelPathReferences(in: mil).sorted().first {
+                !isNonEmptyFile(bundle.appendingPathComponent($0))
+            }
+        }
+        if isNonEmptyFile(bundle.appendingPathComponent("model.espresso.net")) {
+            return nil
+        }
+        let subBundles =
+            (try? fileManager.contentsOfDirectory(at: bundle, includingPropertiesForKeys: nil))?
+            .filter { $0.lastPathComponent != "analytics" }
+            .filter { fileManager.fileExists(atPath: $0.appendingPathComponent("coremldata.bin").path) }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent } ?? []
+        guard !subBundles.isEmpty else { return "model.mil" }
+        for subBundle in subBundles {
+            if let missing = missingProgramFile(in: subBundle) {
+                return subBundle.lastPathComponent + "/" + missing
+            }
+        }
+        return nil
+    }
+
+    /// Bundle-relative paths a `model.mil` loads through `@model_path/`, such
+    /// as `weights/weight.bin`.
+    static func modelPathReferences(in mil: Data) -> Set<String> {
+        let marker = Data("@model_path/".utf8)
+        let quote = UInt8(ascii: "\"")
+        var references: Set<String> = []
+        var searchStart = mil.startIndex
+        while let match = mil.range(of: marker, in: searchStart..<mil.endIndex) {
+            guard let end = mil[match.upperBound...].firstIndex(of: quote) else { break }
+            if let reference = String(data: mil[match.upperBound..<end], encoding: .utf8), !reference.isEmpty {
+                references.insert(reference)
+            }
+            searchStart = end
+        }
+        return references
     }
 
     /// The subset of `requiredFiles` that is missing or not load-ready under

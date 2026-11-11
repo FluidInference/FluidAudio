@@ -655,6 +655,12 @@ public enum ModelNames {
             melSpectrogramPath,
             audioEncoderPath,
         ]
+
+        /// `requiredModels` plus `vocab.json`: what a CTC cache needs to load.
+        /// `ModelHub` and `CtcModels.modelsExist` judge the cache by the same
+        /// set, so a missing vocabulary triggers the download that fetches it
+        /// (issue #1147).
+        public static let requiredFiles: Set<String> = requiredModels.union([vocabularyPath])
     }
 
     /// SenseVoiceSmall (FunASR) model names. 3-stage pipeline:
@@ -2043,7 +2049,7 @@ public enum ModelNames {
         case .parakeetTdtCtc110m:
             return ModelNames.ASR.requiredModelsFused
         case .parakeetCtc110m, .parakeetCtc06b:
-            return ModelNames.CTC.requiredModels
+            return ModelNames.CTC.requiredFiles
         case .senseVoiceSmall:
             return ModelNames.SenseVoice.requiredModels(precision: variant)
         case .nemotron35TranscribeLite:

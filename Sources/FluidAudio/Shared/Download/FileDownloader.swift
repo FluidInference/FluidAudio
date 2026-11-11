@@ -23,7 +23,8 @@ enum FileDownloader {
     }
 
     /// Ensure `file` from `repoRemotePath` exists at `destination`: skip when
-    /// present, create empties locally, otherwise download with retry +
+    /// present (in the managed cache, only at the published size), create
+    /// empties locally, otherwise download with retry +
     /// byte-range resume (via `<destination>.partial`), validate, and move
     /// atomically into place.
     ///
@@ -44,7 +45,17 @@ enum FileDownloader {
         onBytes: (@Sendable (Int64, Int64) -> Void)? = nil
     ) async throws -> Outcome {
         if FileManager.default.fileExists(atPath: destination.path) {
-            return .alreadyPresent
+            // In the managed cache, a file whose size is not the published one is
+            // left over from an older or interrupted download (issue #1147: a
+            // `weight.bin` 9 MB longer than published). Fetch it again.
+            guard recoveringBlockedPaths, file.size > 0,
+                let size = (try? FileManager.default.attributesOfItem(atPath: destination.path))?[.size] as? Int,
+                size != file.size
+            else {
+                return .alreadyPresent
+            }
+            logger.warning("Re-downloading \(file.path): \(size) bytes on disk, \(file.size) published")
+            try FileManager.default.removeItem(at: destination)
         }
 
         let parentDir = destination.deletingLastPathComponent()

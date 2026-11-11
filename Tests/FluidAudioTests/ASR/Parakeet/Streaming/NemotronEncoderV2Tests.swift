@@ -59,6 +59,7 @@ final class NemotronEncoderV2Tests: XCTestCase {
             "encoder-v2/2240ms": [["path": remote, "type": "directory"]],
             remote: [
                 ["path": "\(remote)/coremldata.bin", "type": "file", "size": 4],
+                ["path": "\(remote)/model.mil", "type": "file", "size": 4],
                 ["path": "\(remote)/weights", "type": "directory"],
             ],
             "\(remote)/weights": [["path": "\(remote)/weights/weight.bin", "type": "file", "size": 4]],
