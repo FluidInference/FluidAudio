@@ -423,7 +423,9 @@ public struct VocabularyRescorer: Sendable {
         public let startTime: Double
         public let endTime: Double
         let tokenRange: Range<Int>?
-        /// Lowest TDT token confidence in the word; nil when the timings carry none.
+        /// Lowest TDT token confidence over the word's letters and digits; nil when the timings carry none.
+        /// A punctuation token doesn't count: TDT is often unsure of a sentence-final `.` or a `,` after a word
+        /// it heard at full confidence (#1151).
         var minConfidence: Float? = nil
     }
 
@@ -480,7 +482,9 @@ public struct VocabularyRescorer: Sendable {
             }
             wordEnd = timing.endTime
             wordTokenEnd = tokenIndex + 1
-            wordMinConfidence = min(wordMinConfidence, timing.confidence)
+            if token.unicodeScalars.contains(where: CharacterSet.alphanumerics.contains) {
+                wordMinConfidence = min(wordMinConfidence, timing.confidence)
+            }
         }
 
         // Save final word

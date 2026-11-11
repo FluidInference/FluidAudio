@@ -198,9 +198,13 @@ final class VocabularySpanProtectionTests: XCTestCase {
             TokenTiming(token: " sort", tokenId: 1, startTime: 0, endTime: 0.16, confidence: 0.999),
             TokenTiming(token: " Sor", tokenId: 2, startTime: 0.16, endTime: 0.24, confidence: 0.4),
             TokenTiming(token: "a", tokenId: 3, startTime: 0.24, endTime: 0.32, confidence: 0.9),
+            // Punctuation doesn't count toward a word's confidence (#1151); a word of nothing else has none.
+            TokenTiming(token: " test", tokenId: 4, startTime: 0.32, endTime: 0.48, confidence: 1),
+            TokenTiming(token: ".", tokenId: 5, startTime: 0.48, endTime: 0.56, confidence: 0.86),
+            TokenTiming(token: " ,", tokenId: 6, startTime: 0.56, endTime: 0.64, confidence: 0.5),
         ])
-        XCTAssertEqual(words.map(\.word), ["sort", "Sora"])
-        XCTAssertEqual(words.map(\.minConfidence), [0.999, 0.4])
+        XCTAssertEqual(words.map(\.word), ["sort", "Sora", "test.", ","])
+        XCTAssertEqual(words.map(\.minConfidence), [0.999, 0.4, 1, nil])
     }
 
     /// Only a span whose every word TDT heard at `confidentWordMinConfidence` loses the bias (#967).
