@@ -144,7 +144,7 @@ final class VocabularySpanPreservationTests: XCTestCase {
     /// A one-term vocabulary of a word nobody says must leave the speech alone (#1151). Without the rescue's
     /// similarity floors, `zzqqxvwj` replaced "is mister Quilter's" on CTC evidence alone.
     func testAnUnspokenTermDoesNotReplaceSpeechThroughTheRescue() async throws {
-        let (output, _, transcript) = try await rescoreQuilterPossessive(listing: "zzqqxvwj")
+        let (output, _, transcript) = try await rescore("quilter-possessive", listing: "zzqqxvwj")
         XCTAssertEqual(output.text, transcript)
         XCTAssertFalse(output.wasModified)
     }
@@ -152,13 +152,26 @@ final class VocabularySpanPreservationTests: XCTestCase {
     /// "…than his matter.": the transcript's period is not speech, and scored with it `matter.` lost to a listed
     /// `Matterport` (#1151). The original phrase is also scored as spoken.
     func testASentenceFinalWordIsScoredWithoutItsPeriod() async throws {
-        let (output, evidence, transcript) = try await rescoreQuilterPossessive(listing: "Matterport")
+        let (output, evidence, transcript) = try await rescore("quilter-possessive", listing: "Matterport")
         XCTAssertEqual(output.text, transcript)
         XCTAssertFalse(output.wasModified)
         // Weighed and rejected, not skipped before the comparison.
         XCTAssertTrue(
             evidence.candidates.contains {
                 $0.basePhrase == "matter." && $0.canonicalTerm == "Matterport" && !$0.comparisonPassed
+            })
+    }
+
+    /// "…form a sort of shell.": TDT heard `shell` at full confidence and the period at 0.92. The period
+    /// doesn't make the word uncertain, so a listed `Shelby` gets no bias against it and loses on CTC (#1151).
+    func testAConfidentlyHeardWordKeepsItsGuardBeforePunctuation() async throws {
+        let (output, evidence, transcript) = try await rescore("sort-of-shell", listing: "Shelby")
+        XCTAssertEqual(output.text, transcript)
+        XCTAssertFalse(output.wasModified)
+        XCTAssertTrue(
+            evidence.candidates.contains {
+                $0.basePhrase == "shell." && $0.canonicalTerm == "Shelby" && $0.effectiveBoost == 0
+                    && !$0.comparisonPassed
             })
     }
 
@@ -251,10 +264,10 @@ final class VocabularySpanPreservationTests: XCTestCase {
         }
     }
 
-    /// The `quilter-possessive` recording rescored with a one-term vocabulary, the default config and the
-    /// session's thresholds for one term, with the evidence for every candidate.
-    private func rescoreQuilterPossessive(
-        listing term: String
+    /// A recording rescored with a one-term vocabulary, the default config and the session's thresholds for
+    /// one term, with the evidence for every candidate.
+    private func rescore(
+        _ id: String, listing term: String
     ) async throws -> (
         output: VocabularyRescorer.RescoreOutput, evidence: VocabularyRescorer.CandidateEvidenceOutput,
         transcript: String
@@ -267,8 +280,8 @@ final class VocabularySpanPreservationTests: XCTestCase {
             .appendingPathComponent("Vocabulary")
         let fixtures = try JSONDecoder().decode(
             [Fixture].self, from: Data(contentsOf: root.appendingPathComponent("tdt-v3.json")))
-        let fixture = try XCTUnwrap(fixtures.first { $0.id == "quilter-possessive" })
-        let audio = try AudioConverter().resampleAudioFile(root.appendingPathComponent("quilter-possessive.wav"))
+        let fixture = try XCTUnwrap(fixtures.first { $0.id == id })
+        let audio = try AudioConverter().resampleAudioFile(root.appendingPathComponent(id + ".wav"))
         let probabilities = try await spotter.computeLogProbs(for: audio)
         let vocabulary = CustomVocabularyContext(terms: [
             CustomVocabularyTerm(text: term, ctcTokenIds: tokenizer.encode(term))

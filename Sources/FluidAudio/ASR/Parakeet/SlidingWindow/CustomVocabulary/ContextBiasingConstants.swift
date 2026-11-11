@@ -144,6 +144,7 @@ public enum ContextBiasingConstants {
     /// A vocabulary term gets no context bias against a span whose words were all heard this
     /// confidently, so it must beat the span on CTC evidence alone (#967). Below this, misheard
     /// names keep the full bias; the 13 #967 dictation clips' correct fixes all sit at 0.70 or less.
+    /// Only the word's letter and digit tokens count, not its punctuation (#1151).
     public static let confidentWordMinConfidence: Float = 0.99
 
     /// Similarity at and above which a confidently heard span is a close spelling of the term

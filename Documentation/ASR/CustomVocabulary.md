@@ -814,16 +814,16 @@ FLEURS set from 332 to 220 (WER 15.52%), at 1218/4/56 on Earnings-22.
 
 The keyword counts above credit a term wherever it appears in the transcript. Aligned word by
 word with the reference instead, turning the floors off adds 51 terms at the right position and
-798 at a wrong one, such as `…around the Michael. Was it Michael book at 1175 Michael…` for a chunk
+730 at a wrong one, such as `…around the Michael. Was it Michael book at 1175 Michael…` for a chunk
 that says "Michael" once. `ctc-earnings-benchmark` (batch, TDT v2 + CTC 110M) on 599
-earnings22-kws chunks, each with its own term list (#1151):
+earnings22-kws chunks, each with its own term list (#1151, measured with #1153):
 
 | | No vocabulary | Floors off | Floors on (default) |
 |---|---|---|---|
 | Listed terms at the reference position (of 1,056) | 529 | 994 | 943 |
-| Listed terms written anywhere else | 4 | 870 | 72 |
-| Benchmark's own keyword TP/FP/FN | 487/1/481 | 938/5/30 | 874/5/94 |
-| WER (benchmark average) | 16.14% | 19.02% | 13.73% |
+| Listed terms written anywhere else | 4 | 797 | 67 |
+| Benchmark's own keyword TP/FP/FN | 487/1/481 | 937/5/31 | 874/5/94 |
+| WER (benchmark average) | 16.14% | 18.47% | 13.70% |
 
 To trade that precision back for recall, for vocabularies the speech is known to use, turn the
 floors off:
