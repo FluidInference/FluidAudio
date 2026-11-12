@@ -871,13 +871,12 @@ public struct PocketTtsSynthesizer {
 
         // Pad short texts for better prosody — but only for full sentences.
         // Mid-sentence chunks (clause/word-boundary continuations) must skip
-        // the leading-space padding and the extra trailing frames; otherwise
-        // each short fragment introduces ~80ms+ of silence at the seam, which
-        // re-creates the prosody break we're trying to remove (issue #584).
+        // the extra trailing frames; otherwise each short fragment introduces
+        // ~80ms+ of silence at the seam, which re-creates the prosody break
+        // we're trying to remove (issue #584).
         let wordCount = result.split(separator: " ").count
         let framesAfterEos: Int
         if !isMidSentence, wordCount < PocketTtsConstants.shortTextWordThreshold {
-            result = String(repeating: " ", count: 8) + result
             framesAfterEos = PocketTtsConstants.shortTextPadFrames
         } else {
             framesAfterEos = PocketTtsConstants.longTextExtraFrames
