@@ -143,6 +143,32 @@ final class TextNormalizerTests: XCTestCase {
         XCTAssertEqual(normalizer.normalizeSentence("it costs twelve dollars"), "it costs $12")
     }
 
+    func testNormalizeSentencePicksUpLibrarySentenceFixes() {
+        // Rows from issue #1156: wrong on text-processing-rs v0.3.1.
+        let normalizer = TextNormalizer()
+        XCTAssertEqual(
+            normalizer.normalizeSentence("I paid twenty-five dollars on March 3rd for forty-two apples."),
+            "I paid $25 on March 3rd for 42 apples.")
+        XCTAssertEqual(
+            normalizer.normalizeSentence("It costs two hundred and fifty-five dollars."), "It costs $255.")
+        XCTAssertEqual(
+            normalizer.normalizeSentence("lag behind by twenty five to thirty years"),
+            "lag behind by 25 to 30 years")
+    }
+
+    func testNormalizeSentenceSmallNumbersAsWords() {
+        let normalizer = TextNormalizer()
+        XCTAssertEqual(normalizer.normalizeSentence("no one knows"), "no 1 knows")
+        XCTAssertEqual(normalizer.normalizeSentence("no one knows", smallNumbersAsWords: false), "no 1 knows")
+        XCTAssertEqual(normalizer.normalizeSentence("no one knows", smallNumbersAsWords: true), "no one knows")
+        XCTAssertEqual(
+            normalizer.normalizeSentence("children aged three to five", smallNumbersAsWords: true),
+            "children aged three to five")
+        XCTAssertEqual(
+            normalizer.normalizeSentence("it costs twelve dollars", maxSpanTokens: 8, smallNumbersAsWords: true),
+            "it costs $12")
+    }
+
     func testTnNormalizeConvertsWrittenToSpoken() {
         let normalizer = TextNormalizer()
         XCTAssertEqual(normalizer.tnNormalize("$5.50"), "five dollars fifty cents")
@@ -398,6 +424,7 @@ final class TextNormalizerUnavailableTests: XCTestCase {
         XCTAssertEqual(normalizer.normalize("twelve dollars"), "twelve dollars")
         XCTAssertEqual(normalizer.normalizeSentence("period"), "period")
         XCTAssertEqual(normalizer.normalizeSentence("two hundred", maxSpanTokens: 3), "two hundred")
+        XCTAssertEqual(normalizer.normalizeSentence("one hundred", smallNumbersAsWords: true), "one hundred")
         XCTAssertEqual(normalizer.tnNormalize("$12"), "$12")
         XCTAssertEqual(normalizer.tnNormalizeSentence("$12"), "$12")
         normalizer.addRule(spoken: "foo", written: "bar")
