@@ -629,8 +629,8 @@ final class AudioConverterTests: XCTestCase {
 
     func testReusedConverterMatchesFreshConverterBitForBit() async throws {
         // Live capture delivers small buffers of uneven sizes; formats can change mid-stream.
-        let source48k = try createAudioBuffer(sampleRate: 48000, channels: 1, duration: 0.5)
-        let source44k = try createAudioBuffer(sampleRate: 44100, channels: 2, duration: 0.2)
+        let source48k = try recordedSpeech(sampleRate: 48000, channels: 1)
+        let source44k = try recordedSpeech(sampleRate: 44100, channels: 2)
         let buffers =
             try [512, 128, 4800, 481].map { try slice(source48k, frames: $0) }
             + [try slice(source44k, frames: 1024)]
@@ -644,7 +644,7 @@ final class AudioConverterTests: XCTestCase {
     }
 
     func testConcurrentConversionsMatchSerialResults() async throws {
-        let source = try createAudioBuffer(sampleRate: 48000, channels: 1, duration: 0.5)
+        let source = try recordedSpeech(sampleRate: 48000, channels: 1)
         let samples = Array(UnsafeBufferPointer(start: source.floatChannelData![0], count: Int(source.frameLength)))
         let slices = (0..<16).map { Array(samples.prefix(256 + $0 * 37)) }
         let expected = try slices.map { try AudioConverter().resampleBuffer(Self.monoBuffer($0, sampleRate: 48000)) }
@@ -661,6 +661,40 @@ final class AudioConverterTests: XCTestCase {
             return byIndex
         }
         XCTAssertEqual(results, expected)
+    }
+
+    /// Half a second of a bundled speech recording, converted to a live capture format.
+    private func recordedSpeech(sampleRate: Double, channels: AVAudioChannelCount) throws -> AVAudioPCMBuffer {
+        let name = "01-validation-request-21.4s.wav"
+        guard
+            let url = Bundle.module.url(forResource: "Fixtures/\(name)", withExtension: nil)
+                ?? Bundle.module.url(forResource: name, withExtension: nil)
+        else { throw XCTSkip("fixture \(name) missing from test bundle") }
+        let file = try AVAudioFile(forReading: url)
+        let source = file.processingFormat
+        file.framePosition = AVAudioFramePosition(2 * source.sampleRate)
+        guard
+            let recorded = AVAudioPCMBuffer(pcmFormat: source, frameCapacity: AVAudioFrameCount(source.sampleRate / 2)),
+            let format = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: channels, interleaved: false),
+            let converter = AVAudioConverter(from: source, to: format),
+            let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(sampleRate))
+        else { throw AudioConverterError.failedToCreateBuffer }
+        try file.read(into: recorded, frameCount: recorded.frameCapacity)
+        var delivered = false
+        var error: NSError?
+        let status = converter.convert(to: output, error: &error) { _, inputStatus in
+            if delivered {
+                inputStatus.pointee = .endOfStream
+                return nil
+            }
+            delivered = true
+            inputStatus.pointee = .haveData
+            return recorded
+        }
+        if let error { throw error }
+        XCTAssertNotEqual(status, .error)
+        return output
     }
 
     private static func monoBuffer(_ samples: [Float], sampleRate: Double) throws -> AVAudioPCMBuffer {
