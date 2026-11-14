@@ -232,7 +232,7 @@ extension VocabularyRescorer {
     static func isConfidentlyHeard(_ candidate: CTCMatchCandidate, wordTimings: [WordTiming]) -> Bool {
         let spoken = candidate.spanIndices.filter { index in
             !wordTimings.indices.contains(index)
-                || wordTimings[index].word.unicodeScalars.contains(where: CharacterSet.alphanumerics.contains)
+                || wordTimings[index].word.unicodeScalars.contains(where: { CharacterSet.alphanumerics.contains($0) })
         }
         guard !spoken.isEmpty else { return false }
         return spoken.allSatisfy { index in
