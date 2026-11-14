@@ -26,6 +26,7 @@ v1.3 and the G2P use the same scripts (the model card describes the G2P conversi
 ```swift
 let manager = ParadeeManager()                 // v1.3, .int8, .cpuOnly
 try await manager.initialize()                 // downloads models, the Paradee G2P and English G2P assets
+// or: initialize(voices: [.ffSiwis]) — no English frontend (Kokoro G2P assets) until an English voice is used
 let samples = try await manager.synthesize(text: "Hello from FluidAudio.", voice: .bmFable, speed: 1.0, noiseSeed: 0)
 let french = try await manager.synthesize(text: "Il fait très beau aujourd'hui.", voice: .ffSiwis)
 let phonemes = try await manager.phonemes(for: "La biblioteca abre a las nueve.", voice: .emAlex)

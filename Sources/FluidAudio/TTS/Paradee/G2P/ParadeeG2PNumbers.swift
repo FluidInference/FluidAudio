@@ -79,16 +79,7 @@ enum ParadeeG2PNumbers {
         }
         if n >= 1000 {
             let q = n / 1000
-            if q == 1 {
-                out.append(t["thousand"] ?? "")
-            } else {
-                var p = spanish(q, t)
-                // veintiuno mil -> veintiún mil
-                if q % 10 == 1, q % 100 != 11, let last = p.last, last.unicodeScalars.last == "o" {
-                    p[p.count - 1] = String(String.UnicodeScalarView(last.unicodeScalars.dropLast()))
-                }
-                out += p + [t["thousand"] ?? ""]
-            }
+            out += (q == 1 ? [] : spanishThousands(q, t)) + [t["thousand"] ?? ""]
             n %= 1000
         }
         if n >= 100 {
@@ -98,6 +89,14 @@ enum ParadeeG2PNumbers {
         }
         if n > 0 || out.isEmpty { out.append(t[String(n)] ?? "") }
         return out
+    }
+
+    /// The pieces before `mil`: veintiuno mil -> veintiún mil (not for 11).
+    static func spanishThousands(_ q: Int, _ t: [String: String]) -> [String] {
+        var p = spanish(q, t)
+        guard q % 10 == 1, q % 100 != 11, let last = p.last, last.unicodeScalars.last == "o" else { return p }
+        p[p.count - 1] = String(String.UnicodeScalarView(last.unicodeScalars.dropLast()))
+        return p
     }
 
     /// Spanish b, d and g are said β, ð and ɣ after a vowel and most

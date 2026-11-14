@@ -550,7 +550,7 @@ public struct TTS {
             let manager = ParadeeManager(version: version, variant: variant)
 
             let tLoad0 = Date()
-            try await manager.initialize()
+            try await manager.initialize(voices: [voice])
             let tLoad1 = Date()
 
             logger.info(

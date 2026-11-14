@@ -55,35 +55,26 @@ struct ParadeeG2P {
             let core = word.core
             var parts: [(isNumber: Bool, piece: [Unicode.Scalar])] = []
             for run in Self.digitRuns(core) {
-                if run.isDigits {
+                guard !run.isDigits else {
                     parts.append((true, run.scalars))
-                } else {
-                    let piece = Self.strip(run.scalars, characters: "-.,/:")
-                    if piece.contains(where: Self.isAlphanumeric) { parts.append((false, piece)) }
+                    continue
                 }
+                let piece = Self.strip(run.scalars, characters: "-.,/:")
+                guard piece.contains(where: Self.isAlphanumeric) else { continue }
+                parts.append((false, piece))
             }
             var ids: [Part] = []
             for part in parts {
                 // Upstream compares by value, so a repeated piece counts as first / last too.
                 let first = part.piece == parts[0].piece
                 let last = part.piece == parts[parts.count - 1].piece
-                if part.isNumber {
-                    if part.piece.count < 10 {
-                        let before = first ? context.before : "#"
-                        ids.append(
-                            .text(
-                                ParadeeG2PNumbers.read(
-                                    Self.value(part.piece), language: language, table: table, before: before)))
-                    } else {  // a long string of digits is read digit by digit
-                        let digits = part.piece.map {
-                            ParadeeG2PNumbers.read(Self.value([$0]), language: language, table: table)
-                        }
-                        ids.append(.text(digits.joined(separator: " ")))
-                    }
-                } else {
-                    jobs.append((Self.string(part.piece), first ? context.before : "#", last ? context.after : "#"))
-                    ids.append(.job(jobs.count - 1))
+                guard !part.isNumber else {
+                    let before = first ? context.before : "#"
+                    ids.append(.text(Self.readNumber(part.piece, language: language, table: table, before: before)))
+                    continue
                 }
+                jobs.append((Self.string(part.piece), first ? context.before : "#", last ? context.after : "#"))
+                ids.append(.job(jobs.count - 1))
             }
             plan.append(
                 (Self.string(Array(raw[..<word.start])), ids, Self.string(Array(raw[(word.start + core.count)...]))))
@@ -101,6 +92,18 @@ struct ParadeeG2P {
             return lead + spoken.joined(separator: " ") + trail
         }
         return out.joined(separator: " ").replacingOccurrences(of: "-", with: "")
+    }
+
+    /// A run of digits as upstream reads it: up to 9 digits as one number, a
+    /// longer run digit by digit. `before` softens a Spanish number's first sound.
+    static func readNumber(
+        _ digits: [Unicode.Scalar], language: ParadeeLanguage, table: [String: String], before: String
+    ) -> String {
+        guard digits.count >= 10 else {
+            return ParadeeG2PNumbers.read(value(digits), language: language, table: table, before: before)
+        }
+        return digits.map { ParadeeG2PNumbers.read(value([$0]), language: language, table: table) }
+            .joined(separator: " ")
     }
 
     // MARK: - Words
@@ -246,19 +249,12 @@ struct ParadeeG2P {
         var out: [Unicode.Scalar] = []
         var i = 0
         while i < s.count {
-            if isDecimal(s[i]) {
-                if i + 1 < s.count, s[i + 1] == "%" {
-                    out.append(s[i])
-                    out += (" " + percent).unicodeScalars
-                    i += 2
-                    continue
-                }
-                if i + 2 < s.count, isSpace(s[i + 1]), s[i + 2] == "%" {
-                    out.append(s[i])
-                    out += (" " + percent).unicodeScalars
-                    i += 3
-                    continue
-                }
+            let percentAt = i + 1 < s.count && isSpace(s[i + 1]) ? i + 2 : i + 1
+            if isDecimal(s[i]), percentAt < s.count, s[percentAt] == "%" {
+                out.append(s[i])
+                out += (" " + percent).unicodeScalars
+                i = percentAt + 1
+                continue
             }
             out.append(s[i])
             i += 1

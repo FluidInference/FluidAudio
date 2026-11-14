@@ -83,6 +83,33 @@ final class ParadeeTests: XCTestCase {
             [.americanEnglish, .britishEnglish, .americanEnglish, .britishEnglish, .hindi, .hindi, .french, .spanish])
     }
 
+    func testInitializeRejectsVoicesOfOtherReleasesBeforeDownloading() async {
+        let manager = ParadeeManager(version: .v12)
+        do {
+            try await manager.initialize(voices: [.afHeart, .hfAlpha])
+            XCTFail("expected unsupportedVoice")
+        } catch ParadeeError.unsupportedVoice(let voice, let version) {
+            XCTAssertEqual(voice, "hf_alpha")
+            XCTAssertEqual(version, "1.2")
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
+    }
+
+    func testPhonemesBeforeInitializeThrowsNotInitialized() async {
+        // Non-English voices no longer wait for the English frontend, but still need initialize().
+        let manager = ParadeeManager(version: .v13)
+        for voice in [ParadeeVoice.emAlex, .afHeart] {
+            do {
+                _ = try await manager.phonemes(for: "hola", voice: voice)
+                XCTFail("expected notInitialized for \(voice.rawValue)")
+            } catch ParadeeError.notInitialized {
+            } catch {
+                XCTFail("unexpected error \(error)")
+            }
+        }
+    }
+
     func testV12RejectsV13Voices() async {
         let manager = ParadeeManager(version: .v12)
         do {

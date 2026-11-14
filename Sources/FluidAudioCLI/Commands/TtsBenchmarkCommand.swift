@@ -880,7 +880,7 @@ public enum TtsBenchmarkCommand {
             version: version, variant: variant,
             computeUnits: appliedPreset == .allAne ? .cpuAndNeuralEngine : .cpuOnly)
         let coldStart = Date()
-        try await manager.initialize()
+        try await manager.initialize(voices: [voice])
         let coldStartS = Date().timeIntervalSince(coldStart)
         logger.info(String(format: "Cold start (initialize): %.2fs", coldStartS))
 

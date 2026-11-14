@@ -58,21 +58,26 @@ public actor ParadeeManager {
     }
 
     /// Download (if missing) and load both models, the vocab, the G2P (v1.3)
-    /// and the English frontend assets. The British lexicon is fetched on first
-    /// use of a British voice.
-    public func initialize() async throws {
+    /// and the text frontend for `voices`. The British lexicon is fetched on
+    /// first use of a British voice.
+    ///
+    /// - Parameter voices: voices to prepare; `nil` (default) prepares every
+    ///   voice of the release. The English frontend (Kokoro's English G2P
+    ///   assets) is only fetched when an English voice is listed, so a Hindi,
+    ///   French or Spanish setup works without it; it is then fetched on the
+    ///   first use of an English voice.
+    public func initialize(voices: Set<ParadeeVoice>? = nil) async throws {
+        let voices = voices ?? Set(version.voices)
+        for voice in voices {
+            try checkVoice(voice)
+        }
         try await store.loadIfNeeded()
         if version.usesParadeeG2P {
             try await store.loadG2PIfNeeded()
         }
-        guard !englishFrontendReady else { return }
-        // G2PModel.loadIfNeeded only reads from disk, so fetch the assets
-        // explicitly first. They live under the store's `directory`
-        // (`<directory>/kokoro/`), next to the Paradee models.
-        try await KokoroAneResourceDownloader.ensureG2PAssets(directory: store.directory)
-        try await englishG2P.ensureModelsAvailable()
-        _ = await KokoroAneResourceDownloader.ensureEnglishLexicon(directory: store.directory)
-        englishFrontendReady = true
+        if voices.contains(where: \.language.isEnglish) {
+            try await ensureEnglishFrontend()
+        }
     }
 
     public func isAvailable() async -> Bool {
@@ -125,8 +130,9 @@ public actor ParadeeManager {
     /// for missing words Paradee's G2P (v1.3) or the BART G2P. Hindi, French,
     /// Spanish: Paradee's G2P, which reads numbers and `%` itself.
     public func phonemes(for text: String, voice: ParadeeVoice = .afHeart) async throws -> String {
-        guard englishFrontendReady else { throw ParadeeError.notInitialized }
         try checkVoice(voice)
+        // Throws `notInitialized` before `initialize()`.
+        _ = try await store.vocabulary()
         let paradeeG2P = version.usesParadeeG2P ? try await store.paradeeG2P() : nil
         guard voice.language.isEnglish else {
             guard let paradeeG2P else {
@@ -134,6 +140,7 @@ public actor ParadeeManager {
             }
             return try paradeeG2P.phonemize(text, language: voice.language)
         }
+        try await ensureEnglishFrontend()
         let british = voice.isBritish
         let phonemizer = await ensurePhonemizer(british: british)
         let raw = try await phonemizer.phonemize(EnglishTextNormalizer.normalizeForFrontend(text)) {
@@ -156,6 +163,19 @@ public actor ParadeeManager {
     }
 
     // MARK: - Helpers
+
+    /// Fetch (if missing) and load the English frontend: the BART G2P and the
+    /// American Misaki lexicon, under the store's `directory`
+    /// (`<directory>/kokoro/`), next to the Paradee models.
+    private func ensureEnglishFrontend() async throws {
+        guard !englishFrontendReady else { return }
+        // G2PModel.loadIfNeeded only reads from disk, so fetch the assets
+        // explicitly first.
+        try await KokoroAneResourceDownloader.ensureG2PAssets(directory: store.directory)
+        try await englishG2P.ensureModelsAvailable()
+        _ = await KokoroAneResourceDownloader.ensureEnglishLexicon(directory: store.directory)
+        englishFrontendReady = true
+    }
 
     private func checkVoice(_ voice: ParadeeVoice) throws {
         guard version.voices.contains(voice) else {
