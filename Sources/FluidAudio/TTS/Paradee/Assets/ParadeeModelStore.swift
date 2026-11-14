@@ -4,7 +4,8 @@ import Foundation
 
 /// Actor store for one Paradee release and variant: `ParadeeText` +
 /// `ParadeeAcoustic` CoreML bundles and the phoneme vocab, downloaded from
-/// `FluidInference/paradee-8m-coreml/[v1.2/]<variant>/` on first use.
+/// `FluidInference/paradee-8m-coreml/[v1.<2|3>/]<variant>/` on first use, and
+/// for v1.3 the eSpeak-free G2P from `v1.3/g2p/`.
 ///
 /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 public actor ParadeeModelStore {
@@ -21,9 +22,10 @@ public actor ParadeeModelStore {
     private var textModel: MLModel?
     private var acousticModel: MLModel?
     private var vocab: KokoroAneVocab?
+    private var g2p: ParadeeG2P?
 
     public init(
-        version: ParadeeVersion = .v12,
+        version: ParadeeVersion = .v13,
         variant: ParadeeVariant = .int8,
         directory: URL? = nil,
         computeUnits: MLComputeUnits = .cpuOnly
@@ -64,10 +66,31 @@ public actor ParadeeModelStore {
         return vocab
     }
 
+    /// Download (if missing) and load the eSpeak-free G2P (`ParadeeG2P` +
+    /// `paradee_g2p.json`). It always runs on the CPU: its input lengths vary
+    /// per word.
+    func loadG2PIfNeeded() async throws {
+        if g2p != nil { return }
+        let repoDir = try await ensureDownloaded(.paradeeV13G2P, required: ModelNames.Paradee.g2pRequiredModels)
+        let model = try loadModel(repoDir: repoDir, fileName: ModelNames.Paradee.g2pFile, computeUnits: .cpuOnly)
+        let dataURL = repoDir.appendingPathComponent(ModelNames.Paradee.g2pDataFile)
+        guard FileManager.default.fileExists(atPath: dataURL.path) else {
+            throw ParadeeError.modelFileNotFound(ModelNames.Paradee.g2pDataFile)
+        }
+        g2p = ParadeeG2P(data: try ParadeeG2PData.load(from: dataURL), model: model)
+        logger.info("Paradee G2P loaded from \(repoDir.path)")
+    }
+
+    func paradeeG2P() throws -> ParadeeG2P {
+        guard let g2p else { throw ParadeeError.notInitialized }
+        return g2p
+    }
+
     public func unload() {
         textModel = nil
         acousticModel = nil
         vocab = nil
+        g2p = nil
     }
 
     /// `.all` and `.cpuAndGPU` abort in MPSGraph (`GPURNNOps … JIT not supported`).
@@ -88,15 +111,18 @@ public actor ParadeeModelStore {
     // MARK: - Helpers
 
     private func ensureModels() async throws -> URL {
-        let repo = variant.repo(for: version)
+        try await ensureDownloaded(variant.repo(for: version), required: ModelNames.Paradee.requiredModels)
+    }
+
+    private func ensureDownloaded(_ repo: Repo, required: Set<String>) async throws -> URL {
         let modelsRoot = try directory ?? Self.defaultCacheRoot()
         let repoDir = modelsRoot.appendingPathComponent(repo.folderName)
-        let allPresent = ModelNames.Paradee.requiredModels.allSatisfy {
+        let allPresent = required.allSatisfy {
             FileManager.default.fileExists(atPath: repoDir.appendingPathComponent($0).path)
         }
         if allPresent { return repoDir }
 
-        logger.info("Downloading Paradee \(version.rawValue) \(variant.rawValue) CoreML models from HuggingFace…")
+        logger.info("Downloading \(repo.folderName) from HuggingFace…")
         do {
             try await ModelHub.download(repo, to: modelsRoot)
         } catch {
@@ -105,13 +131,13 @@ public actor ParadeeModelStore {
         return repoDir
     }
 
-    private func loadModel(repoDir: URL, fileName: String) throws -> MLModel {
+    private func loadModel(repoDir: URL, fileName: String, computeUnits: MLComputeUnits? = nil) throws -> MLModel {
         let url = repoDir.appendingPathComponent(fileName)
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw ParadeeError.modelFileNotFound(fileName)
         }
         let config = MLModelConfiguration()
-        config.computeUnits = computeUnits
+        config.computeUnits = computeUnits ?? self.computeUnits
         do {
             return try MLModel(contentsOf: url, configuration: config)
         } catch {

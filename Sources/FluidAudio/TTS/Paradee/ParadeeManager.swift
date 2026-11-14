@@ -5,17 +5,20 @@ import Foundation
 /// Public API for the Paradee-8M CoreML TTS backend.
 ///
 /// Paradee (Sahil Mahendrakar, Apache-2.0) is Kokoro-82M distilled into an
-/// 8M-parameter English model, 24 kHz. v1.2 (default) speaks four voices
-/// (``ParadeeVoice``); v1.0 speaks `af_heart` only. Two CoreML graphs
-/// (`ParadeeText`, `ParadeeAcoustic`) with host-side duration expansion; see
+/// 8M-parameter model, 24 kHz. v1.3 (default) speaks eight voices
+/// (``ParadeeVoice``) in English, Hindi, French and Spanish; v1.2 the four
+/// English ones; v1.0 `af_heart` only. Two CoreML graphs (`ParadeeText`,
+/// `ParadeeAcoustic`) with host-side duration expansion; see
 /// `FluidInference/paradee-8m-coreml`.
 ///
-/// Paradee uses Kokoro's phoneme vocabulary and was trained on misaki
-/// phonemes, so the text path reuses the KokoroAne English frontend (NeMo
-/// text normalization, Misaki lexicon, per-word BART G2P fallback). The
-/// British voices read misaki's British lexicon, as upstream does; it is
-/// downloaded the first time a British voice is used. Like the upstream
-/// package, text is synthesized one sentence at a time.
+/// Paradee uses Kokoro's phoneme vocabulary. English was trained on misaki
+/// phonemes, so English text goes through the KokoroAne English frontend
+/// (NeMo text normalization, Misaki lexicon); the British voices read misaki's
+/// British lexicon, downloaded the first time a British voice is used. Hindi,
+/// French and Spanish go through Paradee's own eSpeak-free G2P
+/// (``ParadeeG2P``), as upstream 1.3.1 does, which in v1.3 also gives the
+/// English words the lexicon lacks (v1.0 / v1.2: the BART G2P). Like the
+/// upstream package, text is synthesized one sentence at a time.
 ///
 /// Run on `.cpuOnly` (default) or `.cpuAndNeuralEngine`; the LSTMs abort on
 /// the GPU, so `.all` / `.cpuAndGPU` are rejected.
@@ -43,7 +46,7 @@ public actor ParadeeManager {
     public nonisolated var voices: [ParadeeVoice] { version.voices }
 
     public init(
-        version: ParadeeVersion = .v12,
+        version: ParadeeVersion = .v13,
         variant: ParadeeVariant = .int8,
         directory: URL? = nil,
         computeUnits: MLComputeUnits = .cpuOnly
@@ -54,11 +57,14 @@ public actor ParadeeManager {
         self.englishG2P = G2PModel.shared(directory: directory)
     }
 
-    /// Download (if missing) and load both models, the vocab, and the
-    /// English frontend assets. The British lexicon is fetched on first use
-    /// of a British voice.
+    /// Download (if missing) and load both models, the vocab, the G2P (v1.3)
+    /// and the English frontend assets. The British lexicon is fetched on first
+    /// use of a British voice.
     public func initialize() async throws {
         try await store.loadIfNeeded()
+        if version.usesParadeeG2P {
+            try await store.loadG2PIfNeeded()
+        }
         guard !englishFrontendReady else { return }
         // G2PModel.loadIfNeeded only reads from disk, so fetch the assets
         // explicitly first. They live under the store's `directory`
@@ -79,7 +85,8 @@ public actor ParadeeManager {
     /// and concatenated, as in the upstream `Paradee.__call__`.
     ///
     /// - Parameters:
-    ///   - voice: one of ``voices``; British voices get British phonemes.
+    ///   - voice: one of ``voices``; the text is read in the voice's language
+    ///     (British phonemes for the British voices).
     ///   - speed: speech-rate multiplier (> 1 is faster).
     ///   - noiseSeed: seed for the harmonic source noise; equal seeds give
     ///     identical audio.
@@ -97,9 +104,11 @@ public actor ParadeeManager {
         return try await synthesize(chunks: phonemeChunks, voice: voice, speed: speed, noiseSeed: noiseSeed)
     }
 
-    /// Misaki-style phonemes → audio, bypassing text normalization and G2P.
-    /// Input longer than 510 phonemes is split at punctuation/whitespace.
-    /// Write British phonemes for the British voices.
+    /// Phonemes → audio, bypassing text normalization and G2P. Input longer
+    /// than 510 phonemes is split at punctuation/whitespace. Write misaki
+    /// phonemes for the English voices (British ones for `bf_` / `bm_`) and
+    /// eSpeak-style phonemes, as ``phonemes(for:voice:)`` gives them, for the
+    /// Hindi, French and Spanish voices.
     public func synthesize(
         phonemes: String,
         voice: ParadeeVoice = .afHeart,
@@ -111,14 +120,27 @@ public actor ParadeeManager {
     }
 
     /// The phoneme string ``synthesize(text:voice:speed:noiseSeed:)`` feeds
-    /// the model for `text` (NeMo normalization, Misaki lexicon, BART G2P):
-    /// British for `bf_` / `bm_` voices, American otherwise.
+    /// the model for `text`, in the voice's language. English: NeMo
+    /// normalization, Misaki lexicon (British for `bf_` / `bm_` voices), then
+    /// for missing words Paradee's G2P (v1.3) or the BART G2P. Hindi, French,
+    /// Spanish: Paradee's G2P, which reads numbers and `%` itself.
     public func phonemes(for text: String, voice: ParadeeVoice = .afHeart) async throws -> String {
         guard englishFrontendReady else { throw ParadeeError.notInitialized }
+        try checkVoice(voice)
+        let paradeeG2P = version.usesParadeeG2P ? try await store.paradeeG2P() : nil
+        guard voice.language.isEnglish else {
+            guard let paradeeG2P else {
+                throw ParadeeError.unsupportedVoice(voice: voice.rawValue, version: version.rawValue)
+            }
+            return try paradeeG2P.phonemize(text, language: voice.language)
+        }
         let british = voice.isBritish
         let phonemizer = await ensurePhonemizer(british: british)
         let raw = try await phonemizer.phonemize(EnglishTextNormalizer.normalizeForFrontend(text)) {
             [englishG2P] word in
+            if let paradeeG2P, let phonemes = try paradeeG2P.englishWord(word, british: british) {
+                return [phonemes]
+            }
             // BART G2P only knows American phonemes.
             let american = try await englishG2P.phonemize(word: word)
             guard british, let american else { return american }
@@ -162,8 +184,9 @@ public actor ParadeeManager {
         return samples
     }
 
-    /// Split like upstream `re.split(r"(?<=[.!?…])\s+|\n+", text)`: after
-    /// sentence-final punctuation followed by whitespace, and at newlines.
+    /// Split like upstream `re.split(r"(?<=[.!?…])\s+|(?<=[।॥])\s*|\n+", text)`:
+    /// after sentence-final punctuation followed by whitespace, after the
+    /// Hindi danda `।` / `॥` (often with no space after it), and at newlines.
     static func sentences(in text: String) -> [String] {
         var out: [String] = []
         var current = ""
@@ -171,7 +194,9 @@ public actor ParadeeManager {
         var index = text.startIndex
         while index < text.endIndex {
             let ch = text[index]
-            if ch.isNewline || (ch.isWhitespace && previous.map { ".!?…".contains($0) } == true) {
+            if ch.isNewline || (ch.isWhitespace && previous.map { ".!?…".contains($0) } == true)
+                || previous.map({ "।॥".contains($0) }) == true
+            {
                 out.append(current)
                 current = ""
                 // Consume the whole whitespace run.
@@ -191,7 +216,8 @@ public actor ParadeeManager {
 
     /// misaki's last step for Kokoro v1.0 (`G2P.__call__`): flap `ɾ` → `T`,
     /// glottal stop `ʔ` → `t`. The lexicon stores the raw forms, and Paradee
-    /// never saw `ɾ`/`ʔ` in training ("kittens", "satellite" come out garbled).
+    /// never saw `ɾ`/`ʔ` in English training ("kittens", "satellite" come out
+    /// garbled). English only: `ɾ` is a real phoneme in Hindi and Spanish.
     static func misakiOutputForm(_ phonemes: String) -> String {
         phonemes.replacingOccurrences(of: "ɾ", with: "T").replacingOccurrences(of: "ʔ", with: "t")
     }
