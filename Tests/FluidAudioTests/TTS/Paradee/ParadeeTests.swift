@@ -25,6 +25,14 @@ final class ParadeeTests: XCTestCase {
         }
     }
 
+    func testV13RepoPathsAndSubdirectories() {
+        for (repo, sub) in [(Repo.paradeeV13Int8, "int8"), (.paradeeV13Fp32, "fp32"), (.paradeeV13G2P, "g2p")] {
+            XCTAssertEqual(repo.remotePath, "FluidInference/paradee-8m-coreml")
+            XCTAssertEqual(repo.subPath, "v1.3/\(sub)")
+            XCTAssertEqual(repo.folderName, "paradee-8m-coreml/v1.3/\(sub)")
+        }
+    }
+
     func testVariantMapsToRepo() {
         XCTAssertEqual(ParadeeVariant.int8.repo, .paradeeInt8)
         XCTAssertEqual(ParadeeVariant.fp32.repo, .paradeeFp32)
@@ -32,14 +40,21 @@ final class ParadeeTests: XCTestCase {
         XCTAssertEqual(ParadeeVariant.fp32.repo(for: .v10), .paradeeFp32)
         XCTAssertEqual(ParadeeVariant.int8.repo(for: .v12), .paradeeV12Int8)
         XCTAssertEqual(ParadeeVariant.fp32.repo(for: .v12), .paradeeV12Fp32)
+        XCTAssertEqual(ParadeeVariant.int8.repo(for: .v13), .paradeeV13Int8)
+        XCTAssertEqual(ParadeeVariant.fp32.repo(for: .v13), .paradeeV13Fp32)
     }
 
     func testRequiredModels() {
         let required: Set<String> = ["ParadeeText.mlmodelc", "ParadeeAcoustic.mlmodelc", "vocab.json"]
         XCTAssertEqual(ModelNames.Paradee.requiredModels, required)
-        for repo in [Repo.paradeeInt8, .paradeeFp32, .paradeeV12Int8, .paradeeV12Fp32] {
+        for repo in [
+            Repo.paradeeInt8, .paradeeFp32, .paradeeV12Int8, .paradeeV12Fp32, .paradeeV13Int8, .paradeeV13Fp32,
+        ] {
             XCTAssertEqual(ModelNames.getRequiredModelNames(for: repo, variant: nil), required)
         }
+        XCTAssertEqual(
+            ModelNames.getRequiredModelNames(for: .paradeeV13G2P, variant: nil),
+            ["ParadeeG2P.mlmodelc", "paradee_g2p.json"])
     }
 
     // MARK: - Voices
@@ -52,6 +67,60 @@ final class ParadeeTests: XCTestCase {
         XCTAssertEqual(ParadeeVersion.v12.voices.map(\.modelIndex), [0, 1, 2, 3])
         XCTAssertTrue(ParadeeVersion.v12.hasVoiceInput)
         XCTAssertEqual(ParadeeVoice.allCases.filter(\.isBritish), [.bfIsabella, .bmFable])
+    }
+
+    func testV13VoicesKeepV12RowsAndAddFour() {
+        // config.json `voices` of sahilmahendrakar/Paradee-8M-v1.3
+        XCTAssertEqual(
+            ParadeeVersion.v13.voices.map(\.rawValue),
+            ["af_heart", "bf_isabella", "am_puck", "bm_fable", "hf_alpha", "hm_omega", "ff_siwis", "em_alex"])
+        XCTAssertEqual(ParadeeVersion.v13.voices.map(\.modelIndex), [0, 1, 2, 3, 4, 5, 6, 7])
+        XCTAssertTrue(ParadeeVersion.v13.hasVoiceInput)
+        XCTAssertTrue(ParadeeVersion.v13.usesParadeeG2P)
+        XCTAssertFalse(ParadeeVersion.v12.usesParadeeG2P)
+        XCTAssertEqual(
+            ParadeeVersion.v13.voices.map(\.language),
+            [.americanEnglish, .britishEnglish, .americanEnglish, .britishEnglish, .hindi, .hindi, .french, .spanish])
+    }
+
+    func testInitializeRejectsVoicesOfOtherReleasesBeforeDownloading() async {
+        let manager = ParadeeManager(version: .v12)
+        do {
+            try await manager.initialize(voices: [.afHeart, .hfAlpha])
+            XCTFail("expected unsupportedVoice")
+        } catch ParadeeError.unsupportedVoice(let voice, let version) {
+            XCTAssertEqual(voice, "hf_alpha")
+            XCTAssertEqual(version, "1.2")
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
+    }
+
+    func testPhonemesBeforeInitializeThrowsNotInitialized() async {
+        // Non-English voices no longer wait for the English frontend, but still need initialize().
+        let manager = ParadeeManager(version: .v13)
+        for voice in [ParadeeVoice.emAlex, .afHeart] {
+            do {
+                _ = try await manager.phonemes(for: "hola", voice: voice)
+                XCTFail("expected notInitialized for \(voice.rawValue)")
+            } catch ParadeeError.notInitialized {
+            } catch {
+                XCTFail("unexpected error \(error)")
+            }
+        }
+    }
+
+    func testV12RejectsV13Voices() async {
+        let manager = ParadeeManager(version: .v12)
+        do {
+            _ = try await manager.synthesize(phonemes: "bɔ̃ʒˈuʁ", voice: .ffSiwis)
+            XCTFail("expected unsupportedVoice")
+        } catch ParadeeError.unsupportedVoice(let voice, let version) {
+            XCTAssertEqual(voice, "ff_siwis")
+            XCTAssertEqual(version, "1.2")
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
     }
 
     func testV10RejectsOtherVoices() async {
@@ -126,6 +195,12 @@ final class ParadeeTests: XCTestCase {
             ["Hello there.", "How are you?", "Fine!", "New line…", "End"])
         // No split without whitespace after the punctuation ("3.5", "a.b").
         XCTAssertEqual(ParadeeManager.sentences(in: "Pi is 3.14 today."), ["Pi is 3.14 today."])
+    }
+
+    func testSentenceSplitAfterDandaWithOrWithoutSpace() {
+        XCTAssertEqual(
+            ParadeeManager.sentences(in: "आज मौसम अच्छा है।कल बारिश होगी॥ फिर धूप।"),
+            ["आज मौसम अच्छा है।", "कल बारिश होगी॥", "फिर धूप।"])
     }
 
     func testMisakiOutputFormRewritesFlapAndGlottalStop() {
