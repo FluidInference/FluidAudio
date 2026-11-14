@@ -1,0 +1,16 @@
+{
+  "origin_url": "https://cs.utep.edu/nigel/dral/more-examples/ES_002_3.34.wav",
+  "license": "CC0-1.0",
+  "license_source": "https://cs.utep.edu/nigel/dral/",
+  "transcript_source": "https://cs.utep.edu/nigel/dral/more-examples/index.html",
+  "original_sha256": "548b44fab0b09ebf28bc5711749eb8e7e232fde4c4bf7853a6404c6024c922b0",
+  "original_bytes": 264644,
+  "derived_sha256": "05d1926f0e71b7439cfdd3bd23a09955d2c1f9fd6ccfc8aafd9deddc604879d3",
+  "derived_frames": 48000,
+  "sample_rate": 16000,
+  "channels": 1,
+  "sample_width_bytes": 2,
+  "derivation": "afconvert -f WAVE -d LEI16@16000 -c1 ORIGINAL DERIVED, macOS27.0.1",
+  "reference_kind": "publisher literal, not locally human-acoustically audited",
+  "human_reference_quality_claim": false
+}
