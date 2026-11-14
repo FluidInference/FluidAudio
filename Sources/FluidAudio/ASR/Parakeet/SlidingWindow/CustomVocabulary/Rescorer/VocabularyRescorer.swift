@@ -482,7 +482,8 @@ public struct VocabularyRescorer: Sendable {
             }
             wordEnd = timing.endTime
             wordTokenEnd = tokenIndex + 1
-            if token.unicodeScalars.contains(where: CharacterSet.alphanumerics.contains) {
+            // A closure: `contains(where: CharacterSet.alphanumerics.contains)` is miscompiled by Swift 6.4 `-O`.
+            if token.unicodeScalars.contains(where: { CharacterSet.alphanumerics.contains($0) }) {
                 wordMinConfidence = min(wordMinConfidence, timing.confidence)
             }
         }

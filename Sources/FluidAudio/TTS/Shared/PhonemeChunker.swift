@@ -66,9 +66,13 @@ enum PhonemeChunker {
         var ranges: [Range<Int>] = []
 
         // Chunks are trimmed like `trimmingCharacters(in: .whitespacesAndNewlines)`,
-        // which also strips U+200B.
+        // which also strips U+200B. A closure, not the method reference
+        // `allSatisfy(CharacterSet.whitespacesAndNewlines.contains)`: Swift 6.4 `-O`
+        // inverts that reference once the module holds a second one, and release
+        // builds then trimmed the first and last word of every chunk.
+        let trimmedScalars = CharacterSet.whitespacesAndNewlines
         func isTrimmed(_ character: Character) -> Bool {
-            character.unicodeScalars.allSatisfy(CharacterSet.whitespacesAndNewlines.contains)
+            character.unicodeScalars.allSatisfy { trimmedScalars.contains($0) }
         }
         func appendChunk(_ range: Range<Int>) {
             var lower = range.lowerBound
