@@ -627,6 +627,67 @@ final class AudioConverterTests: XCTestCase {
             "Second conversion should work expected 8000, got \(result2.count)")
     }
 
+    func testReusedConverterMatchesFreshConverterBitForBit() async throws {
+        // Live capture delivers small buffers of uneven sizes; formats can change mid-stream.
+        let source48k = try createAudioBuffer(sampleRate: 48000, channels: 1, duration: 0.5)
+        let source44k = try createAudioBuffer(sampleRate: 44100, channels: 2, duration: 0.2)
+        let buffers =
+            try [512, 128, 4800, 481].map { try slice(source48k, frames: $0) }
+            + [try slice(source44k, frames: 1024)]
+            + [try slice(source48k, frames: 512)]
+
+        for buffer in buffers {
+            let fresh = try AudioConverter().resampleBuffer(buffer)
+            let reused = try audioConverter.resampleBuffer(buffer)
+            XCTAssertEqual(reused, fresh, "\(buffer.frameLength) frames at \(buffer.format.sampleRate) Hz")
+        }
+    }
+
+    func testConcurrentConversionsMatchSerialResults() async throws {
+        let source = try createAudioBuffer(sampleRate: 48000, channels: 1, duration: 0.5)
+        let samples = Array(UnsafeBufferPointer(start: source.floatChannelData![0], count: Int(source.frameLength)))
+        let slices = (0..<16).map { Array(samples.prefix(256 + $0 * 37)) }
+        let expected = try slices.map { try AudioConverter().resampleBuffer(Self.monoBuffer($0, sampleRate: 48000)) }
+        let converter = audioConverter!
+
+        let results = try await withThrowingTaskGroup(of: (Int, [Float]).self) { group in
+            for (index, slice) in slices.enumerated() {
+                group.addTask {
+                    (index, try converter.resampleBuffer(Self.monoBuffer(slice, sampleRate: 48000)))
+                }
+            }
+            var byIndex = [[Float]](repeating: [], count: slices.count)
+            for try await (index, samples) in group { byIndex[index] = samples }
+            return byIndex
+        }
+        XCTAssertEqual(results, expected)
+    }
+
+    private static func monoBuffer(_ samples: [Float], sampleRate: Double) throws -> AVAudioPCMBuffer {
+        guard
+            let format = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false),
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count))
+        else { throw AudioConverterError.failedToCreateBuffer }
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer {
+            buffer.floatChannelData![0].update(from: $0.baseAddress!, count: samples.count)
+        }
+        return buffer
+    }
+
+    private func slice(_ buffer: AVAudioPCMBuffer, frames: Int) throws -> AVAudioPCMBuffer {
+        guard
+            let out = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: AVAudioFrameCount(frames)),
+            let source = buffer.floatChannelData, let target = out.floatChannelData
+        else { throw AudioConverterError.failedToCreateBuffer }
+        out.frameLength = AVAudioFrameCount(frames)
+        for channel in 0..<Int(buffer.format.channelCount) {
+            target[channel].update(from: source[channel], count: frames)
+        }
+        return out
+    }
+
     func testConverterFormatSwitching() async throws {
         // Convert from one format
         let buffer1 = try createAudioBuffer(sampleRate: 44100, channels: 1)
