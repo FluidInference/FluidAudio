@@ -15,8 +15,9 @@ The voice picks the language (`ParadeeVoice.language`): `a`/`b` American/British
 
 Core ML models: [FluidInference/paradee-8m-coreml](https://huggingface.co/FluidInference/paradee-8m-coreml)
 (v1.3 in `v1.3/int8/` 11 MB default and `v1.3/fp32/` 33 MB, plus the G2P in `v1.3/g2p/` 3.9 MB; v1.2 in `v1.2/`;
-v1.0 in `int8/` and `fp32/`). Conversion: model-lab `models/paradee-coreml` (v1.0 and v1.2 also in
-[mobius `models/tts/paradee/coreml`](https://github.com/FluidInference/mobius/tree/main/models/tts/paradee/coreml)).
+v1.0 in `int8/` and `fp32/`). Conversion of v1.0 and v1.2:
+[mobius `models/tts/paradee/coreml`](https://github.com/FluidInference/mobius/tree/main/models/tts/paradee/coreml);
+v1.3 and the G2P use the same scripts (the model card describes the G2P conversion).
 
 > **Beta:** API, model artifacts and accuracy may change.
 
