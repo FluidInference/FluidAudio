@@ -90,6 +90,38 @@ For a decode conditioned on one language, use Canary
 Transcribe (`CoherePipeline.transcribe(audio:models:language:)`, 14
 languages). Both prompt the decoder with the language.
 
+## Czech and Slovak: excluded letters
+
+Czech and Slovak share the Latin script and most of their letters, and v3
+sometimes spells a short Czech clip the Slovak way ("väčšina", "ľudí"). For
+`.czech` and `.slovak` the filter therefore also rejects any token containing
+a letter only the other language uses (`Language.excludedLetters`):
+
+| Hint | Rejected letters (both cases) |
+|---|---|
+| `.czech` | ä ô ľ ĺ ŕ |
+| `.slovak` | ř ů ě |
+
+Every other language has an empty set and decodes exactly as before. The
+check runs through `TokenLanguageFilter.matches(_:language:)` and
+`filterTopK(topKIds:topKLogits:vocabulary:language:)`, so it uses the same
+top-K substitution as the script filter.
+
+This is a letter filter, not a language model. Words that are Slovak but
+spelled with shared letters ("ktorá", "majú", "pomierne", "sa") still get
+through. Measured on FLEURS test (first 100 clips per language, macOS 27,
+M2 Pro):
+
+| Model | Set | WER before → after | Clips changed | Clips with excluded letters |
+|---|---|---|---|---|
+| ultra | cs_cz | 8.90 → 8.79 % | 2 (both better) | 2 → 0 |
+| ultra | sk_sk | 7.94 → 7.94 % | 0 | 0 → 0 |
+| redux | cs_cz | 9.05 → 9.05 % | 0 | 0 → 0 |
+| redux | sk_sk | 9.82 → 9.82 % | 0 | 0 → 0 |
+
+A 10-minute Czech long-form file decoded identically. Decode speed did not
+change measurably.
+
 ## Algorithm
 
 For every decoder step the joint network produces top-K token IDs and logits.
@@ -97,7 +129,9 @@ The filter:
 
 1. Walks the top-K list (does **not** assume CoreML returns it sorted).
 2. Looks up each token's text in the vocabulary.
-3. Runs `matches(tokenText, script:)` — a per-character Unicode range check.
+3. Runs `matches(tokenText, language:)`: the per-character Unicode range check
+   for the language's script, then the language's excluded letters (only
+   Czech and Slovak have any).
 4. Keeps the highest-logit candidate that passes.
 5. Returns that token plus a top-K softmax probability.
 
@@ -173,9 +207,9 @@ probability.
 
 ## Extending
 
-The filter currently partitions by Unicode script only. Per-language token
-allowlists (e.g. distinguishing Polish from Czech within the Latin script)
-could plug in at the `matches` call site without changing the decoder API.
+The filter partitions by Unicode script, plus excluded letters for Czech and
+Slovak. Other close pairs can get their own `Language.excludedLetters` set
+without changing the decoder API.
 Validate any per-language token list against real speech in that language,
 including names, titles and code-switching: SentencePiece pieces are shared
 across languages, and blocking one also blocks every word it starts (#840).
@@ -186,13 +220,15 @@ corresponding `matches` case.
 
 ## Testing
 
-40 unit tests in `TokenLanguageFilterTests` cover:
+47 unit tests in `TokenLanguageFilterTests` cover:
 - Every supported language's characteristic diacritics
 - Cross-script rejection (Latin `"cat"` must fail Cyrillic, Cyrillic `"кот"`
   must fail Latin)
 - Boundary marker stripping and neutral-token behavior
 - Combining diacritic (NFD) forms
 - `-∞` logit edge case in `filterTopK`
+- Czech/Slovak excluded letters (both cases, NFD forms), and that no other
+  language is affected
 
 Run with:
 

@@ -728,12 +728,12 @@ internal struct TdtDecoderV3: Sendable {
             let topKLogits = topKLogits,
             !topKIds.isEmpty,
             let tokenText = vocab[label],
-            !TokenLanguageFilter.matches(tokenText, script: language.script),
+            !TokenLanguageFilter.matches(tokenText, language: language),
             let filtered = TokenLanguageFilter.filterTopK(
                 topKIds: topKIds,
                 topKLogits: topKLogits,
                 vocabulary: vocab,
-                preferredScript: language.script
+                language: language
             )
         else { return }
 
