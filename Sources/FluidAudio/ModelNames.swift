@@ -1025,6 +1025,18 @@ public enum ModelNames {
         // Encoder in subdirectory (int8 quantized only)
         public static let encoderInt8File = "encoder/encoder_int8.mlmodelc"
 
+        /// `encoder_int8.mlmodelc` with the conv-cache slice of a concat
+        /// rewritten so the M2 Neural Engine compiles it; the original makes
+        /// Core ML run the encoder on the CPU there (issue #1170, the English
+        /// counterpart of #1141). Same weights, inputs and outputs,
+        /// byte-identical results. Published per tier in `encoder-v2/<tier>ms/`,
+        /// outside the tier folders (releases up to 0.15.5 download every
+        /// `.bin` in a tier folder), stored next to ``encoderInt8File`` and
+        /// loaded in its place when a model directory has it.
+        public static let encoderV2File = "encoder/encoder_int8_v2.mlmodelc"
+
+        static func encoderV2Subdirectory(chunkMs: Int) -> String { "encoder-v2/\(chunkMs)ms" }
+
         public static let requiredModels: Set<String> = [
             preprocessorFile,
             encoderInt8File,
@@ -1034,6 +1046,14 @@ public enum ModelNames {
             tokenizer,
             metadata,
         ]
+
+        /// Repo-download variant without ``encoderInt8File``, for
+        /// `StreamingNemotronAsrManager`, which fetches ``encoderV2File`` itself.
+        static let withoutEncoderVariant = "without-encoder"
+
+        static func requiredModels(variant: String?) -> Set<String> {
+            variant == withoutEncoderVariant ? requiredModels.subtracting([encoderInt8File]) : requiredModels
+        }
     }
 
     /// Parakeet Unified 0.6B (FastConformer-RNNT) model names.
@@ -2106,7 +2126,7 @@ public enum ModelNames {
         case .parakeetEou160, .parakeetEou320, .parakeetEou1280:
             return ModelNames.ParakeetEOU.requiredModels
         case .nemotronStreaming2240, .nemotronStreaming1120, .nemotronStreaming560:
-            return ModelNames.NemotronStreaming.requiredModels
+            return ModelNames.NemotronStreaming.requiredModels(variant: variant)
         case .parakeetUnified:
             // Variants: nil/"fp16" (streaming), "offline"/"offline-fp16" (batch).
             return ModelNames.ParakeetUnified.requiredModels(variant: variant)
