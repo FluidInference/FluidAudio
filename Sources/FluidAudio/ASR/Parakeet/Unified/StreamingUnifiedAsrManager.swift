@@ -310,6 +310,9 @@ public actor StreamingUnifiedAsrManager {
     /// decoded word the term displaced and the scores behind the replacement,
     /// which `finish()`'s transcript cannot express. Empty when boosting is not
     /// configured, or when no segment has been rescored since the last call.
+    /// Each decision's `wordRange` / `tokenRange` is relative to the segment it
+    /// was rescored in, not to the stream, so it does not index the output of
+    /// `consumeTokenTimings()`.
     public func consumeVocabularyReplacements() -> [VocabularyRescorer.RescoringResult] {
         defer { pendingVocabReplacements.removeAll(keepingCapacity: true) }
         return pendingVocabReplacements

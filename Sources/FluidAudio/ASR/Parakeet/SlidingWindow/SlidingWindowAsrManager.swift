@@ -1223,7 +1223,9 @@ public struct SlidingWindowTranscriptionUpdate: Sendable {
     /// The rescoring decision behind each applied replacement, aligned 1:1 with
     /// `ctcAppliedTerms`. Carries the decoded word each term displaced and the
     /// scores the decision was made on, so callers can tell a recognizer error
-    /// from a bad vocabulary replacement. `nil` when nothing was replaced.
+    /// from a bad vocabulary replacement. Each decision's `tokenRange` indexes
+    /// this update's `tokenTimings`, and its `wordRange` the words
+    /// `buildWordTimings(from:)` groups from them. `nil` when nothing was replaced.
     public let ctcReplacements: [VocabularyRescorer.RescoringResult]?
     /// The manager's `confirmedTranscript` after this update. Unlike `text`, it
     /// carries the edits the window made to earlier text — a retired or

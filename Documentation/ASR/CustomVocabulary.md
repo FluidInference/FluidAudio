@@ -756,7 +756,9 @@ let output = await session.rescore(
     text: result.text, tokenTimings: result.tokenTimings ?? [], audioSamples: audioSamples)
 let text = output?.text ?? result.text  // nil: nothing replaced and nothing detected
 
-// output?.replacements: the replacements that were applied
+// output?.replacements: the replacements that were applied; each one's `tokenRange`
+//   indexes the `tokenTimings` passed in, and its `wordRange` the words
+//   `buildWordTimings(from:)` groups from them (counted before any replacement)
 // output?.detectedTerms: terms the spotter found above `thresholds.detectionMinScore`
 ```
 
@@ -767,6 +769,8 @@ The managers run the same session internally after `configureVocabularyBoosting(
 | `SlidingWindowAsrManager` | Each update carries `ctcDetectedTerms`, `ctcAppliedTerms` and `ctcReplacements` |
 | `UnifiedAsrManager` | `transcribeDetailed(_:)` returns them on the `ASRResult`; `transcribe(_:)` returns text only |
 | `StreamingUnifiedAsrManager` | Applied replacements via `consumeVocabularyReplacements()`; no detected terms |
+
+`ASRResult` and `SlidingWindowTranscriptionUpdate` replacements index that result's or update's own `tokenTimings`. `StreamingUnifiedAsrManager` replacements index the segment they were rescored in, not the stream.
 
 ## Streaming Mode Limitations
 
