@@ -141,7 +141,10 @@ public struct ASRResult: Codable, Sendable {
     /// The rescoring decision behind each applied replacement, aligned 1:1 with
     /// `ctcAppliedTerms`. Carries the decoded word each term displaced and the
     /// scores the decision was made on, so callers can tell a recognizer error
-    /// from a bad vocabulary replacement. `nil` when boosting is not configured.
+    /// from a bad vocabulary replacement. Each decision's `tokenRange` indexes
+    /// this result's `tokenTimings`, and its `wordRange` the words
+    /// `buildWordTimings(from:)` groups from them. `nil` when boosting is not
+    /// configured.
     public let ctcReplacements: [VocabularyRescorer.RescoringResult]?
 
     public init(

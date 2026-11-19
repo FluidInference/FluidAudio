@@ -343,7 +343,7 @@ extension VocabularyRescorer {
     ///   - modifiedWords: Array of words being modified (mutated)
     ///   - replacedIndices: Set of already-replaced indices (mutated)
     ///   - replacements: Array of replacement results (mutated)
-    func applyReplacement(
+    static func applyReplacement(
         result: CTCMatchResult,
         candidate: CTCMatchCandidate,
         modifiedWords: inout [(word: String, startTime: Double, endTime: Double)],
@@ -372,7 +372,9 @@ extension VocabularyRescorer {
                 replacementWord: result.replacement,
                 replacementScore: result.boostedVocabScore,
                 shouldReplace: true,
-                reason: result.reason
+                reason: result.reason,
+                wordRange: Self.wordRange(for: candidate.spanIndices),
+                tokenRange: candidate.tokenRange
             )
         )
     }
