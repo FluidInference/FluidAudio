@@ -841,9 +841,6 @@ struct ChunkProcessor {
                 let worker = workers[workerIndex]
 
                 group.addTask {
-                    var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
-                    decoderState.reset()
-
                     let (windowTokens, windowTimestamps, windowConfidences, windowDurations) =
                         try await Self
                         .transcribeChunk(
@@ -852,7 +849,7 @@ struct ChunkProcessor {
                             chunkStart: window.chunkStartOffset,
                             isLastChunk: window.isLastChunk,
                             using: worker,
-                            decoderState: &decoderState,
+                            decoderLayers: decoderLayers,
                             maxModelSamples: maxModelSamples,
                             language: language,
                             emitTokensAfterFrame: window.emitTokensAfterFrame,
@@ -1012,7 +1009,7 @@ struct ChunkProcessor {
         chunkStart: Int,
         isLastChunk: Bool,
         using manager: AsrManager,
-        decoderState: inout TdtDecoderState,
+        decoderLayers: Int,
         maxModelSamples: Int,
         language: Language? = nil,
         emitTokensAfterFrame: Int? = nil,
@@ -1032,6 +1029,8 @@ struct ChunkProcessor {
             return (value.tokens, value.timestamps, value.confidences, value.durations)
         }
 
+        // Each window starts with fresh decoder state. Cache hits need no Core ML arrays.
+        var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
         let paddedChunk = manager.padAudioIfNeeded(samples, targetLength: maxModelSamples)
 
         // Calculate frame count for the ACTUAL audio (excluding prepended context)
@@ -2083,8 +2082,6 @@ struct ChunkProcessor {
         language: Language?
     ) async throws -> [TokenWindow] {
         for placement in probe.placements {
-            var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
-            decoderState.reset()
             let (windowTokens, windowTimestamps, windowConfidences, windowDurations) =
                 try await transcribeChunk(
                     samples: placement.audio,
@@ -2092,7 +2089,7 @@ struct ChunkProcessor {
                     chunkStart: placement.start,
                     isLastChunk: placement.isLastChunk,
                     using: manager,
-                    decoderState: &decoderState,
+                    decoderLayers: decoderLayers,
                     maxModelSamples: maxModelSamples,
                     language: language
                 )
