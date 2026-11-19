@@ -66,8 +66,10 @@ extension AsrManager {
     /// tokens for audio the previous windows already emitted are suppressed at
     /// the source, leaving dedup only the jitter margin. `transcribeChunk` pairs
     /// the frame-0 entry with a *fresh* decoder state — see the note there.
-    /// `redecode == false` (the first window) and callers without accumulated
-    /// timestamps get `(nil, nil)` — the legacy navigation.
+    /// `redecode == false` (the first window) keeps legacy navigation. A final
+    /// re-decode with no emitted tokens starts fresh without a suppression cutoff;
+    /// prior blank windows may already have advanced the carried decoder state.
+    /// Existing output without timestamps retains the legacy fallback.
     nonisolated internal static func redecodePlan(
         redecode: Bool,
         previousTokens: [Int],
@@ -75,9 +77,12 @@ extension AsrManager {
         globalFrameOffset: Int,
         lastWordStartFrame: Int? = nil
     ) -> (initialTimeIndexOverride: Int?, emitTokensAfterFrame: Int?) {
-        guard redecode, let previousTimestamps = previousTokenTimestamps, !previousTokens.isEmpty else {
-            return (nil, nil)
-        }
+        guard redecode else { return (nil, nil) }
+        // A token-empty window can still advance decoder navigation. At EOF,
+        // re-decode retained audio from a fresh state even when no text emitted.
+        // There is no emitted prefix to suppress in that case.
+        guard !previousTokens.isEmpty else { return (0, nil) }
+        guard let previousTimestamps = previousTokenTimestamps else { return (nil, nil) }
         // Anchor the cutoff at the previous window's last *word*, not its last
         // token: that word may have been cut by the window edge (#897), and the
         // re-decode must be free to re-emit it in full.
