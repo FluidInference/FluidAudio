@@ -96,7 +96,9 @@ public actor StreamingNemotronAsrManager {
     }
 
     /// Load models from a directory containing encoder, decoder, joint, and tokenizer
-    /// (the mel front-end is computed natively in Swift; no CoreML preprocessor)
+    /// (the mel front-end is computed natively in Swift; no CoreML preprocessor).
+    /// `encoder/encoder_int8_v2.mlmodelc` (#1170) is loaded in place of
+    /// `encoder/encoder_int8.mlmodelc` when the directory has it.
     /// - Parameter directory: Directory containing the model files
     public func loadModels(from directory: URL) async throws {
         guard SystemInfo.isAppleSilicon else {
@@ -117,7 +119,9 @@ public actor StreamingNemotronAsrManager {
         self.melExtractor = NemotronMelExtractor(nMels: config.melFeatures)
 
         // Load encoder (int8 quantized)
-        let encoderPath = directory.appendingPathComponent("encoder").appendingPathComponent(NemotronEncoder.fileName)
+        let encoderName = Self.compiledEncoderName(in: directory)
+        logger.info("Loading \(encoderName)")
+        let encoderPath = directory.appendingPathComponent(encoderName)
         self.encoder = try await MLModel.load(contentsOf: encoderPath, configuration: mlConfiguration)
 
         // Load decoder
@@ -165,6 +169,10 @@ public actor StreamingNemotronAsrManager {
 
     /// Downloads and loads Nemotron streaming models from Hugging Face if not cached locally.
     ///
+    /// The encoder is `encoder_int8_v2.mlmodelc` (#1170). A cache from an earlier
+    /// release fetches it once; if that fails (offline), the cached
+    /// `encoder_int8.mlmodelc` is kept and loaded.
+    ///
     /// - Parameters:
     ///   - directory: Root directory for model cache (default: Application Support)
     ///   - configuration: Optional model configuration override
@@ -190,24 +198,91 @@ public actor StreamingNemotronAsrManager {
             .appendingPathComponent("Models", isDirectory: true)
 
         let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
+        let encoderV2Missing = !ModelCache.isCacheComplete(
+            at: cacheDir, requiredFiles: [ModelNames.NemotronStreaming.encoderV2File])
 
         // Completeness-checked download + purge-and-retry on load failure: a
         // bare directory-existence gate mistook an interrupted encoder fetch
         // for a warm cache and bricked loading permanently (issue #819).
         // `decoder_joint.mlmodelc` and `metadata.json` are optional at load
-        // time, so they are excluded from the validity set.
+        // time, so they are excluded from the validity set. The tier folder's
+        // encoder_int8 is skipped: `load` fetches encoder_int8_v2 (#1170) from
+        // outside the tier folder, so a purge-and-retry fetches it again.
         try await ModelHub.loadWithRecovery(
             repo, directory: modelsBaseDir,
             requiredFiles: [
-                "encoder/\(NemotronEncoder.fileName)",
                 ModelNames.NemotronStreaming.decoderFile,
                 ModelNames.NemotronStreaming.jointFile,
                 ModelNames.NemotronStreaming.tokenizer,
             ],
-            progressHandler: progressHandler
+            variant: ModelNames.NemotronStreaming.withoutEncoderVariant,
+            progressHandler: encoderV2Missing
+                ? CtcModels.scaledProgressHandler(progressHandler, step: 0, of: 2) : progressHandler
         ) {
+            try await Self.ensureEncoderV2(
+                chunkSize: chunkSize, in: cacheDir,
+                progressHandler: encoderV2Missing
+                    ? CtcModels.scaledProgressHandler(progressHandler, step: 1, of: 2) : nil)
             try await self.loadModels(from: cacheDir)
         }
+    }
+
+    /// Download `encoder_int8_v2.mlmodelc` (#1170) into `cacheDir` unless it is
+    /// already there. If that fails and `cacheDir` has a complete
+    /// `encoder_int8.mlmodelc` from an earlier release, that one is kept.
+    /// `configuration` is the test seam of `ModelHub.download`.
+    static func ensureEncoderV2(
+        chunkSize: NemotronChunkSize, in cacheDir: URL, progressHandler: ProgressHandler?,
+        configuration: URLSessionConfiguration? = nil
+    ) async throws {
+        let names = ModelNames.NemotronStreaming.self
+        guard !ModelCache.isCacheComplete(at: cacheDir, requiredFiles: [names.encoderV2File]) else { return }
+        let logger = AppLogger(category: "NemotronStreaming")
+        logger.info("Downloading \(names.encoderV2File) for \(chunkSize.rawValue) ms...")
+        do {
+            try await downloadEncoderV2(
+                chunkSize: chunkSize, into: cacheDir, progressHandler: progressHandler, configuration: configuration)
+        } catch let error
+            where !RetryPolicy.isCancellation(error)
+            && ModelCache.isCacheComplete(at: cacheDir, requiredFiles: [names.encoderInt8File])
+        {
+            logger.warning(
+                "Could not download \(names.encoderV2File) (\(error.localizedDescription)); keeping the cached \(names.encoderInt8File)"
+            )
+        }
+    }
+
+    /// Download `encoder_int8_v2.mlmodelc` (#1170) for `chunkSize`. It is
+    /// published outside the tier folders, so it lands under
+    /// `cacheDir/encoder-v2/` first (where an interrupted download resumes)
+    /// and is then moved to `encoder/encoder_int8_v2.mlmodelc`.
+    static func downloadEncoderV2(
+        chunkSize: NemotronChunkSize, into cacheDir: URL, progressHandler: ProgressHandler?,
+        configuration: URLSessionConfiguration? = nil
+    ) async throws {
+        let subdirectory = ModelNames.NemotronStreaming.encoderV2Subdirectory(chunkMs: chunkSize.rawValue)
+        try await ModelHub.download(
+            chunkSize.repo, subdirectory: subdirectory, to: cacheDir, progressHandler: progressHandler,
+            configuration: configuration)
+        let destination = cacheDir.appendingPathComponent(ModelNames.NemotronStreaming.encoderV2File)
+        let staged = cacheDir.appendingPathComponent(subdirectory)
+            .appendingPathComponent(destination.lastPathComponent)
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: destination.path) {
+            try fileManager.removeItem(at: destination)
+        }
+        try fileManager.createDirectory(
+            at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fileManager.moveItem(at: staged, to: destination)
+        try? fileManager.removeItem(at: cacheDir.appendingPathComponent(subdirectory).deletingLastPathComponent())
+    }
+
+    /// `encoder/encoder_int8_v2.mlmodelc` (#1170) when `directory` has a
+    /// complete copy, else `encoder/encoder_int8.mlmodelc`.
+    static func compiledEncoderName(in directory: URL) -> String {
+        let encoderV2 = ModelNames.NemotronStreaming.encoderV2File
+        return ModelCache.isCacheComplete(at: directory, requiredFiles: [encoderV2])
+            ? encoderV2 : ModelNames.NemotronStreaming.encoderInt8File
     }
 
     /// Reset all states for a new transcription session
