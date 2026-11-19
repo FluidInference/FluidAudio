@@ -293,8 +293,28 @@ extension CtcKeywordSpotter {
 
         // The shape initializer leaves storage uninitialized. Clear it, then copy the clip.
         array.reset(to: 0)
-        for i in 0..<clampedCount {
-            array[i] = NSNumber(value: audioSamples[i])
+        // Copy in bulk rather than boxing an NSNumber per sample, which cost about a
+        // third of transcription CPU with vocabulary boosting on. A fresh array is
+        // contiguous, so its linear index is its storage offset, and vImage narrows to
+        // half precision with the same round-to-nearest-even as the per-element path.
+        guard clampedCount > 0 else { return (array, clampedCount) }
+        audioSamples.withUnsafeBufferPointer { source in
+            guard let samples = source.baseAddress else { return }
+            switch dataType {
+            case .float32:
+                array.dataPointer.bindMemory(to: Float.self, capacity: maxSamples)
+                    .update(from: samples, count: clampedCount)
+            case .float16:
+                Float16Conversion.fromFloat32(
+                    src: samples,
+                    dst: array.dataPointer.bindMemory(to: UInt16.self, capacity: maxSamples),
+                    count: clampedCount)
+            default:
+                // Not reached by prepareAudioArray (float32 or float16 only).
+                for i in 0..<clampedCount {
+                    array[i] = NSNumber(value: audioSamples[i])
+                }
+            }
         }
 
         return (array, clampedCount)
