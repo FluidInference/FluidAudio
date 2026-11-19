@@ -36,6 +36,30 @@ final class BatchWindowReuseExperimentTests: XCTestCase {
         return Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
     }
 
+    func testAQuietWindowReusesItsSuccessfulEmptyDecode() async throws {
+        let recording = try loadSpeech()
+        // A quiet interval between words in the original recording, 5.15–5.95 s.
+        let samples = Array(recording[82_400..<95_200])
+        let version = AsrModelVersion.v3
+        let models = try AsrModels.loadLocal(from: AsrModels.defaultCacheDirectory(for: version), version: version)
+        let manager = AsrManager(models: models)
+
+        await manager.beginBatchWindowReuseExperiment()
+        for _ in 0..<2 {
+            let result = try await ChunkProcessor.transcribeChunk(
+                samples: samples, contextSamples: 0, chunkStart: 82_400, isLastChunk: false,
+                using: manager, decoderLayers: version.decoderLayers,
+                maxModelSamples: ASRConstants.maxModelSamples, language: .english
+            )
+            XCTAssertTrue(result.tokens.isEmpty, "The fixture must produce a successful empty decode")
+            XCTAssertTrue(result.timestamps.isEmpty && result.confidences.isEmpty && result.durations.isEmpty)
+        }
+        let stats = await manager.batchWindowReuseExperimentStatistics()
+        XCTAssertEqual(stats.misses, 1)
+        XCTAssertEqual(stats.hits, 1, "Repeating a quiet window must not rerun inference")
+        await manager.cleanup()
+    }
+
     // An interior window may get a different flush decision when evaluated in
     // a longer recording. Its cached tokens must never cross that boundary.
     func testIdenticalAudioDoesNotReuseAcrossPendingTokenFlushPolicies() async throws {
@@ -47,7 +71,8 @@ final class BatchWindowReuseExperimentTests: XCTestCase {
             try await ChunkProcessor.transcribeChunk(
                 samples: samples, contextSamples: 0, chunkStart: 0, isLastChunk: false,
                 flushPendingTokens: flush, using: manager, decoderLayers: version.decoderLayers,
-                maxModelSamples: ASRConstants.maxModelSamples, language: .english).tokens
+                maxModelSamples: ASRConstants.maxModelSamples, language: .english
+            ).tokens
         }
 
         let uncached = try await decode(flush: true)

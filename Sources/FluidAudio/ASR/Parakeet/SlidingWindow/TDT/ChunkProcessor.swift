@@ -1120,17 +1120,21 @@ struct ChunkProcessor {
             initialTimeIndexOverride: initialTimeIndexOverride
         )
 
-        if hypothesis.isEmpty || encoderSequenceLength == 0 {
-            return ([], [], [], [])
-        }
-
         try Task.checkCancellation()
+        // An empty decode is still a successful result for this exact window.
+        let value: BatchWindowReuseCache.Value
+        if hypothesis.isEmpty || encoderSequenceLength == 0 {
+            value = .init(tokens: [], timestamps: [], confidences: [], durations: [])
+        } else {
+            value = .init(
+                tokens: hypothesis.ySequence, timestamps: hypothesis.timestamps,
+                confidences: hypothesis.tokenConfidences, durations: hypothesis.tokenDurations)
+        }
         if let cache, let key {
-            await cache.store(.init(tokens: hypothesis.ySequence, timestamps: hypothesis.timestamps,
-                confidences: hypothesis.tokenConfidences, durations: hypothesis.tokenDurations), for: key)
+            await cache.store(value, for: key)
         }
 
-        return (hypothesis.ySequence, hypothesis.timestamps, hypothesis.tokenConfidences, hypothesis.tokenDurations)
+        return (value.tokens, value.timestamps, value.confidences, value.durations)
     }
 
     /// Token IDs that may safely start a seam splice: word-initial (`▁`) or
