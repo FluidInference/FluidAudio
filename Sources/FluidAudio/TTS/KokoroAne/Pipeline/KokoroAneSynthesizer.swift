@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -19,6 +20,20 @@ public struct KokoroAneSynthesizer {
         styleS: [Float],
         styleTimbre: [Float],
         speed: Float = KokoroAneConstants.defaultSpeed,
+        store: KokoroAneModelStore
+    ) async throws -> KokoroAneSynthesisResult {
+        try await synthesize(
+            inputIds: inputIds, styleS: styleS, styleTimbre: styleTimbre, speed: speed, pauses: [], store: store)
+    }
+
+    /// ``synthesize(inputIds:styleS:styleTimbre:speed:store:)`` with the
+    /// punctuation pauses of ``KokoroAnePauses``.
+    static func synthesize(
+        inputIds: [Int32],
+        styleS: [Float],
+        styleTimbre: [Float],
+        speed: Float,
+        pauses: [KokoroAnePauses.Span],
         store: KokoroAneModelStore
     ) async throws -> KokoroAneSynthesisResult {
         guard styleS.count == 128 else {
@@ -70,7 +85,8 @@ public struct KokoroAneSynthesizer {
         // duration → pred_dur (int32, rounded, clamped ≥ 1)
         let duration = try outputArray(postOut, key: "duration", stage: .postAlbert)
         let durFloats = KokoroAneArrays.readFloats(duration)
-        let predDur = try predictedDurations(from: durFloats)
+        var predDur = try predictedDurations(from: durFloats)
+        let silentFrames = KokoroAnePauses.apply(pauses, to: &predDur)
         let tA = predDur.reduce(0) { $0 + Int($1) }
         if tA > KokoroAneConstants.maxAcousticFrames {
             throw KokoroAneError.acousticFramesExceedCap(
@@ -102,10 +118,17 @@ public struct KokoroAneSynthesizer {
             timing: &timings.prosody
         )
         // Fetch F0 / N once; reused fp32 by Noise and fp16 by Vocoder.
-        let f0Raw = try outputArray(prosOut, key: "F0", stage: .prosody)
+        var f0Raw = try outputArray(prosOut, key: "F0", stage: .prosody)
         let f0Shape = f0Raw.shape.map(\.intValue)
-        let nRaw = try outputArray(prosOut, key: "N", stage: .prosody)
+        var nRaw = try outputArray(prosOut, key: "N", stage: .prosody)
         let nShape = nRaw.shape.map(\.intValue)
+        if !silentFrames.isEmpty {
+            var f0 = KokoroAneArrays.readFloats(f0Raw)
+            var n = KokoroAneArrays.readFloats(nRaw)
+            try KokoroAnePauses.silence(f0: &f0, n: &n, frames: silentFrames, durations: predDur)
+            f0Raw = try KokoroAneArrays.float32Array(shape: f0Shape, from: f0)
+            nRaw = try KokoroAneArrays.float32Array(shape: nShape, from: n)
+        }
 
         // ── 5: Noise (fp32 boundary) ─────────────────────────────────
         try Task.checkCancellation()
@@ -236,3 +259,4 @@ public struct KokoroAneSynthesizer {
         return try KokoroAneArrays.float32Array(shape: arr.shape.map(\.intValue), from: arr)
     }
 }
+#endif

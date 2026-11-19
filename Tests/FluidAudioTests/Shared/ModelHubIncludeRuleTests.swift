@@ -148,4 +148,65 @@ final class ModelHubIncludeRuleTests: XCTestCase {
         XCTAssertFalse(include("tokenizer_test_vectors.model", false))
         XCTAssertFalse(include("Encoder.mlmodelc/model.mil", false))
     }
+
+    // MARK: - kokoro root, `g2p-only` variant (#1044)
+
+    /// Patterns exactly as `ModelHub.download(.kokoro, variant: "g2p-only")`
+    /// derives them from `ModelNames.G2P.requiredModels`.
+    private var g2pPatterns: [String] {
+        ModelNames.G2P.requiredModels.map { $0 + "/" }
+    }
+
+    private func g2pInclude(_ path: String, isDirectory: Bool = false) -> Bool {
+        ModelHub.repoIncludeRule(
+            subPath: nil, patterns: g2pPatterns, sweepsRootMetadata: Repo.kokoro.sweepsRootMetadata
+        )(path, isDirectory)
+    }
+
+    func testKokoroRepoOptsOutOfRootMetadataSweep() {
+        XCTAssertFalse(Repo.kokoro.sweepsRootMetadata)
+        // Sibling repos keep the allowance.
+        XCTAssertTrue(Repo.diarizer.sweepsRootMetadata)
+        XCTAssertTrue(Repo.canary1bV2.sweepsRootMetadata)
+    }
+
+    func testG2POnlyTakesRequiredAssets() {
+        XCTAssertTrue(g2pInclude("G2PEncoder.mlmodelc", isDirectory: true))
+        XCTAssertTrue(g2pInclude("G2PEncoder.mlmodelc/model.mil"))
+        XCTAssertTrue(g2pInclude("G2PEncoder.mlmodelc/weights/weight.bin"))
+        XCTAssertTrue(g2pInclude("G2PDecoder.mlmodelc/coremldata.bin"))
+        XCTAssertTrue(g2pInclude("g2p_vocab.json"))
+    }
+
+    func testG2POnlySkipsRootLexiconCaches() {
+        // ~40 MB of per-language lexicons at the repo root rode in on the
+        // `.json` allowance for every caller; English never reads most of them.
+        for file in [
+            "us_lexicon_cache.json", "es_lexicon_cache.json", "fr_lexicon_cache.json",
+            "us_gold.json", "us_silver.json", "gb_gold.json", "gb_silver.json",
+            "vocab_index.json", "config.json",
+        ] {
+            XCTAssertFalse(g2pInclude(file), "\(file) must not be downloaded by g2p-only")
+        }
+    }
+
+    func testG2POnlySkipsUnrelatedRootDirectories() {
+        XCTAssertFalse(g2pInclude("G2PEncoder.mlpackage", isDirectory: true))
+        XCTAssertFalse(g2pInclude("MultilingualG2PEncoder.mlmodelc", isDirectory: true))
+        XCTAssertFalse(g2pInclude("voices", isDirectory: true))
+        XCTAssertFalse(g2pInclude("ANE", isDirectory: true))
+        XCTAssertFalse(g2pInclude("README.md"))
+    }
+
+    func testRootMetadataSweepDefaultsOn() {
+        // Omitting the flag keeps the historical allowance for every other repo.
+        let rule = ModelHub.repoIncludeRule(subPath: nil, patterns: ["Melspectrogram.mlmodelc/"])
+        XCTAssertTrue(rule("config.json", false))
+        XCTAssertTrue(rule("vocab.txt", false))
+        let off = ModelHub.repoIncludeRule(
+            subPath: nil, patterns: ["Melspectrogram.mlmodelc/"], sweepsRootMetadata: false)
+        XCTAssertFalse(off("config.json", false))
+        XCTAssertFalse(off("vocab.txt", false))
+        XCTAssertTrue(off("Melspectrogram.mlmodelc/model.mil", false))
+    }
 }

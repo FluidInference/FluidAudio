@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Minimal Mandarin tone sandhi pass operating on a flat list of
@@ -73,3 +74,4 @@ public enum MandarinToneSandhi {
         }
     }
 }
+#endif

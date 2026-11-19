@@ -248,6 +248,21 @@ Derived metrics:
 
 ## Text-to-Speech
 
+### Kokoro ANE v3 (FluidAudio v0.17.6)
+
+Selected M5 Pro / macOS 27.0 checks measured **49.45 / 35.85 / 53.97 ms**
+median inference for English / Japanese / Mandarin, producing 3.350 / 3.050 /
+3.675 seconds of audio. Each median uses five calls after two warmups; input
+phonemes are prepared in advance. Current v3 uses per-stage CPU/ANE and CPU/GPU
+policies plus native CPU DSP, rather than `.all` or an ANE-only policy.
+
+Applying CPU+ANE to every graph measured 511.40 / 474.45 / 584.19 ms; `.all`
+and CPU+GPU aborted in Apple's GPU RNN path before completing warmups.
+These are bounded local checks, not full-corpus results. See the
+[complete protocol, inputs, ranges, raw records and separate live-demo timings](TTS/Benchmarks.md#kokoro-ane-v3-selected-m5-pro-measurements).
+
+### Historical M4 Pro comparison
+
 We generated the same strings with to generate audio between 1s to ~300s in order to test the speed across a range of varying inputs on Pytorch CPU, MPS, and MLX pipeline, and compared it against the native Swift version with Core ML models.
 
 Each pipeline warmed up the models by running through it once with pesudo inputs, and then comparing the raw inference time with the model already loaded. You can see that for the Core ML model, we traded lower memory and very slightly faster inference for longer initial warm-up.
@@ -639,7 +654,18 @@ Both offline and online versions use the community-1 model (via FluidInference/s
 
 > **Beta:** CAM++ is a beta model conversion; results and model artifacts may change.
 
-CoreML CAM++ (FunASR, ~7.2M) speaker-embedding extractor. Model: [FluidInference/campplus-coreml](https://huggingface.co/FluidInference/campplus-coreml). 2-stage: fbank80 preprocessor (fp32/CPU) → CAM++ (RangeDim, CPU/GPU) → 192-d L2-normalized embedding. Hardware: Apple M5 Pro.
+CoreML CAM++ (FunASR, ~7.2M) speaker-embedding extractor. Model: [FluidInference/campplus-coreml](https://huggingface.co/FluidInference/campplus-coreml). 2-stage: fbank80 preprocessor (fp32/CPU) → per-utterance mean subtraction → CAM++ (RangeDim, fp32, CPU/GPU) → 192-d L2-normalized embedding. Hardware: Apple M5 Pro.
+
+The `_v2` models (#985) match 3D-Speaker's PyTorch `CAMPPlus` (`campplus_cn_common.bin` on Kaldi fbank): cosine 1.0000 at every length from 0.35 s to 60 s and on 413 single-speaker AMI Mix-Headset segments (3–8 s, 16 speakers). Speaker-verification EER on those segments:
+
+| Models | Within meeting (1,332 target trials) | Across meetings (4,079 target trials) |
+|---|---|---|
+| v1 (Hamming window, ceil-mode pooling divisor, fp16) | 4.67% | 3.73% |
+| v1 + host mean subtraction (#1094) | 3.07% | 3.48% |
+| `_v2` | 2.85% | 3.55% |
+| PyTorch reference | 2.85% | 3.55% |
+
+The AISHELL-1 numbers below were measured on v1.
 
 | Metric | Value |
 |--------|-------|
@@ -677,9 +703,9 @@ Completed. New results: 232, Skipped existing: 0, Total attempted: 232
 Step Ratio 1, min duration 0 (edited) 
 ```
 
-Note that the baseline pytorch version is ~11% DER, we lost some precision dropping down to fp16 precision in order to run most of the embedding model on neural engine. But as a result, we significantly out perform the baseline `mps` backend as well. the pyannote-community-1 on cpu is ~1.5-2 RTFx, on mps, it's ~20-25 RTFx.
+These VoxConverse numbers use the in-repo scorer (0.25 s collar, overlapped speech skipped) and were measured with exclusive output, before #1049, so they are not comparable with pyannote's published community-1 VoxConverse DER of 11.2% (no collar, overlap scored). Running most of the embedding model in fp16 on the Neural Engine is much faster than the PyTorch pipeline, which runs at ~1.5-2 RTFx on CPU and ~20-25 RTFx on `mps`.
 
-Running on the full AMI SDM 16-meeting test set (official NeMo/pyannote evaluation split: EN2002, ES2004, IS1009, TS3003 × a-d). Re-run 2026-07-03 on an Apple M5 Pro:
+Running on the full AMI 16-meeting test set (official NeMo/pyannote evaluation split: EN2002, ES2004, IS1009, TS3003 × a-d). `diarization-benchmark --dataset ami-sdm` reads the headset mix (`Mix-Headset.wav`), which pyannote's tables list as AMI (IHM). Re-run 2026-07-03 on an Apple M5 Pro:
 
 ```bash
 swift run -c release fluidaudiocli diarization-benchmark --mode offline \
@@ -711,9 +737,21 @@ AVERAGE          10.6     17.4       5.4      2.0      3.3      -        323.2
 ==========================================================================================
 ```
 
-12/16 meetings detect the correct speaker count. Average DER 10.62% matches published pyannote-community-1 offline numbers on this split (~11-12%). Results are fully deterministic (two consecutive runs produce bit-identical metrics).
+12/16 meetings detect the correct speaker count. Results are fully deterministic (two consecutive runs produce bit-identical metrics). This table predates #1049, so it was measured with `exclusiveSegments: true` (one speaker at a time). Its scorer uses a 0.25 s collar, skips overlapped reference speech and never charges an extra output speaker, so overlapping output can only lower its DER, and its numbers are not comparable with pyannote's published ones. With today's defaults (threshold 0.6 in the post-#801 semantics) the same scorer gives 9.4% average DER with overlapping output and 9.6% with `--exclusive-segments`, with 15/16 meetings detecting the correct speaker count (2026-10-30, M5 Pro); that drop is not evidence of better overlap handling.
 
 **Clustering threshold matters on this split.** The table above predates #801 and uses `--threshold 0.7` under the old (inverted) threshold semantics. Since #801 the threshold is a Euclidean cut distance applied directly to the AHC dendrogram (pyannote parity): **larger values merge more aggressively and yield fewer speakers**. Old values map to new ones via `sqrt(2 − 2·old)` — the old default 0.6 behaved like a cut at 0.894, and the old `--threshold 0.7` from this table behaves like `--threshold 0.775` today. The CLI default remains the community-1 preset value (0.6), now interpreted as pyannote does.
+
+**Overlap-scored DER (pyannote protocol).** pyannote's published community-1 numbers use no forgiveness collar and score overlapped speech. Measured that way on the same 16 meetings with pyannote.metrics 3.2.1 and the [AMI-diarization-setup](https://github.com/pyannote/AMI-diarization-setup) `only_words` references (DER over all meetings), on an Apple M5 Pro, 2026-10-30 (#1049). The audio is the headset mix, so the matching pyannote row is AMI (IHM).
+
+| Settings | Output | DER | Missed | False alarm | Confusion | Overlapped speech with ≥ 2 output speakers |
+|---|---|---|---|---|---|---|
+| CLI defaults (step ratio 0.2, min segment 1.0 s) | overlapping (default) | 20.3% | 13.2% | 3.0% | 4.1% | 45.8% |
+| CLI defaults | `--exclusive-segments` | 24.2% | 19.0% | 2.3% | 3.0% | 0.0% |
+| `--step-ratio 0.1 --min-segment-duration 0` | overlapping (default) | 18.3% | 9.3% | 3.7% | 5.3% | 63.7% |
+| `--step-ratio 0.1 --min-segment-duration 0` | `--exclusive-segments` | 23.1% | 17.2% | 2.5% | 3.4% | 0.0% |
+| pyannote community-1, published | `speaker_diarization` | 17.0% | | | | |
+
+Exclusive output (the default before #1049) leaves out the second speaker of every overlap: missed speech rises by about 6-8 points and DER by about 4-5. With overlap kept, the remaining gap to pyannote's 17.0% is 3.3 points at the CLI defaults and 1.3 points at step ratio 0.1, min segment 0. Set `exclusiveSegments` only when you need one speaker at a time, for example to attribute ASR words.
 
 ### Streaming/online Diarization
 
@@ -1075,6 +1113,10 @@ swift run -c release fluidaudiocli ja-benchmark --decoder tdt --dataset jsut --s
 | Mean RTFx | 28.9x |
 
 **Note:** CER calculation includes number normalization (full-width digits → half-width, kanji numbers → Arabic) matching NVIDIA's evaluation methodology. NVIDIA reports 6.4% CER for the same model on JSUT-basic5000.
+
+### Known limitation: multi-sentence windows
+
+When a window holds several sentences from the same speaker, the model can transcribe only one of them and output blank for the rest. It is most likely when the window has a long stretch of silence before or after the speech: leading silence tends to keep only the last sentence, trailing silence only the first. NVIDIA's original NeMo checkpoint gives the same output, so this is model behavior, not a conversion issue ([#1117](https://github.com/FluidInference/FluidAudio/issues/1117)). On the FLEURS ja_jp test set it affects 14 of 116 multi-sentence clips and none of the 534 single-sentence clips. `SlidingWindowAsrManager` transcribes the clip from #1117 in full, but it runs the same model, so it is not a guaranteed workaround.
 
 ## CUA-S1-FORMS decision scoring
 

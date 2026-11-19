@@ -69,7 +69,9 @@ public final class AudioMelSpectrogram {
         padTo: Int = 0,
         logFloor: Float = powf(2, -24),
         logFloorMode: LogFloorMode = .additive,
-        windowPeriodic: Bool = false
+        windowPeriodic: Bool = false,
+        window: [Float]? = nil,
+        filterbank: [Float]? = nil
     ) {
         self.nMels = nMels
         self.padTo = max(1, padTo)
@@ -84,20 +86,37 @@ public final class AudioMelSpectrogram {
         self.fMax = Float(sampleRate) / 2.0
 
         // 1. Create Hann window. NeMo defaults to a symmetric window, while
-        // librosa/STFT paths use a periodic window.
-        self.hannWindow = Self.createHannWindow(length: winLength, periodic: windowPeriodic)
+        // librosa/STFT paths use a periodic window. A model that ships its own
+        // window (e.g. the checkpoint's bf16 table) passes it in instead.
+        let numFreqBins = nFFT / 2 + 1
+        if let window {
+            precondition(window.count == winLength, "window has \(window.count) samples, expected \(winLength)")
+            self.hannWindow = window
+        } else {
+            self.hannWindow = Self.createHannWindow(length: winLength, periodic: windowPeriodic)
+        }
 
-        // 2. Create mel filterbank with Slaney normalization
-        self.melFilterbank = Self.createMelFilterbank(
-            nFFT: nFFT,
-            nMels: nMels,
-            sampleRate: sampleRate,
-            fMin: fMin,
-            fMax: fMax
-        )
+        // 2. Create mel filterbank with Slaney normalization, or take the shipped
+        // [nMels, numFreqBins] row-major table.
+        if let filterbank {
+            precondition(
+                filterbank.count == nMels * numFreqBins,
+                "filterbank has \(filterbank.count) values, expected \(nMels * numFreqBins) (\(nMels) x \(numFreqBins))"
+            )
+            self.melFilterbank = (0..<nMels).map {
+                Array(filterbank[($0 * numFreqBins)..<(($0 + 1) * numFreqBins)])
+            }
+        } else {
+            self.melFilterbank = Self.createMelFilterbank(
+                nFFT: nFFT,
+                nMels: nMels,
+                sampleRate: sampleRate,
+                fMin: fMin,
+                fMax: fMax
+            )
+        }
 
         // 3. Flatten filterbank for vDSP matrix multiply: [nMels, numFreqBins] row-major
-        let numFreqBins = nFFT / 2 + 1
         var flat = [Float](repeating: 0, count: nMels * numFreqBins)
         for m in 0..<nMels {
             for f in 0..<numFreqBins {

@@ -1,3 +1,4 @@
+#if TTS
 import Accelerate
 @preconcurrency import AVFoundation
 @preconcurrency import CoreML
@@ -406,3 +407,4 @@ public enum PocketTtsVoiceCloner {
         }
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 import Accelerate
 @preconcurrency import CoreML
 import Foundation
@@ -31,7 +32,7 @@ struct PocketTtsStateModels: Sendable {
 /// writes, so access must be serialized. One engine per session; the state
 /// is reset per chunk by re-injecting the fp16 voice snapshot (which
 /// overwrites every slot, so no `makeState()` per utterance is needed).
-@available(macOS 15.0, iOS 18.0, *)
+@available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
 actor PocketTtsStateEngine {
 
     /// A voice KV snapshot converted to the state's at-rest format: fp16 bit
@@ -267,8 +268,10 @@ actor PocketTtsStateEngine {
 
     /// Convert `count` floats starting at `offset` into a full-length,
     /// zero-padded fp16 state buffer (IEEE round-to-nearest-even via vImage).
-    static func fp16Buffer(from source: [Float], offset: Int, count: Int) -> [UInt16] {
-        var dst = [UInt16](repeating: 0, count: bufferElementCount)
+    static func fp16Buffer(
+        from source: [Float], offset: Int, count: Int, totalCount: Int? = nil
+    ) -> [UInt16] {
+        var dst = [UInt16](repeating: 0, count: totalCount ?? bufferElementCount)
         guard count > 0 else { return dst }
         source.withUnsafeBufferPointer { src in
             guard let srcBase = src.baseAddress else { return }
@@ -397,3 +400,4 @@ actor PocketTtsStateEngine {
         return Array(UnsafeBufferPointer(start: ptr, count: count))
     }
 }
+#endif

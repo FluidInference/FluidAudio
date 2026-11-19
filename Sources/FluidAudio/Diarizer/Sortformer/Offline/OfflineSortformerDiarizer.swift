@@ -1,3 +1,4 @@
+#if Diarizer
 @preconcurrency import CoreML
 import Foundation
 import OSLog
@@ -389,3 +390,4 @@ public final class OfflineSortformerDiarizer {
             .resample(samples, from: sourceSampleRate)
     }
 }
+#endif

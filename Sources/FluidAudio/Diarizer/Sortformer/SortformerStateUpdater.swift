@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 import Foundation
 
@@ -584,3 +585,4 @@ public struct SortformerStateUpdater {
         return logits.map { 1.0 / (1.0 + exp(-$0)) }
     }
 }
+#endif

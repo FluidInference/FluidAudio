@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Result of SSML preprocessing - cleaned text with phonetic overrides
@@ -90,3 +91,4 @@ func digitToWord(_ char: Character) -> String? {
     guard let digit = Int(String(char)), digit >= 0, digit <= 9 else { return nil }
     return digitWords[digit]
 }
+#endif

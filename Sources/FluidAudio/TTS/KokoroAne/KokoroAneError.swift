@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Errors emitted by the KokoroAne TTS chain.
@@ -55,3 +56,4 @@ public enum KokoroAneError: Error, LocalizedError {
         }
     }
 }
+#endif

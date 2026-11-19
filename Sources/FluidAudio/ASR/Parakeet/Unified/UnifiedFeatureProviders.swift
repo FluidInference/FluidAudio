@@ -1,21 +1,28 @@
 @preconcurrency import CoreML
 import Foundation
 
-/// Hyperoptimized Mel Feature Provider
+/// Encoder feature provider: `mel`, `mel_length`, and `prompt_id` for the multilingual (prompted) encoders.
 final class UnifiedEncoderFeatureProvider: MLFeatureProvider {
-    let featureNames: Set<String> = ["mel", "mel_length"]
+    let featureNames: Set<String>
 
     let mel: MLFeatureValue
     let melLength: MLFeatureValue
+    let promptId: MLFeatureValue?
 
     func featureValue(for featureName: String) -> MLFeatureValue? {
-        if featureName.count == 3 { return mel }
-        return melLength
+        switch featureName {
+        case "mel": return mel
+        case "mel_length": return melLength
+        case "prompt_id": return promptId
+        default: return nil
+        }
     }
 
-    init(mel: MLMultiArray, melLength: MLMultiArray) {
+    init(mel: MLMultiArray, melLength: MLMultiArray, promptId: MLMultiArray? = nil) {
         self.mel = MLFeatureValue(multiArray: mel)
         self.melLength = MLFeatureValue(multiArray: melLength)
+        self.promptId = promptId.map { MLFeatureValue(multiArray: $0) }
+        self.featureNames = promptId == nil ? ["mel", "mel_length"] : ["mel", "mel_length", "prompt_id"]
     }
 }
 

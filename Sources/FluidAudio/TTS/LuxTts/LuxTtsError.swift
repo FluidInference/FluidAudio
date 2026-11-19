@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Errors surfaced by the LuxTTS backend.
@@ -38,3 +39,4 @@ public enum LuxTtsError: Error, LocalizedError {
         }
     }
 }
+#endif

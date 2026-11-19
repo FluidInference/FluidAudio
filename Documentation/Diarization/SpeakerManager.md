@@ -497,6 +497,29 @@ if let avgEmbedding = SpeakerUtilities.averageEmbeddings(embeddingArray) {
 }
 ```
 
+### cleanEmbeddingsBySpeaker
+Build one embedding per speaker from clean speech only, to enroll speakers from a finished diarization. Averaging everything a speaker said lets crosstalk, short turns, and clustering mistakes pull the embedding toward another voice.
+
+- Reads `chunkEmbeddings`, one independent embedding per chunk and local speaker. Segment embeddings repeat the chunk's vector or the cluster centroid, so they can't be filtered.
+- A speaker's clean speech is their turns minus other speakers' turns, counted as seconds of audio: `OfflineDiarizerManager`'s windows overlap 80%, so each moment is split between the chunks covering it, and a chunk's share is its weight.
+- Skips chunks with under 1.5 s of clean speech, but still counts their clean speech toward the speaker's total.
+- Keeps the chunks within cosine distance 0.5 of the speaker's medoid chunk (picked by chunk count, not seconds).
+- Returns no embedding when fewer than 2 chunks are kept (`minChunks`), when the kept chunks hold under 60% of the speaker's clean speech (likely two people in one cluster, including a second voice spread over many short chunks), or when they hold under 4 s.
+
+```swift
+var config = DiarizerConfig.default
+config.exposeChunkEmbeddings = true  // required; OfflineDiarizerConfig has the same flag
+let diarizer = DiarizerManager(config: config)
+diarizer.initialize(models: models)
+
+let result = try diarizer.performCompleteDiarization(samples)
+let embeddings = SpeakerUtilities.cleanEmbeddingsBySpeaker(result)
+let known = embeddings.map { id, embedding in
+    Speaker(id: id, name: names[id], currentEmbedding: embedding, isPermanent: true)
+}
+speakerManager.initializeKnownSpeakers(known)
+```
+
 ## Threading and Concurrency
 
 `SpeakerManager` is thread-safe:

@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -43,19 +44,21 @@ public struct PocketTtsSynthesizer {
     /// - Parameters:
     ///   - text: The text to synthesize.
     ///   - voice: Voice identifier (default: "alba").
-    ///   - temperature: Generation temperature (default: 0.7).
+    ///   - temperature: Generation temperature (default: the language pack's
+    ///     `defaultTemperature`, 0.7 for most packs and 0.3 for `.english`).
     ///   - seed: Random seed for reproducibility (nil for random).
     ///   - deEss: Whether to apply de-essing post-processing.
     /// - Returns: A synthesis result containing WAV audio data.
     public static func synthesize(
         text: String,
         voice: String = PocketTtsConstants.defaultVoice,
-        temperature: Float = PocketTtsConstants.temperature,
+        temperature: Float? = nil,
         seed: UInt64? = nil,
         deEss: Bool = true,
         maxTokensPerChunk: Int = PocketTtsConstants.maxTokensPerChunk,
         language: PocketTtsLanguage = .english
     ) async throws -> SynthesisResult {
+        let temperature = temperature ?? language.defaultTemperature
         let store = try currentModelStore()
         let voiceData = try await store.voiceData(for: voice)
         return try await synthesize(
@@ -76,19 +79,21 @@ public struct PocketTtsSynthesizer {
     /// - Parameters:
     ///   - text: The text to synthesize.
     ///   - voiceData: Voice conditioning data (e.g., from cloneVoice).
-    ///   - temperature: Generation temperature (default: 0.7).
+    ///   - temperature: Generation temperature (default: the language pack's
+    ///     `defaultTemperature`, 0.7 for most packs and 0.3 for `.english`).
     ///   - seed: Random seed for reproducibility (nil for random).
     ///   - deEss: Whether to apply de-essing post-processing.
     /// - Returns: A synthesis result containing WAV audio data.
     public static func synthesize(
         text: String,
         voiceData: PocketTtsVoiceData,
-        temperature: Float = PocketTtsConstants.temperature,
+        temperature: Float? = nil,
         seed: UInt64? = nil,
         deEss: Bool = true,
         maxTokensPerChunk: Int = PocketTtsConstants.maxTokensPerChunk,
         language: PocketTtsLanguage = .english
     ) async throws -> SynthesisResult {
+        let temperature = temperature ?? language.defaultTemperature
         logger.info("PocketTTS synthesizing with custom voice: '\(text)'")
         let genStart = Date()
 
@@ -168,7 +173,8 @@ public struct PocketTtsSynthesizer {
     /// - Parameters:
     ///   - text: The text to synthesize.
     ///   - voice: Voice identifier (default: "alba").
-    ///   - temperature: Generation temperature (default: 0.7).
+    ///   - temperature: Generation temperature (default: the language pack's
+    ///     `defaultTemperature`, 0.7 for most packs and 0.3 for `.english`).
     ///   - seed: Random seed for reproducibility (nil for random).
     /// - Returns: An `AsyncThrowingStream` of audio frames. Throws if a model
     ///   inference error occurs during generation.
@@ -183,11 +189,12 @@ public struct PocketTtsSynthesizer {
     public static func synthesizeStreaming(
         text: String,
         voice: String = PocketTtsConstants.defaultVoice,
-        temperature: Float = PocketTtsConstants.temperature,
+        temperature: Float? = nil,
         seed: UInt64? = nil,
         maxTokensPerChunk: Int = PocketTtsConstants.maxTokensPerChunk,
         language: PocketTtsLanguage = .english
     ) async throws -> AsyncThrowingStream<AudioFrame, Error> {
+        let temperature = temperature ?? language.defaultTemperature
         let store = try currentModelStore()
         let voiceData = try await store.voiceData(for: voice)
         return try await synthesizeStreaming(
@@ -207,18 +214,20 @@ public struct PocketTtsSynthesizer {
     /// - Parameters:
     ///   - text: The text to synthesize.
     ///   - voiceData: Voice conditioning data (e.g., from cloneVoice).
-    ///   - temperature: Generation temperature (default: 0.7).
+    ///   - temperature: Generation temperature (default: the language pack's
+    ///     `defaultTemperature`, 0.7 for most packs and 0.3 for `.english`).
     ///   - seed: Random seed for reproducibility (nil for random).
     /// - Returns: An `AsyncThrowingStream` of audio frames. Throws if a model
     ///   inference error occurs during generation.
     public static func synthesizeStreaming(
         text: String,
         voiceData: PocketTtsVoiceData,
-        temperature: Float = PocketTtsConstants.temperature,
+        temperature: Float? = nil,
         seed: UInt64? = nil,
         maxTokensPerChunk: Int = PocketTtsConstants.maxTokensPerChunk,
         language: PocketTtsLanguage = .english
     ) async throws -> AsyncThrowingStream<AudioFrame, Error> {
+        let temperature = temperature ?? language.defaultTemperature
         let store = try currentModelStore()
 
         logger.info("PocketTTS streaming synthesis with custom voice: '\(text)'")
@@ -302,10 +311,11 @@ public struct PocketTtsSynthesizer {
     /// Must be called within a `withModelStore` context.
     static func makeSession(
         voiceData: PocketTtsVoiceData,
-        temperature: Float = PocketTtsConstants.temperature,
+        temperature: Float? = nil,
         seed: UInt64? = nil,
         language: PocketTtsLanguage = .english
     ) async throws -> PocketTtsSession {
+        let temperature = temperature ?? language.defaultTemperature
         let store = try currentModelStore()
 
         // `.aneState` sessions run on the Trial 23 MLState pipeline; none of
@@ -806,7 +816,7 @@ public struct PocketTtsSynthesizer {
         _ text: String, language: PocketTtsLanguage
     ) -> String {
         switch language {
-        case .english, .german, .german24L, .italian, .italian24L,
+        case .english, .english2026Apr, .german, .german24L, .italian, .italian24L,
             .portuguese, .portuguese24L, .spanish, .spanish24L:
             return text
         case .french24L:
@@ -851,22 +861,12 @@ public struct PocketTtsSynthesizer {
                 language: language))
 
         if !isMidSentence {
-            // Strip trailing clause punctuation (commas, semicolons, colons)
-            // before adding sentence-ending punctuation
-            while let last = result.last, ",;:".contains(last) {
-                result = String(result.dropLast())
-            }
-            result = result.trimmingCharacters(in: .whitespaces)
-
             // Capitalize first letter
             if let first = result.first, first.isLetter {
                 result = first.uppercased() + result.dropFirst()
             }
 
-            // Add period if no terminal punctuation
-            if let last = result.last, !".!?".contains(last) {
-                result += "."
-            }
+            result = withTerminalPunctuation(result)
         }
 
         // Pad short texts for better prosody — but only for full sentences.
@@ -884,6 +884,32 @@ public struct PocketTtsSynthesizer {
         }
 
         return (result, framesAfterEos)
+    }
+
+    /// Closing quotes and brackets. Right after a sentence's terminal punctuation
+    /// they belong to that sentence, as in `"Stop!"` or `(quietly.)`.
+    static let closingPunctuation: Set<Character> = ["\"", "'", ")", "]", "\u{00BB}", "\u{201D}", "\u{2019}"]
+
+    /// End `text` with sentence-final punctuation, as Python's
+    /// `_ensure_terminal_punctuation` does.
+    ///
+    /// Text that ends with `.`, `!`, `?` or `…`, possibly followed by closing quotes
+    /// or brackets, is left alone. A trailing comma, semicolon, colon or dash
+    /// becomes a period, inside the closing quotes. Anything else gets a period.
+    static func withTerminalPunctuation(_ text: String) -> String {
+        var core = Substring(text)
+        while let last = core.last, last == " " || closingPunctuation.contains(last) {
+            core = core.dropLast()
+        }
+        guard let last = core.last, !".!?\u{2026}".contains(last) else { return text }
+        guard ",;:\u{2014}\u{2013}-".contains(last) else { return text + "." }
+
+        while let last = core.last, ",;:\u{2014}\u{2013}- ".contains(last) {
+            core = core.dropLast()
+        }
+        guard !core.isEmpty else { return "" }
+        let closers = text[core.endIndex...].filter { closingPunctuation.contains($0) }
+        return String(core) + "." + closers
     }
 
     /// Split text into chunks that fit within the KV cache token limit.
@@ -920,7 +946,8 @@ public struct PocketTtsSynthesizer {
         maxTokens: Int = PocketTtsConstants.maxTokensPerChunk,
         preferredMaxTokens: Int? = nil,
         voiceCachePosition: Int? = nil,
-        language: PocketTtsLanguage = .english
+        language: PocketTtsLanguage = .english,
+        cacheLen: Int = PocketTtsConstants.kvCacheMaxLen
     ) -> [TextChunk] {
         let preferredMaxTokens = min(preferredMaxTokens ?? maxTokens, maxTokens)
         // Size chunks on the text the model is given. `normalizeText` collapses
@@ -939,7 +966,8 @@ public struct PocketTtsSynthesizer {
                 maxTokens: maxTokens,
                 voiceCachePosition: voiceCachePosition,
                 isMidSentence: isMidSentence,
-                language: language)
+                language: language,
+                cacheLen: cacheLen)
         }
 
         // If it fits in one chunk, return as-is. A single-chunk input is
@@ -966,7 +994,8 @@ public struct PocketTtsSynthesizer {
                     tokenizer: tokenizer,
                     maxTokens: maxTokens,
                     voiceCachePosition: voiceCachePosition,
-                    language: language)
+                    language: language,
+                    cacheLen: cacheLen)
                 // The first sub-piece keeps the sentence's leading capital and
                 // is treated as a sentence-start; subsequent sub-pieces are
                 // mid-sentence continuations. The last sub-piece carries the
@@ -1028,14 +1057,15 @@ public struct PocketTtsSynthesizer {
 
     /// Split an oversized sentence to fit within the token limit.
     ///
-    /// First tries splitting at clause boundaries (commas, semicolons, colons).
+    /// First tries splitting at clause boundaries (see `splitAtClauseBoundaries`).
     /// Falls back to word-boundary splitting for clauses that still exceed the limit.
     static func splitOversizedSentence(
         _ text: String,
         tokenizer: SentencePieceTokenizer,
         maxTokens: Int,
         voiceCachePosition: Int? = nil,
-        language: PocketTtsLanguage = .english
+        language: PocketTtsLanguage = .english,
+        cacheLen: Int = PocketTtsConstants.kvCacheMaxLen
     ) -> [String] {
         func fits(_ candidate: String) -> Bool {
             fitsTextChunk(
@@ -1043,18 +1073,19 @@ public struct PocketTtsSynthesizer {
                 tokenizer: tokenizer,
                 maxTokens: maxTokens,
                 voiceCachePosition: voiceCachePosition,
-                language: language)
+                language: language,
+                cacheLen: cacheLen)
         }
 
         // First try: split at clause boundaries
-        let clauseParts = splitAtClauseBoundaries(text)
+        let clauseParts = clauseParts(of: text)
 
-        // Group clause parts into chunks that fit
+        // Group clause parts into chunks that fit, joined as they were in the text
         var result: [String] = []
         var currentPart = ""
 
-        for part in clauseParts {
-            let candidate = currentPart.isEmpty ? part : currentPart + " " + part
+        for (part, spaced) in clauseParts {
+            let candidate = currentPart.isEmpty ? part : currentPart + (spaced ? " " : "") + part
             if fits(candidate) {
                 currentPart = candidate
             } else {
@@ -1069,7 +1100,8 @@ public struct PocketTtsSynthesizer {
                             tokenizer: tokenizer,
                             maxTokens: maxTokens,
                             voiceCachePosition: voiceCachePosition,
-                            language: language))
+                            language: language,
+                            cacheLen: cacheLen))
                     currentPart = ""
                 } else {
                     currentPart = part
@@ -1084,19 +1116,70 @@ public struct PocketTtsSynthesizer {
         return result.isEmpty ? [text] : result
     }
 
-    /// Split text at clause punctuation (commas, semicolons, colons).
+    /// Split text at clause punctuation: commas, semicolons, colons, dashes,
+    /// ellipses, and the edges of a bracketed aside.
     ///
-    /// Does not split at commas within numbers (e.g., "3,500").
+    /// These are the places a speaker pauses, so a chunk seam there is covered
+    /// by a pause the listener already expects. Exceptions keep tokens whole:
+    /// - A comma between digits ("3,500") does not split.
+    /// - An en dash or hyphen splits only with a space on each side, so
+    ///   hyphenated words and numeric ranges stay whole. An em dash always splits.
+    /// - Only a bracket opened after a space starts an aside, so "f(x)" and
+    ///   "item(s)" stay whole. The aside splits before its opening bracket and
+    ///   after its closing one; that, like an ellipsis, splits only when a space
+    ///   follows, so trailing punctuation ("aside)," or "…?") stays attached.
     static func splitAtClauseBoundaries(_ text: String) -> [String] {
-        let clauseBreaks: Set<Character> = [",", ";", ":"]
-        var parts: [String] = []
+        clauseParts(of: text).map(\.text)
+    }
+
+    /// `splitAtClauseBoundaries`, with whether whitespace separated each part
+    /// from the one before, so regrouped parts read exactly as the text did
+    /// ("rain—a mix" is not given a space).
+    static func clauseParts(of text: String) -> [(text: String, spaced: Bool)] {
+        let breakAfter: Set<Character> = [",", ";", ":", "\u{2014}"]
+        let breakAfterWhenSpaced: Set<Character> = ["\u{2013}", "-"]
+        let opening: Set<Character> = ["(", "["]
+        let closing: Set<Character> = [")", "]"]
+        var parts: [(text: String, spaced: Bool)] = []
         var current = ""
+        var spacedBefore = false
+        // Whether each open bracket started an aside.
+        var openBrackets: [Bool] = []
         let chars = Array(text)
 
+        func flush() {
+            let trimmed = current.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty {
+                spacedBefore = spacedBefore || !current.isEmpty
+            } else {
+                parts.append((trimmed, spacedBefore || current.first?.isWhitespace == true))
+                spacedBefore = current.last?.isWhitespace == true
+            }
+            current = ""
+        }
+
         for (i, char) in chars.enumerated() {
+            let prevIsSpace = i > 0 && chars[i - 1] == " "
+            let nextIsSpace = i + 1 < chars.count && chars[i + 1] == " "
+
+            if opening.contains(char) {
+                openBrackets.append(prevIsSpace)
+                if prevIsSpace {
+                    flush()
+                }
+            }
             current.append(char)
 
-            guard clauseBreaks.contains(char) else { continue }
+            if breakAfterWhenSpaced.contains(char) {
+                guard prevIsSpace && nextIsSpace else { continue }
+            } else if closing.contains(char) {
+                let closesAside = openBrackets.popLast() ?? false
+                guard closesAside && nextIsSpace else { continue }
+            } else if char == "\u{2026}" {
+                guard nextIsSpace else { continue }
+            } else {
+                guard breakAfter.contains(char) else { continue }
+            }
 
             // Don't split at commas between digits (e.g., "3,500")
             if char == "," {
@@ -1107,32 +1190,32 @@ public struct PocketTtsSynthesizer {
                 }
             }
 
-            let trimmed = current.trimmingCharacters(in: .whitespaces)
-            if !trimmed.isEmpty {
-                parts.append(trimmed)
-            }
-            current = ""
+            flush()
         }
 
-        let trimmed = current.trimmingCharacters(in: .whitespaces)
-        if !trimmed.isEmpty {
-            parts.append(trimmed)
-        }
-
+        flush()
         return parts
     }
 
     /// Split text at word boundaries to fit within the token limit.
     ///
-    /// Avoids orphaning a single trailing word ("…stations-service de" +
-    /// "TotalEnergies") by pre-budgeting one word back from the head chunk
-    /// when the tail would otherwise be a single short word. See issue #584.
+    /// Uses the fewest parts that fit, and balances them: each part closes at the
+    /// word boundary nearest an equal share of the tokens still to place, as long as
+    /// the rest still fits in the parts that remain. Filling every part to the limit
+    /// instead leaves whatever spills past the last full part as a short tail
+    /// ("…the first drops hit" + "the pavement."), and a short chunk is synthesized
+    /// with a prosodic start of its own.
+    ///
+    /// Also avoids orphaning a single trailing word ("…stations-service de" +
+    /// "TotalEnergies") by donating one word back from the preceding chunk.
+    /// See issue #584.
     static func splitAtWordBoundaries(
         _ text: String,
         tokenizer: SentencePieceTokenizer,
         maxTokens: Int,
         voiceCachePosition: Int? = nil,
-        language: PocketTtsLanguage = .english
+        language: PocketTtsLanguage = .english,
+        cacheLen: Int = PocketTtsConstants.kvCacheMaxLen
     ) -> [String] {
         let words = text.split(separator: " ").map(String.init)
         guard words.count > 1 else { return [text] }
@@ -1143,29 +1226,77 @@ public struct PocketTtsSynthesizer {
                 tokenizer: tokenizer,
                 maxTokens: maxTokens,
                 voiceCachePosition: voiceCachePosition,
-                language: language)
+                language: language,
+                cacheLen: cacheLen)
         }
 
-        var chunks: [String] = []
-        var currentWords: [String] = []
+        func span(_ range: Range<Int>) -> String {
+            words[range].joined(separator: " ")
+        }
 
+        // `suffixStarts[m]` is the earliest index from which the remaining words fit
+        // in `m` parts, filling each part to the limit backwards from the end. The
+        // number of parts that takes is the fewest the text needs.
+        var suffixStarts = [words.count]
+        while let end = suffixStarts.last, end > 0 {
+            var begin = end - 1
+            while begin > 0, fits(span((begin - 1)..<end)) {
+                begin -= 1
+            }
+            suffixStarts.append(begin)
+        }
+        let partCount = suffixStarts.count - 1
+        guard partCount > 1 else { return [text] }
+
+        // Raw token counts add up word by word, which is enough to aim at a share.
+        var tokensBefore = [0]
         for word in words {
-            let candidate = (currentWords + [word]).joined(separator: " ")
-            if !fits(candidate) && !currentWords.isEmpty {
-                chunks.append(currentWords.joined(separator: " "))
-                currentWords = [word]
-            } else {
-                currentWords.append(word)
+            tokensBefore.append(tokensBefore[tokensBefore.count - 1] + tokenizer.encode(word).count)
+        }
+
+        var ends: [Int] = []
+        var start = 0
+        for part in 0..<(partCount - 1) {
+            let partsLeft = partCount - part
+            let share = Double(tokensBefore[words.count] - tokensBefore[start]) / Double(partsLeft)
+            func distance(_ end: Int) -> Double {
+                abs(Double(tokensBefore[end] - tokensBefore[start]) - share)
+            }
+            // The rest must still fit in the parts after this one.
+            let earliest = max(start + 1, suffixStarts[partsLeft - 1])
+            let latest = words.count - (partsLeft - 1)
+            // The boundary nearest the share (ties keep the shorter part), stepped
+            // back until the part fits.
+            var end = earliest
+            while end < latest, distance(end + 1) < distance(end) {
+                end += 1
+            }
+            while end > earliest, !fits(span(start..<end)) {
+                end -= 1
+            }
+            ends.append(end)
+            start = end
+        }
+        ends.append(words.count)
+
+        // Token counts can shift by a token when a part is capitalized as a sentence
+        // start, so check the parts and fill each to the limit if any fails.
+        var partEnds = ends
+        if !zip([0] + ends.dropLast(), ends).allSatisfy({ $1 - $0 == 1 || fits(span($0..<$1)) }) {
+            partEnds = []
+            while (partEnds.last ?? 0) < words.count {
+                let partStart = partEnds.last ?? 0
+                var partEnd = partStart + 1
+                while partEnd < words.count, fits(span(partStart..<(partEnd + 1))) {
+                    partEnd += 1
+                }
+                partEnds.append(partEnd)
             }
         }
+        var chunks = zip([0] + partEnds.dropLast(), partEnds).map { span($0..<$1) }
 
-        if !currentWords.isEmpty {
-            chunks.append(currentWords.joined(separator: " "))
-        }
-
-        // If the tail is a single short word (likely orphaned by the greedy
-        // split), shift one word back from the preceding chunk so the tail
-        // has at least two words and prosody is less jarring. Only applies
+        // If the tail is a single short word, shift one word back from the
+        // preceding chunk so the tail has at least two words. Only applies
         // when the preceding chunk has multiple words to give up.
         if chunks.count >= 2, let tail = chunks.last,
             tail.split(separator: " ").count == 1
@@ -1193,7 +1324,7 @@ public struct PocketTtsSynthesizer {
         "dr", "mr", "mrs", "ms", "prof", "sr", "jr", "st", "vs", "etc",
         "inc", "ltd", "co", "corp", "dept", "univ", "govt", "approx",
         "avg", "est", "gen", "gov", "hon", "sgt", "cpl", "pvt", "capt",
-        "lt", "col", "maj", "cmdr", "adm", "rev", "sen", "rep",
+        "lt", "col", "maj", "cmdr", "adm", "rev", "sen", "rep", "e.g", "i.e",
     ]
 
     /// French abbreviations that end with a period but don't end a sentence.
@@ -1218,7 +1349,7 @@ public struct PocketTtsSynthesizer {
         switch language {
         case .french24L:
             return frenchAbbreviations
-        case .english, .german, .german24L, .italian, .italian24L,
+        case .english, .english2026Apr, .german, .german24L, .italian, .italian24L,
             .portuguese, .portuguese24L, .spanish, .spanish24L:
             return abbreviations
         }
@@ -1227,6 +1358,8 @@ public struct PocketTtsSynthesizer {
     /// Split text into sentences at `.!?` boundaries.
     ///
     /// Handles abbreviations (e.g., "Dr.", "Prof.") by not splitting after them.
+    /// Closing quotes and brackets right after the punctuation stay with the
+    /// sentence they close (`"Stop!"`, `(quietly.)`).
     ///
     /// The `language` parameter selects the abbreviation table; English is the
     /// default. French (`.french24L`) uses `frenchAbbreviations` for civility
@@ -1239,11 +1372,19 @@ public struct PocketTtsSynthesizer {
         var sentences: [String] = []
         var current = ""
         let chars = Array(text)
+        // Characters before this index are already in `current`.
+        var resumeAt = 0
 
         for (i, char) in chars.enumerated() {
+            guard i >= resumeAt else { continue }
             current.append(char)
 
             guard ".!?".contains(char) else { continue }
+
+            // A run of sentence punctuation ("...", "?!") ends one sentence, once.
+            if i + 1 < chars.count, ".!?".contains(chars[i + 1]) {
+                continue
+            }
 
             // For periods, check if this is an abbreviation
             if char == "." {
@@ -1262,10 +1403,19 @@ public struct PocketTtsSynthesizer {
                     continue
                 }
 
-                // Skip if followed by a digit (e.g., "3.5")
-                if i + 1 < chars.count, chars[i + 1].isNumber {
+                // Skip if followed by a letter or digit without a space: a decimal,
+                // an address or a dotted abbreviation ("3.5", "www.kyutai.org", "p.m.")
+                if i + 1 < chars.count, chars[i + 1].isLetter || chars[i + 1].isNumber {
                     continue
                 }
+            }
+
+            // Closing quotes and brackets right after the punctuation end the
+            // sentence with it, so the next sentence does not start with them.
+            resumeAt = i + 1
+            while resumeAt < chars.count, closingPunctuation.contains(chars[resumeAt]) {
+                current.append(chars[resumeAt])
+                resumeAt += 1
             }
 
             let trimmed = current.trimmingCharacters(in: .whitespaces)
@@ -1342,7 +1492,8 @@ public struct PocketTtsSynthesizer {
         maxTokens: Int,
         voiceCachePosition: Int?,
         isMidSentence: Bool = false,
-        language: PocketTtsLanguage = .english
+        language: PocketTtsLanguage = .english,
+        cacheLen: Int = PocketTtsConstants.kvCacheMaxLen
     ) -> Bool {
         let normalized = normalizeText(
             text, isMidSentence: isMidSentence, language: language
@@ -1353,14 +1504,16 @@ public struct PocketTtsSynthesizer {
 
         return voiceCachePosition + textTokenCount
             + estimateRequiredCacheFrames(text: normalized)
-            <= PocketTtsConstants.kvCacheMaxLen
+            <= cacheLen
     }
 
     /// Bound a generation loop to the positions still available after
     /// conditioning. This prevents a late KV overflow after audio frames have
     /// already been emitted to a streaming caller.
-    static func boundedGenerationFrameCount(text: String, cachePosition: Int) -> Int {
-        let remaining = max(0, PocketTtsConstants.kvCacheMaxLen - cachePosition)
+    static func boundedGenerationFrameCount(
+        text: String, cachePosition: Int, cacheLen: Int = PocketTtsConstants.kvCacheMaxLen
+    ) -> Int {
+        let remaining = max(0, cacheLen - cachePosition)
         return min(estimateMaxFrames(text: text), remaining)
     }
 
@@ -1372,9 +1525,10 @@ public struct PocketTtsSynthesizer {
         generatedFrameLimit: Int,
         cachePosition: Int,
         eosStep: Int?,
-        framesAfterEos: Int
+        framesAfterEos: Int,
+        cacheLen: Int = PocketTtsConstants.kvCacheMaxLen
     ) throws {
-        let remaining = max(0, PocketTtsConstants.kvCacheMaxLen - cachePosition)
+        let remaining = max(0, cacheLen - cachePosition)
         guard generatedFrameLimit == remaining else { return }
         if let eosStep, eosStep + framesAfterEos <= generatedFrameLimit {
             return
@@ -1382,7 +1536,7 @@ public struct PocketTtsSynthesizer {
         throw PocketTTSError.processingFailed(
             "PocketTTS generation exhausted the KV cache before completing the text: "
                 + "conditioning ended at position \(cachePosition), capacity "
-                + "\(PocketTtsConstants.kvCacheMaxLen)")
+                + "\(cacheLen)")
     }
 
     /// Number of cache positions occupied by voice conditioning before text
@@ -1399,7 +1553,8 @@ public struct PocketTtsSynthesizer {
     /// position. Chunking reserves the estimated speech frames separately.
     static func effectiveMaxTokensPerChunk(
         requested: Int,
-        voiceCachePosition: Int
+        voiceCachePosition: Int,
+        cacheLen: Int = PocketTtsConstants.kvCacheMaxLen
     ) throws -> Int {
         guard requested > 0 else {
             throw PocketTTSError.processingFailed(
@@ -1410,11 +1565,11 @@ public struct PocketTtsSynthesizer {
                 "PocketTTS voice cache position cannot be negative")
         }
 
-        let available = PocketTtsConstants.kvCacheMaxLen - voiceCachePosition - 1
+        let available = cacheLen - voiceCachePosition - 1
         guard available > 0 else {
             throw PocketTTSError.processingFailed(
                 "PocketTTS voice conditioning uses \(voiceCachePosition) of "
-                    + "\(PocketTtsConstants.kvCacheMaxLen) cache positions, leaving too little "
+                    + "\(cacheLen) cache positions, leaving too little "
                     + "room for generation")
         }
         return min(requested, available)
@@ -1479,3 +1634,4 @@ public struct PocketTtsSynthesizer {
     }
 
 }
+#endif

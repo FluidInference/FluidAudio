@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Loader / lookup for `POLYPHONIC_CHARS.txt`, the pronunciation
@@ -24,9 +25,10 @@ import Foundation
 /// argmax-ing.
 public struct MandarinPolyphoneCatalog: Sendable {
 
-    /// All characters that have ≥ 2 pronunciations, in the order they
-    /// first appear in the file. Used by the model as the target-char
-    /// vocabulary (a char index maps to the row index here).
+    /// All characters that have ≥ 2 pronunciations, sorted by code
+    /// point. This is the model's target-char vocabulary: `charIndex`
+    /// feeds the `char_ids` input, and upstream g2pW defines that index
+    /// over `sorted(char2phonemes.keys())`, not file order.
     public let chars: [Character]
     /// Sorted-unique list of every bopomofo label that appears in the
     /// file. The model's output dimension equals `labels.count`.
@@ -103,7 +105,11 @@ public struct MandarinPolyphoneCatalog: Sendable {
             candidatesRaw[ch, default: []].append(label)
         }
 
-        let labels = labelSet.sorted()
+        // Python-compatible ordering (code point lexicographic): the
+        // model's label axis was built with `sorted(set(phonemes))`.
+        let labels = labelSet.sorted { lhs, rhs in
+            lhs.unicodeScalars.lexicographicallyPrecedes(rhs.unicodeScalars)
+        }
         let labelToIndex: [String: Int] = Dictionary(
             uniqueKeysWithValues: labels.enumerated().map { ($1, $0) })
 
@@ -121,11 +127,14 @@ public struct MandarinPolyphoneCatalog: Sendable {
             candidatesByChar[ch] = indices
         }
 
-        self.chars = seenChars
+        let sortedChars = seenChars.sorted { lhs, rhs in
+            lhs.unicodeScalars.lexicographicallyPrecedes(rhs.unicodeScalars)
+        }
+        self.chars = sortedChars
         self.labels = labels
         self.candidatesByChar = candidatesByChar
         self.charIndex = Dictionary(
-            uniqueKeysWithValues: seenChars.enumerated().map { ($1, $0) })
+            uniqueKeysWithValues: sortedChars.enumerated().map { ($1, $0) })
     }
 
     /// Allowed label indices for `char`, or `nil` when the char isn't
@@ -155,12 +164,16 @@ public struct MandarinPolyphoneCatalog: Sendable {
         return Self.toneDigitForm(raw)
     }
 
-    /// Convert `<bopomofo><diacritic?>` → `<bopomofo><digit>`. Public
-    /// so callers (and tests) can run the conversion without holding a
-    /// catalog instance.
+    /// Convert `<bopomofo><diacritic?>` → `<bopomofo><digit>`. Labels
+    /// that already carry a tone digit (the form shipped in
+    /// `ANE-zh/g2pw/POLYPHONIC_CHARS.txt`, e.g. `ㄒㄧㄥ2`) pass through
+    /// unchanged. Public so callers (and tests) can run the conversion
+    /// without holding a catalog instance.
     public static func toneDigitForm(_ bopomofo: String) -> String {
         guard let last = bopomofo.last else { return bopomofo }
         switch last {
+        case "1", "2", "3", "4", "5":
+            return bopomofo
         case "ˊ":
             return String(bopomofo.dropLast()) + "2"
         case "ˇ":
@@ -177,3 +190,4 @@ public struct MandarinPolyphoneCatalog: Sendable {
         }
     }
 }
+#endif

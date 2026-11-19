@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Spanish / French number reading for builds without the NeMo engine
@@ -186,3 +187,4 @@ enum RomanceNumberNormalizer {
         }
     }
 }
+#endif

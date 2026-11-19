@@ -43,7 +43,14 @@ public enum CohereAsrConfig {
     /// Head dimension (1024 / 8).
     public static let headDim: Int = 128
 
-    /// Maximum sequence length for decoder KV cache.
+    /// KV-cache length of the 108-slot decoder exports (v1 dynamic, v2 static).
+    ///
+    /// The runtime reads the real cache length from the loaded decoder's
+    /// `k_cache_0` input shape (`CoherePipeline.LoadedModels.cacheLength`);
+    /// this constant only documents the legacy exports. The default v3
+    /// decoder ships a 256-slot cache — the 108-slot cache was shared by the
+    /// 10-token prompt and the output, so a dense 35 s window (up to ~225
+    /// tokens) hit the cap and silently dropped the rest of the window.
     public static let maxSeqLen: Int = 108
 
     /// Number of mel bins.

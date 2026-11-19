@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// English-only StyleTTS2 phonemizer.
@@ -41,12 +42,27 @@ public struct StyleTTS2Phonemizer: Sendable {
     /// back to the lower-cased view.
     private let caseSensitiveWordToPhonemes: [String: [String]]
 
+    /// BART G2P fallback for OOV words, bound to the manager's models root.
+    private let g2p: G2PModel
+
     public init(
         wordToPhonemes: [String: [String]] = [:],
         caseSensitiveWordToPhonemes: [String: [String]] = [:]
     ) {
+        self.init(
+            wordToPhonemes: wordToPhonemes,
+            caseSensitiveWordToPhonemes: caseSensitiveWordToPhonemes,
+            g2p: .shared)
+    }
+
+    init(
+        wordToPhonemes: [String: [String]],
+        caseSensitiveWordToPhonemes: [String: [String]],
+        g2p: G2PModel
+    ) {
         self.wordToPhonemes = wordToPhonemes
         self.caseSensitiveWordToPhonemes = caseSensitiveWordToPhonemes
+        self.g2p = g2p
     }
 
     /// Phonemize a sentence and encode it into the StyleTTS2 token IDs.
@@ -136,7 +152,7 @@ public struct StyleTTS2Phonemizer: Sendable {
             // 4. BART G2P CoreML fallback for OOV words (Kokoro's
             //    `G2PEncoder.mlmodelc` + `G2PDecoder.mlmodelc`).
             do {
-                let phonemes = try await G2PModel.shared.phonemize(word: word)
+                let phonemes = try await g2p.phonemize(word: word)
                 if let phonemes, !phonemes.isEmpty {
                     ipaParts.append(Self.expandMisakiShorthand(phonemes.joined()))
                     anyResolved = true
@@ -272,3 +288,4 @@ public struct StyleTTS2Phonemizer: Sendable {
         return out
     }
 }
+#endif

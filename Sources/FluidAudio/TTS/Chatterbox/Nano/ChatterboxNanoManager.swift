@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Public API for Chatterbox Nano synthesis (ResembleAI, 110M, English,
@@ -19,7 +20,7 @@ import Foundation
 /// let audio = try await manager.synthesize(
 ///     text: "Well that went better than expected [chuckle], see you tomorrow.")
 /// ```
-@available(macOS 15.0, iOS 18.0, *)
+@available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
 public actor ChatterboxNanoManager {
 
     private static let logger = AppLogger(category: "ChatterboxNanoManager")
@@ -84,3 +85,4 @@ public actor ChatterboxNanoManager {
         return Audio(samples: result.samples, sampleRate: ChatterboxNanoConstants.sampleRate)
     }
 }
+#endif

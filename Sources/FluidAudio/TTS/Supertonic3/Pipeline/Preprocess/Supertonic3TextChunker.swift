@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Long-text chunker that mirrors `chunkText()` from the upstream Supertonic
@@ -171,3 +172,4 @@ enum Supertonic3TextChunker {
         return sentences.isEmpty ? [text] : sentences
     }
 }
+#endif

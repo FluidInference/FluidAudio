@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Phoneme-token table for LuxTTS (`tokens.txt`, EmiliaTokenizer format:
@@ -72,3 +73,4 @@ public struct LuxTtsTokenizer: Sendable {
         tokens.compactMap { tokenToId[$0] }
     }
 }
+#endif

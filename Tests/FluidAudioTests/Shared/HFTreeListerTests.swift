@@ -59,6 +59,34 @@ final class HFTreeListerTests: XCTestCase {
 
     // MARK: - Walking + pruning
 
+    func testParsesContentIDsWithoutFallingBackToLFSPointerOID() async throws {
+        let server = PageServer()
+        let sha256 = String(repeating: "a", count: 64)
+        let blobSHA1 = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391"
+        try server.addPage(
+            url: treeURL(),
+            items: [
+                ["path": "weight.bin", "type": "file", "size": 5, "oid": blobSHA1, "lfs": ["oid": sha256]],
+                ["path": "empty.json", "type": "file", "size": 0, "oid": blobSHA1],
+                ["path": "missing-lfs.bin", "type": "file", "oid": blobSHA1, "lfs": ["size": 5]],
+                ["path": "malformed-lfs.bin", "type": "file", "oid": blobSHA1, "lfs": "invalid"],
+                ["path": "missing-id.json", "type": "file"],
+            ])
+
+        let files = try await HFTreeLister.listTree(
+            repoRemotePath: Self.repo, include: { _, _ in true }, fetch: server.fetch)
+
+        XCTAssertEqual(
+            files,
+            [
+                RemoteFile(path: "weight.bin", size: 5, contentID: .lfsSHA256(sha256)),
+                RemoteFile(path: "empty.json", size: 0, contentID: .gitBlobSHA1(blobSHA1)),
+                RemoteFile(path: "missing-lfs.bin", size: -1),
+                RemoteFile(path: "malformed-lfs.bin", size: -1),
+                RemoteFile(path: "missing-id.json", size: -1),
+            ])
+    }
+
     func testRecursiveWalkWithPruningAndFileExclusion() async throws {
         let server = PageServer()
         try server.addPage(

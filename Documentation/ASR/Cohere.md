@@ -23,9 +23,30 @@ variants live in different directories.
   (35 s at 10 ms hop), output `[1, 438, 1024]` (FP16)
 - **Decoder**: 8-layer transformer with external KV cache (Parakeet pattern),
   hidden size 1024, 8 heads × 128 head-dim
-- **Cache window**: 108 tokens
+- **Cache window**: 256 slots (v3 decoder, default); 108 slots in the v1/v2
+  exports. The prompt (10 tokens) and the output share the cache: the last
+  prompt step already yields the first output, so the longest output per
+  35 s window is `cacheLength − 9` (99 with v2, 247 with v3). The runtime
+  reads the length from the loaded decoder's `k_cache_0` shape.
 - **Vocabulary**: 16,384 SentencePiece tokens
 - **Max audio**: 35 s per call (single chunk)
+
+### Decoder variants
+
+| Variant | File | `attention_mask` | KV cache | Notes |
+|---|---|---|---|---|
+| `.v3` (default) | `cohere_decoder_cache_external_v3.mlmodelc` | static `[1, 1, 1, 256]` | 256 slots | Same graph as v2; fixes the token cap below |
+| `.v2` | `cohere_decoder_cache_external_v2.mlmodelc` | static `[1, 1, 1, 108]` | 108 slots | ANE-resident static shapes |
+| `.v1` | `cohere_decoder_cache_external.mlmodelc` | dynamic `RangeDim(1, 108)` | 108 slots | FP16, CPU/GPU only |
+
+The 108-slot exports cap each 35 s window at 99 output tokens. Dense speech
+(fast German, two-speaker calls) needs 150–225 tokens per window, so every
+window hit the cap and the rest of the window was silently dropped — up to a
+third of the words on a 25 min call ([#1013](https://github.com/FluidInference/FluidAudio/issues/1013)).
+`TranscriptionResult.cappedWindows` reports how many windows ran out of
+budget without emitting EOS; the CLI prints it as a warning. If you pass
+`maxNewTokens` explicitly it is clamped to the cache, so the v3 decoder is
+needed to get past 99 tokens per window.
 
 ### Upstream model spec (`cohere-pytorch/config.json`)
 
@@ -73,7 +94,17 @@ swift run -c release fluidaudiocli cohere-transcribe audio.wav \
     --decoder-dir /path/to/f16 \
     --vocab-dir /path/to/f16 \
     --language en
+
+# Opt the encoder into the GPU (fast, but ~10 GB of extra memory; see below)
+swift run -c release fluidaudiocli cohere-transcribe audio.wav \
+    --model-dir /path/to/q8 --language en \
+    --encoder-compute-units all
 ```
+
+`--compute-units`, `--encoder-compute-units` and `--decoder-compute-units`
+take `all | cpu-only | cpu-gpu | ane`; the per-model flags override the shared
+one. Both default to `ane`. `cohere-transcribe` prints the process footprint
+after loading and after transcribing so the cost of a choice is visible.
 
 ### Swift API
 
@@ -88,6 +119,8 @@ let models = try await CoherePipeline.loadModels(
     encoderDir: encoderDir,
     decoderDir: decoderDir,
     vocabDir: decoderDir
+    // encoderComputeUnits: .cpuAndNeuralEngine,  (default, see "Compute units")
+    // decoderComputeUnits: .cpuAndNeuralEngine   (default)
 )
 
 let pipeline = CoherePipeline()
@@ -97,10 +130,62 @@ let result = try await pipeline.transcribe(
     language: .english
 )
 print(result.text)
+print(models.cacheLength)     // 256 with the v3 decoder
+print(result.cappedWindows)   // > 0 means a window ran out of decode budget
 ```
+
+`transcribeLong` slides the 35 s window with a 5 s overlap over longer audio
+and stitches the windows at the longest common token run inside the overlap.
+The seam is cut after the matched run on both sides, so neither window's copy
+of the overlap audio is emitted twice.
 
 `TranscriptionResult` also exposes `encoderSeconds`, `decoderSeconds`, and
 `totalSeconds` for per-stage profiling.
+
+## Compute units and memory
+
+`loadModels` resolves compute units per model: `encoderComputeUnits` /
+`decoderComputeUnits` win, then the shared `computeUnits`, then the
+defaults `CoherePipeline.defaultEncoderComputeUnits` and
+`defaultDecoderComputeUnits` (both `.cpuAndNeuralEngine`).
+`LoadedModels.encoderComputeUnits` / `decoderComputeUnits` report what was
+used.
+
+**Keep the INT8 encoder off the GPU unless you can spare ~10 GB.** Under
+`.all`, Core ML may route the encoder to the GPU, where the 1.8 GB of INT8
+weights are materialised at full precision on the first call
+([#1045](https://github.com/FluidInference/FluidAudio/issues/1045)). The
+Neural Engine runs it as INT8 and the footprint stays under 100 MB. The
+transcripts are identical; the GPU encoder is faster per window.
+
+Measured with the debug `cohere-transcribe --repeat 3` build on an M5 Pro
+(24 GB, macOS 27.0), INT8 encoder + FP16 v3 decoder, one 16.9 s English clip,
+fresh process per row. Footprint is `phys_footprint` (Xcode's memory gauge);
+max RSS is from `/usr/bin/time -l`. First-call times include the one-off
+per-process ANE/GPU setup; warm times are runs 2–3.
+
+| Encoder | Decoder | Footprint after load | Footprint after 3 calls | Max RSS | Encoder 1st call | Encoder warm | Decoder warm |
+|---|---|---:|---:|---:|---:|---:|---:|
+| `ane` (default) | `ane` (default) | 26 MB | 128 MB | 7.4 GB | 10.6 s | 1.15–1.23 s | 0.34 s |
+| `ane` | `all` | 20 MB | 226 MB | 7.8 GB | 1.7 s | 1.29 s | 0.32–0.34 s |
+| `all` | `all` (old default) | 24 MB | 1,066 MB | 11.6 GB | 78.9 s | 0.51 s | 0.30–0.34 s |
+| `all` | `ane` | 30 MB | 1,038 MB | 12.9 GB | 76.3 s | 0.49 s | 0.37 s |
+| `cpu-gpu` | `ane` | 23 MB | 1,048 MB | 12.1 GB | 77.5 s | 0.48–0.50 s | 0.37 s |
+
+With `all` or `cpu-gpu` the encoder lands on the GPU: the first call takes
+over a minute while the weights are materialised, and the process keeps
+~10 GB more resident than the ANE path. On this 24 GB host most of it shows
+up as max RSS with the footprint settling near 1 GB; the report in #1045
+(M5 Pro, 48 GB, macOS 26.6, v2 decoder) saw the same ~10 GB in the footprint
+itself, 12.4 GB after the first call. The decoder's placement moves the
+footprint by ~100 MB and its time by a few percent, so it follows the
+encoder onto the ANE by default.
+
+The encoder always processes the padded 35 s window (`[1, 128, 3500]`), so a
+7 s dictation pays the full window cost on every path; the ANE/GPU timing
+gap above is per window, not per second of audio. Pass
+`encoderComputeUnits: .all` (or `.cpuAndGPU`) for throughput-bound work on a
+machine with memory to spare; leave the default on 8–16 GB Macs and on iOS.
 
 ## Benchmarks
 

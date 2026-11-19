@@ -7,22 +7,38 @@ This guide collects commonly used `fluidaudio` CLI commands for ASR, diarization
 TTS is built into the CLI. Run it directly:
 
 ```bash
-# Default Kokoro (CPU+GPU, multi-voice, chunker, custom lexicon)
+# Default TTS backend (use --backend to select explicitly)
 swift run fluidaudiocli tts "Hello from FluidAudio" --output out.wav
 
-# Kokoro ANE (7-stage, ANE-resident, 3-11× RTFx, single voice af_heart)
+# Kokoro legacy seven-stage runtime (variant voices; OS-dependent routing)
 swift run fluidaudiocli tts "Hello from FluidAudio" \
   --backend kokoro-ane \
   --output out-ane.wav
+
+# Kokoro ANE v3: fixed hybrid CPU/ANE/GPU routing (v0.17.6+)
+swift run -c release fluidaudiocli tts "Hello from FluidAudio" \
+  --backend kokoro-ane --kokoro-version v3 --voice af_heart --output en.wav
+swift run -c release fluidaudiocli tts "こんにちは、世界。" \
+  --backend kokoro-ane --kokoro-version v3 --variant ja --voice jf_alpha --output ja.wav
+swift run -c release fluidaudiocli tts "你好世界。" \
+  --backend kokoro-ane --kokoro-version v3 --variant zh --voice zf_001 --output zh.wav
 
 # PocketTTS (streaming, voice cloning)
 swift run fluidaudiocli tts "Hello from FluidAudio" \
   --backend pocket \
   --output out-pocket.wav
 
+# Gradium Phonon 31m on the Neural Engine (macOS 15+); --voice en_us_Easton, characters_The Snow Queen, ...
+swift run -c release fluidaudiocli tts "Your order of $42.50 ships today." \
+  --backend pocket-small --model phonon --voice en_gb_Maeve --output phonon.wav
+
 # Multilingual G2P benchmark
 swift run fluidaudiocli g2p-benchmark
 ```
+
+V3 requires macOS 15 / iOS 18. It supports the fixed hybrid route, not arbitrary
+global compute policies. See [Kokoro usage and limits](TTS/KokoroAne.md) and
+[latency measurement boundaries](TTS/Benchmarks.md#kokoro-ane-v3-selected-m5-pro-measurements).
 
 ## ASR
 
@@ -32,6 +48,9 @@ swift run fluidaudiocli transcribe audio.wav
 
 # English-only run with higher accuracy
 swift run fluidaudiocli transcribe audio.wav --model-version v2
+
+# Parakeet Unified (English, punctuation and capitalization), with word timings in the JSON
+swift run fluidaudiocli transcribe audio.wav --model-version unified --output-json out.json
 
 # Streaming ASR with Parakeet EOU
 swift run fluidaudiocli parakeet-eou --input audio.wav

@@ -13,10 +13,24 @@ public enum ANEMemoryUtils {
     public static let aneTileSize = 16
 
     /// Errors that can occur during ANE memory operations
-    public enum ANEMemoryError: Error {
+    public enum ANEMemoryError: Error, LocalizedError {
         case allocationFailed
         case invalidShape
         case unsupportedDataType
+        case invalidArrayBounds
+
+        public var errorDescription: String? {
+            switch self {
+            case .allocationFailed:
+                return "Failed to allocate ANE-aligned memory."
+            case .invalidShape:
+                return "Invalid shape for ANE-aligned array."
+            case .unsupportedDataType:
+                return "Unsupported MLMultiArray data type for ANE memory operation."
+            case .invalidArrayBounds:
+                return "Array bounds exceeded for zero-copy view."
+            }
+        }
     }
 
     /// Create ANE-aligned MLMultiArray with optimized memory layout

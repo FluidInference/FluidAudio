@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Word → phoneme lexicon read from a Kokoro lexicon cache
@@ -54,3 +55,4 @@ struct KokoroAneLexicon: Sendable {
         hAspireWords.contains(word.lowercased())
     }
 }
+#endif

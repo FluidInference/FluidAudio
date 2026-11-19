@@ -56,8 +56,9 @@ jobs:
           sudo xcode-select -s /Applications/Xcode_26.3.app
           swift --version
 
+      # The CLI and tests need the TTS and Diarizer traits (#990); keep those on.
       - name: Build with the trait disabled
-        run: swift build --disable-default-traits --product fluidaudiocli
+        run: swift build --traits TTS,Diarizer --product fluidaudiocli
 
       - name: Assert no engine symbols linked
         run: |
@@ -66,8 +67,39 @@ jobs:
           test "$count" -eq 0
 
       - name: Run tests with the trait disabled
-        run: swift test --disable-default-traits --filter 'TextNormalizerUnavailableTests|NemoTextNormalizerUnavailableTests|TextNormalizerTests|NemoTextNormalizerTests'
+        run: swift test --traits TTS,Diarizer --filter 'TextNormalizerUnavailableTests|NemoTextNormalizerUnavailableTests|TextNormalizerTests|NemoTextNormalizerTests'
         timeout-minutes: 20
+
+  build-library-trait-subsets:
+    name: Build library with TTS / Diarizer traits disabled (macOS)
+    runs-on: macos-15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      # #990: ASR-only consumers resolve with `traits: []` (or `["Diarizer"]`) to drop
+      # the TTS and diarization subsystems. Only the library target has to build that way.
+      - name: Select Xcode 26
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.3.app
+          swift --version
+
+      - name: Build with no traits
+        run: swift build --disable-default-traits --target FluidAudio
+
+      - name: Assert no TTS resource bundle
+        run: test ! -e .build/debug/FluidAudio_LuxTtsG2pResources.bundle
+
+      - name: Build with TTS only
+        run: swift build --traits TTS --target FluidAudio
+
+      # Positive control for the assertion above: the same path must appear once TTS is on,
+      # otherwise a renamed bundle or build-dir layout change would make the check pass vacuously.
+      - name: Assert TTS resource bundle present
+        run: test -e .build/debug/FluidAudio_LuxTtsG2pResources.bundle
+
+      - name: Build with Diarizer only
+        run: swift build --traits Diarizer --target FluidAudio
 
   build-macos-x86_64:
     name: Build Swift Package (macOS x86_64 cross-compile)
@@ -80,6 +112,39 @@ jobs:
       # fp16 usage breaking universal builds (issue #875).
       - name: Build package (x86_64)
         run: swift build --arch x86_64
+
+  build-tvos:
+    name: Build library (tvOS simulator cross-compile)
+    runs-on: macos-15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Select Xcode 26
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.3.app
+          swift --version
+
+      # SwiftPM does not pick the tvOS SDK from the triple alone; without
+      # --sdk it compiles against the macOS sysroot and fails to load the
+      # tvOS standard library.
+      - name: Locate tvOS simulator SDK
+        id: tvos-sdk
+        run: |
+          if ! sdk=$(xcrun --sdk appletvsimulator --show-sdk-path); then
+            xcodebuild -downloadPlatform tvOS
+            sdk=$(xcrun --sdk appletvsimulator --show-sdk-path)
+          fi
+          echo "path=$sdk" >> "$GITHUB_OUTPUT"
+          echo "tvOS SDK: $sdk"
+
+      # NemoTextProcessing.xcframework ships no tvOS slice, so the library must
+      # build with the engine absent (#890). Nothing else compiles this triple.
+      - name: Build library (tvOS simulator)
+        run: |
+          swift build --target FluidAudio \
+            --triple arm64-apple-tvos-simulator \
+            --sdk "${{ steps.tvos-sdk.outputs.path }}"
 
   build-ios:
     name: Build (iOS)

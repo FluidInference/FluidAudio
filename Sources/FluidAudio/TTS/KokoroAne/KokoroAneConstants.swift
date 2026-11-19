@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Compile-time constants for the laishere/kokoro 7-stage CoreML chain.
@@ -277,3 +278,4 @@ public enum KokoroAneVariant: String, CaseIterable, Sendable {
         }
     }
 }
+#endif

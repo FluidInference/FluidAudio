@@ -162,7 +162,25 @@ final class CtcDPAlgorithmTests: XCTestCase {
         }
     }
 
-    // MARK: - fillDPTable (indirectly tested through ctcWordSpotConstrained)
+    /// Retiring earlier DP rows must retain every disjoint occurrence and its
+    /// own span, rather than carrying the first keyword's start into the next.
+    func testMultipleOccurrencesKeepIndependentSpans() {
+        let logProbs = (0..<24).map { frame in
+            let token: Int? = [3, 17].contains(frame) ? 0 : ([4, 18].contains(frame) ? 1 : nil)
+            return makeFrame(
+                vocabSize: 3, hotToken: token, highScore: -0.05,
+                blankId: 2, blankScore: -0.2, coldScore: -12)
+        }
+        let results = CtcDPAlgorithm.ctcWordSpotMultiple(
+            logProbs: logProbs, keywordTokens: [0, 1], minScore: -0.1, blankId: 2)
+        XCTAssertEqual(results.map(\.startFrame), [3, 17])
+        XCTAssertEqual(results.map(\.endFrame), [5, 19])
+        for result in results {
+            XCTAssertEqual(result.score, -0.05, accuracy: 0.000001)
+        }
+    }
+
+    // MARK: - Terminal states (indirectly tested through ctcWordSpotConstrained)
 
     func testDPTableScoreMonotonicity() {
         // With a perfect match, the score at the end should be non-negative

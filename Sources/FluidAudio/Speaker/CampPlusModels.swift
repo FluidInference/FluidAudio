@@ -5,7 +5,7 @@ import Foundation
 ///
 /// 2 stages from `FluidInference/campplus-coreml`:
 ///   - `preprocessor` (fp32, CPU): waveform -> [1, T, 80] fbank
-///   - `model` (fp16, ANE): fbank -> [1, 192] speaker embedding
+///   - `model` (fp32, CPU/GPU): mean-normalized fbank -> [1, 192] speaker embedding
 ///
 /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 public struct CampPlusModels: Sendable {
@@ -53,7 +53,8 @@ public struct CampPlusModels: Sendable {
         cpu.computeUnits = .cpuOnly
         // CAM++ uses a dynamic time dim (RangeDim) which the ANE compiler rejects;
         // it's tiny (~7.2M), so run on CPU/GPU. Dynamic length avoids padding
-        // corrupting the statistics-pooled embedding.
+        // corrupting the statistics-pooled embedding. fp32: in fp16 its pointwise
+        // convs gave unrelated embeddings for some lengths (#985).
         let gpu = MLModelConfiguration()
         gpu.computeUnits = .cpuAndGPU
         let pre = try loadModel(named: ModelNames.CampPlus.preprocessor, from: directory, configuration: cpu)

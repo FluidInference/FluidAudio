@@ -1,6 +1,15 @@
 import Foundation
 
 /// Supported languages for script-based filtering.
+///
+/// A language hint constrains the decoder's script (Latin, Cyrillic, Greek), not the language.
+/// Every Latin-script case filters the same tokens, so `.spanish` and `.english` decode the
+/// same audio identically, and neither keeps English words out of Spanish speech (#1063).
+/// `.french` is the one exception: it also applies the English function-word blocklist
+/// (#630, #847). For a decode conditioned on one language, use Canary
+/// (`CanaryManager(models:source:target:)`) or Cohere Transcribe
+/// (`CoherePipeline.transcribe(audio:models:language:)`).
+/// See Documentation/ASR/TokenLanguageFilter.md.
 public enum Language: String, Sendable, CaseIterable {
     case english = "en"
     case spanish = "es"
@@ -72,6 +81,11 @@ internal struct TokenLanguageFilter: Sendable {
     /// checks — carries no script information.
     private static let sentencePieceBoundary: Unicode.Scalar = "\u{2581}"
 
+    /// Currency symbols such as `€` and `£` are script-neutral, like ASCII punctuation and digits.
+    private static func isCurrencySymbol(_ scalar: Unicode.Scalar) -> Bool {
+        scalar.properties.generalCategory == .currencySymbol
+    }
+
     /// Whether every character in `text` is compatible with `script`.
     ///
     /// The Latin path has no "reject Cyrillic" guard because the Cyrillic
@@ -95,11 +109,13 @@ internal struct TokenLanguageFilter: Sendable {
                     || ($0.value >= 0x0180 && $0.value <= 0x024F)  // Latin Extended-B
                     || ($0.value >= 0x0300 && $0.value <= 0x036F)  // Combining Diacritical Marks (NFD)
                     || ($0.value >= 0x1E00 && $0.value <= 0x1EFF)  // Latin Extended Additional
+                    || isCurrencySymbol($0)
             }
         case .cyrillic:
             return chars.allSatisfy { char in
                 let value = char.value
                 if value >= 0x0400 && value <= 0x04FF { return true }
+                if isCurrencySymbol(char) { return true }
                 // ASCII is script-neutral except for letters A-Z/a-z, which
                 // must be rejected (see function doc).
                 if value >= 0x0020 && value <= 0x007F {
@@ -119,6 +135,7 @@ internal struct TokenLanguageFilter: Sendable {
                 if value >= 0x1F00 && value <= 0x1FFF { return true }
                 // Combining Diacritical Marks (NFD)
                 if value >= 0x0300 && value <= 0x036F { return true }
+                if isCurrencySymbol(char) { return true }
                 // Allow ASCII punctuation, digits, spaces (script-neutral)
                 if value >= 0x0020 && value <= 0x007F {
                     // Reject Latin letters A-Z/a-z

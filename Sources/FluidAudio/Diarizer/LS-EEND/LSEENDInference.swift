@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 import CoreML
 import Accelerate
@@ -235,3 +236,4 @@ public class LSEENDInput: MLFeatureProvider {
         }
     }
 }
+#endif

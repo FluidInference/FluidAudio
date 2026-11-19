@@ -45,7 +45,7 @@ Main class for speaker diarization and "who spoke when" analysis.
 ### OfflineDiarizerManager
 Full batch pipeline that mirrors the pyannote/Core ML exporter (powerset segmentation + VBx clustering).
 
-> Requires macOS 14 / iOS 17 or later because the manager relies on Swift Concurrency features and C++ clustering shims that are unavailable on older OS releases.
+> Requires macOS 14 / iOS 17 / tvOS 17 or later because the manager relies on Swift Concurrency features and C++ clustering shims that are unavailable on older OS releases.
 
 **Key Methods:**
 - `init(config: OfflineDiarizerConfig = .default)`

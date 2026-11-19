@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// On-disk schema of the upstream `tts.json` config.
@@ -265,3 +266,4 @@ public struct Supertonic3VoiceStyle: Sendable {
         return out
     }
 }
+#endif

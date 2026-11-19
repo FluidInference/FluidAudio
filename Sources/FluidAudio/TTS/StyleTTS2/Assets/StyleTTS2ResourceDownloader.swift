@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Downloads StyleTTS2 LibriTTS (iteration_3) CoreML models from HuggingFace.
@@ -56,8 +57,8 @@ public enum StyleTTS2ResourceDownloader {
     /// kokoro HF repo root and is consumed by the shared
     /// `LexiconAssetCache`.
     @discardableResult
-    public static func ensureLexiconCache() async throws -> URL {
-        let modelsRoot = try defaultCacheRoot()
+    public static func ensureLexiconCache(directory: URL? = nil) async throws -> URL {
+        let modelsRoot = try directory ?? defaultCacheRoot()
         let kokoroDir = modelsRoot.appendingPathComponent(Repo.kokoro.folderName)
         try FileManager.default.createDirectory(
             at: kokoroDir, withIntermediateDirectories: true)
@@ -84,7 +85,7 @@ public enum StyleTTS2ResourceDownloader {
 
     /// Ensure Kokoro's BART grapheme-to-phoneme CoreML assets
     /// (`G2PEncoder.mlmodelc`, `G2PDecoder.mlmodelc`, `g2p_vocab.json`)
-    /// are present in the kokoro cache. `G2PModel.shared` only loads from
+    /// are present in the kokoro cache. `G2PModel` only loads from
     /// disk — without this call, a first-time StyleTTS2 user (who hasn't
     /// already downloaded the kokoro repo) would fail with
     /// `G2PModelError.vocabLoadFailed` the first time the OOV path is hit.
@@ -158,3 +159,4 @@ public enum StyleTTS2ResourceDownloader {
         return root
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 import Foundation
 
@@ -369,3 +370,4 @@ public struct Nemotron3StateUpdater {
         return (topK, isDisabled)
     }
 }
+#endif

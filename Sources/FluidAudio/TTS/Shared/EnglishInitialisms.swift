@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Shared helpers for reading uppercase initialisms as letter names in
@@ -69,3 +70,4 @@ enum EnglishInitialisms {
         return letters.joined(separator: separator)
     }
 }
+#endif

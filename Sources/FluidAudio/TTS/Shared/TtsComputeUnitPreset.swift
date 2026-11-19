@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -80,3 +81,4 @@ public enum TtsComputeUnitPreset: String, Sendable, CaseIterable {
         }
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if Diarizer
 @preconcurrency import CoreML
 import Foundation
 import OSLog
@@ -139,3 +140,4 @@ extension DiarizerModels {
             compilationDuration: loadDuration)
     }
 }
+#endif

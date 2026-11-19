@@ -228,6 +228,8 @@ let fileTimeline = try diarizer.processComplete(audioFileURL: audioURL)
 - `processComplete(_:sourceSampleRate:keepingEnrolledSpeakers:...)` - Batch process a full sample buffer
 - `processComplete(audioFileURL:keepingEnrolledSpeakers:...)` - Batch process a file with automatic resampling
 
+`processComplete` and `finalizeSession()` give every frame a prediction: the final chunk takes whatever right context is left (none at the very end), as NeMo does, so audio shorter than one chunk (30.4 s for `highContextV2_1`) still gets a timeline.
+
 ### DiarizerInference.swift
 
 Handles CoreML model loading and inference:
@@ -370,6 +372,7 @@ public struct SortformerSegment {
 │                                                                │
 │  3. finalizeSession()                                          │
 │     └─→ pad trailing silence until last true frame is emitted  │
+│     └─→ run the final chunks with the right context left       │
 │     └─→ timeline.finalize()                                    │
 │                                                                │
 └────────────────────────────────────────────────────────────────┘

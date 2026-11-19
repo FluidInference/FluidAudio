@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Mandarin number / date / time / currency verbalization pre-pass.
@@ -264,3 +265,4 @@ public enum MandarinNumberNormalizer {
         ]
     }
 }
+#endif

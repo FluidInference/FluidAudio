@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Port of upstream `AlignmentStreamAnalyzer` (multilingual T3 sampling),
@@ -128,3 +129,4 @@ struct ChatterboxAlignmentAnalyzer {
         currFramePos += 1
     }
 }
+#endif

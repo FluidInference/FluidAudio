@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Errors thrown by the Inflect v2 TTS backend.
@@ -35,3 +36,4 @@ public enum InflectError: Error, LocalizedError {
         }
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 
 // MARK: - Configuration
@@ -277,3 +278,4 @@ public enum Nemotron3Error: Error, LocalizedError {
         }
     }
 }
+#endif

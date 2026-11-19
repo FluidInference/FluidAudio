@@ -24,6 +24,43 @@ The paper introduces a dynamic programming algorithm for CTC-based keyword spott
 
 Both approaches achieve identical 99.4% accuracy. Approach 1 is faster but only works with TDT-CTC-110M because that model has a built-in CTC head. Approach 2 works with any TDT model but loads a separate CTC encoder.
 
+## Optional preflight for transcript-only consumers
+
+A prepared `VocabularyBoostingSession` can check whether a transcript has any
+candidate requiring CTC evidence before running acoustic rescoring:
+
+```swift
+if session.hasCTCRescoringCandidates(
+    text: result.text,
+    tokenTimings: result.tokenTimings ?? []
+) {
+    let rescored = await session.rescore(
+        text: result.text,
+        tokenTimings: result.tokenTimings ?? [],
+        audioSamples: audio
+    )
+    // Use rescored.text when a replacement was applied.
+}
+// Otherwise keep result.text.
+```
+
+This uses the same aliases, compounds, similarity thresholds and safety rules as
+rescoring. It performs no CTC inference. An empty vocabulary or timing list
+returns `false`. When acoustic rescue is enabled on the term-centric path and the
+vocabulary size is at or below `ContextBiasingConstants.largeVocabThreshold`,
+nonempty input returns `true` conservatively: the spotter can find a term even
+when text matching cannot. Larger vocabularies and the experimental BK-tree path
+use text candidate discovery because acoustic rescue does not run there.
+Disabling rescue changes recognition behavior; choose that policy separately
+from whether to use preflight.
+
+Use this only when consuming transcript replacements. Applications that also
+need `detectedTerms` must still run `rescore`: keyword detections can exist
+without a text replacement candidate. The existing `rescore` API retains that
+behavior. Callers managing their own CTC head can use
+`VocabularyRescorer.hasCTCRescoringCandidates` with the same `minSimilarity` they
+pass to `ctcTokenRescore`.
+
 ## Model Compatibility
 
 FluidAudio supports two ASR models with different architectures:
@@ -229,8 +266,8 @@ let tokenIds = tokenizer.encode("NVIDIA")
 Runs CTC model inference and implements the NeMo CTC word spotting algorithm.
 
 **Inference pipeline** (`+Inference.swift`):
-1. Audio → MelSpectrogram model → mel features
-2. Mel features → AudioEncoder model → CTC logits
+1. Audio → MelSpectrogram model (always on the CPU; on the Neural Engine its features made every frame blank, #1074) → mel features
+2. Mel features → AudioEncoder model (CPU + Neural Engine) → CTC logits
 3. Logits → log-softmax → log-probabilities `[T, V]`
 4. For long audio (>15s), processes in overlapping chunks and averages log-probs at boundaries
 
@@ -288,7 +325,42 @@ Performs principled comparison between original transcript words and vocabulary 
 - `VocabularyRescorer.swift` — struct definition, Config, result types, word timing builder
 - `VocabularyRescorer+TokenRescoring.swift` — three-pass orchestration (`ctcTokenRescore()`)
 - `VocabularyRescorer+TokenEvaluation.swift` — per-candidate scoring and guard logic
+- `VocabularyRescorer+SpanProtection.swift` — recognized spans, acoustic search boundaries and possessive preservation
 - `VocabularyRescorer+Utilities.swift` — string similarity, normalization, token boundary helpers
+
+#### Preserving recognized words and inflections
+
+Canonical vocabulary phrases already present in the transcript are protected, including
+possessives such as `Quilter's`, `Quilter’s` and `Jones'`. Other candidates cannot consume
+part of those phrases: a correction may include a recognized phrase only if its letters survive
+in the replacement on the same side of the other words, such as `John Collar` → `John Collier`
+or `Open AI` → `OpenAI` when `John` or `AI` is also listed, but not `in Envious Labs` →
+`Envious Labs`. Corrections to misspelled names preserve a possessive in both scoring and
+replacement text, unless the apostrophe split the term's own final `s` (`Envious Lab's` →
+`Envious Labs`) or belongs to a neighbouring word in the span.
+
+A hyphenated name may occupy fewer timing words than its canonical phrase.
+Shorter spans are considered only when their hyphen-separated component count
+matches a canonical form or alias. The multi-word similarity floor still applies.
+This lets a correction retain the next ordinary word instead of consuming it to
+reach the canonical word count. Partial-word replacements remain unsupported.
+
+With disjoint timestamps (compared with a 1 ms tolerance, so rounding noise does not count as
+overlap), the CTC search margin for the term stops at other recognized occurrences of it, and at
+a recognized listed term the correction would duplicate (a listed surname after a misheard full
+name that ends with it, or a first name before one that starts with it). The original phrase is
+still scored over its full span plus margin. A weak textual match
+creating a nearby adjacent duplicate must beat the original without a positive context-bias
+bonus. One-edit name spellings and registered aliases retain their normal bonus. Coarse
+overlapping timestamps do not establish acoustic ownership and leave the normal search and
+bias intact.
+
+Candidate selection rejects a replacement whose CTC alignment lies outside its own source
+span and overlaps an alignment already applied for the same term. A candidate whose alignment
+lies inside its own words is never rejected for this; it replaces an earlier applied borrower
+of that alignment, so the result does not depend on which is considered first. Coarse source
+timings that contain the alignment remain eligible, preserving genuine repetitions. Other
+similarity thresholds and bias settings remain unchanged.
 
 #### Non-Mutating Candidate Evidence
 
@@ -338,7 +410,8 @@ path finally did after overlap arbitration:
 - `rejectedByComparison` — the legacy floating-point comparison ran and rejected the candidate.
 - `unavailableEvidence` — the comparison could not run, for example because tokenizer evidence was
   unavailable.
-- `supersededByOverlap` — comparison passed, but an overlapping candidate won final arbitration.
+- `supersededByOverlap` — comparison passed, but a selected candidate overlapped its word span, or it
+  borrowed another occurrence's CTC alignment for the same term (see "Preserving recognized words").
 
 `comparisonPassed` and `legacyOutcome` preserve the comparison FluidAudio actually performed. A
 raw score remains `nil` when the underlying scorer produced a non-finite diagnostic value, but that
@@ -384,7 +457,7 @@ let vocabulary = CustomVocabularyContext(terms: [
 ])
 ```
 
-Terms without `ctcTokenIds` are tokenized with the CTC tokenizer when boosting is configured (`configureVocabularyBoosting` on any engine, or `VocabularyBoostingSession.init`), so the plain `CustomVocabularyTerm(text:)` form above works as written. Pre-tokenized terms (from `loadWithCtcTokens(from:)`, or an explicit `ctcTokenIds:`) are used as-is; a term that encodes to nothing is dropped with a warning. Each term is then scored against CTC log-probabilities, and high-scoring terms correct the transcript. (Before #851 this path was a silent no-op: untokenized terms were skipped without any log.)
+Terms without `ctcTokenIds` are tokenized with the CTC tokenizer when boosting is configured (`configureVocabularyBoosting` on any engine, or `VocabularyBoostingSession.init`), so the plain `CustomVocabularyTerm(text:)` form above works as written. Pre-tokenized terms (from `loadWithCtcTokens(from:)`, or an explicit `ctcTokenIds:`) are used as-is; a term that encodes to nothing is dropped with a warning. Boosting reads `tokenizer.json` from the folder the CTC models were loaded from (`CtcModels.directory`, or the default cache folder when that is `nil`), so CTC models kept in your own folder need their `tokenizer.json` beside them (#1114). Each term is then scored against CTC log-probabilities, and high-scoring terms correct the transcript. (Before #851 this path was a silent no-op: untokenized terms were skipped without any log.)
 
 **Streaming (`SlidingWindowAsrManager`).** Every window is rescored, including windows that are still volatile (a clip shorter than `minContextForConfirmation`, a low-confidence window, the final flush) — confirmation only governs display promotion, and a window's text is promoted verbatim later.
 
@@ -484,6 +557,42 @@ The thresholds, the size buckets (`largeVocabThreshold = 10`,
 `extraLargeVocabThreshold = 100`), and the dispatch logic live in
 `ContextBiasingConstants.rescorerConfig(forVocabSize:)`.
 
+#### Overriding the thresholds (#967)
+
+These defaults favour recall: they were tuned on the keyword-spotting benchmarks above, which count how
+many spoken terms are recovered. In dictation most listed terms are not in any given sentence, and a wrong
+replacement of a correctly heard word costs more than a miss. `VocabularyBoostingSession.Thresholds`
+overrides them; `nil` keeps the size default:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `cbw` | size default (4.5) | Added to the term's per-token CTC score before it is compared with the transcribed words' own score. `0` = the term must win on acoustics alone; negative = it must win by that margin |
+| `minSimilarity` | size default (0.50 / 0.55 / 0.60) | String-similarity floor; the vocabulary's own `minSimilarity` still applies when stricter |
+| `marginSeconds` | 0.5 | Audio searched on each side of a span for both sides of the comparison |
+| `detectionMinScore` | −6.5 | Per-token spotter score a term needs to be listed in `detectedTerms` (reporting only) |
+
+```swift
+let session = try await VocabularyBoostingSession(
+    vocabulary: vocabulary, ctcModels: ctcModels,
+    thresholds: .init(cbw: 0, minSimilarity: 0.7))
+```
+
+The managers' `configureVocabularyBoosting(vocabulary:ctcModels:config:thresholds:)` take the same value.
+On the #967 reporter's 13 dictation clips (12-term list, this release), the defaults replaced three
+correctly heard words (`twist` → `Tuist` in "a twist of lime", `analytics` → `Qualtrics`, `Xcode` → `Codex`);
+`cbw: 0, minSimilarity: 0.7` replaced none and kept three of the nine corrections the defaults made.
+
+`detectedTerms` used to list every term on any speech: the spotter's own floor is −15 per token. With the
+−6.5 default (pairs of clip and term):
+
+| Data | Spoken terms listed | Unspoken terms listed | Junk term listed |
+|---|---|---|---|
+| #967 dictation clips (13 clips, 12 terms) | 16/16, including the misheard ones | 40/140 (was 140/140) | 0/13 |
+| LibriSpeech test-clean (40 utterances) | 141/141 | 13/160 (was 159/160) | 0/40 |
+
+Most unspoken terms that remain are sound-alikes at real locations (`Sora` inside "Saurabh", `Codex` on
+"Xcode", `Qualtrics` on "analytics"), which score like spoken terms, so no score floor removes them.
+
 ### Short-Term Over-Fire Controls (opt-in, #702)
 
 The blank-aware DP score is a per-token average log-prob. A **short** keyword
@@ -546,11 +655,9 @@ let config = VocabularyRescorer.Config(
     spotterRescueMinSimilarity: 0.30,     // single-word acoustic-rescue floor
     spotterRescueMultiWordMinSimilarity: 0.50  // multi-word floor
 )
-let rescorer = try await VocabularyRescorer.create(
-    spotter: ctcSpotter,
-    vocabulary: vocabulary,
-    config: config
-)
+// Through a session (or any manager's configureVocabularyBoosting(vocabulary:ctcModels:config:)):
+let session = try await VocabularyBoostingSession(
+    vocabulary: vocabulary, ctcModels: ctcModels, config: config)
 ```
 
 ```bash
@@ -588,6 +695,10 @@ pipeline; turning it off reproduces the older, much-lower over-fire behavior.
 |---|---|---|---|
 | `spotterRescueEnabled` | `--vocab-disable-spotter-rescue` | `FLUID_SPOTTER_RESCUE` (`0` disables) | `true` (on) |
 
+The rescue only runs for vocabularies of at most `ContextBiasingConstants.largeVocabThreshold` (10) terms on
+the default term-centric path. Above that, `spotterRescueEnabled` and the spotter-rescue similarity floors
+have no effect.
+
 ```swift
 // Disable the acoustic rescue for short-keyword KWS:
 let config = VocabularyRescorer.Config(spotterRescueEnabled: false)
@@ -623,28 +734,40 @@ default is unchanged, so existing distinctive-name setups are unaffected.
 
 ## Usage Example
 
+Batch transcription with Parakeet TDT, then rescoring with `VocabularyBoostingSession`:
+
 ```swift
 // 1. Load models
-let asrManager = try await AsrManager.shared
-let ctcModels = try await CtcModels.downloadAndLoad()
-let ctcSpotter = CtcKeywordSpotter(models: ctcModels)
+let asrModels = try await AsrModels.downloadAndLoad(version: .v3)
+let asr = AsrManager(config: .default)
+try await asr.loadModels(asrModels)
+let ctcModels = try await CtcModels.downloadAndLoad(variant: .ctc110m)
 
-// 2. Define vocabulary
+// 2. Define the vocabulary (terms built in code are tokenized by the session)
 let vocabulary = CustomVocabularyContext(terms: [
     CustomVocabularyTerm(text: "NVIDIA"),
     CustomVocabularyTerm(text: "TensorRT"),
 ])
+let session = try await VocabularyBoostingSession(vocabulary: vocabulary, ctcModels: ctcModels)
 
-// 3. Transcribe with vocabulary boosting
-let result = try await asrManager.transcribe(
-    audioSamples,
-    customVocabulary: vocabulary
-)
+// 3. Transcribe, then rescore against the same audio (16 kHz mono)
+var state = TdtDecoderState.make(decoderLayers: await asr.decoderLayerCount)
+let result = try await asr.transcribe(audioSamples, decoderState: &state)
+let output = await session.rescore(
+    text: result.text, tokenTimings: result.tokenTimings ?? [], audioSamples: audioSamples)
+let text = output?.text ?? result.text  // nil: nothing replaced and nothing detected
 
-// result.text: "NVIDIA announced TensorRT optimizations"
-// result.ctcDetectedTerms: ["NVIDIA", "TensorRT"]
-// result.ctcAppliedTerms: ["NVIDIA", "TensorRT"]
+// output?.replacements: the replacements that were applied
+// output?.detectedTerms: terms the spotter found above `thresholds.detectionMinScore`
 ```
+
+The managers run the same session internally after `configureVocabularyBoosting(vocabulary:ctcModels:)`:
+
+| Manager | What the rescoring reports |
+|---|---|
+| `SlidingWindowAsrManager` | Each update carries `ctcDetectedTerms`, `ctcAppliedTerms` and `ctcReplacements` |
+| `UnifiedAsrManager` | `transcribeDetailed(_:)` returns them on the `ASRResult`; `transcribe(_:)` returns text only |
+| `StreamingUnifiedAsrManager` | Applied replacements via `consumeVocabularyReplacements()`; no detected terms |
 
 ## Streaming Mode Limitations
 
@@ -668,6 +791,43 @@ When using `--custom-vocab` with `--streaming`, be aware of the following constr
 - For maximum vocabulary boosting accuracy, use file-based transcription
 - If streaming is required, prefer single-word vocabulary terms over multi-word phrases
 - Consider post-processing the streaming transcript with vocabulary boosting on the complete audio
+
+### Opt-in rescue floors (#702, #899)
+
+The spotter-anchored rescue pass can replace a word with a term on CTC evidence alone, even when
+the two spellings share almost nothing. Two similarity floors gate it. Both are `0.0` (off) in
+`VocabularyRescorer.Config.default`; the Unified engines' `VocabularyBoostingSession.itnDefaultConfig`
+sets them to `0.30` (single word) and `0.50` (multi-word). With floors on, the rescue pass no longer
+fires on unrelated speech, but it also stops recovering brand names that TDT mangles past the
+similarity gate. Measured on main b3eda843 (before #1100), streaming `SlidingWindowAsrManager` with the CLI's
+default `--streaming` config:
+
+| | No vocabulary | Floors off (default) | Floors on |
+|---|---|---|---|
+| Earnings-22 keyword clips (772): keyword TP/FP/FN | 581/0/693 | 1220/4/54 | 1082/2/192 |
+| Earnings-22: WER | 21.71% | 26.10% | 19.68% |
+| FLEURS en_us (200 clips) with an unrelated Earnings-22 term list: false term insertions | 0 | 332 | 40 |
+| FLEURS: WER | 6.09% | 24.41% | 6.91% |
+
+Since then, the confident-word guard (#1100, #967) has lowered floors-off false insertions on the
+FLEURS set from 332 to 220 (WER 15.52%), at 1218/4/56 on Earnings-22.
+
+The default favours term recall, for vocabularies the speech actually uses. If much of the audio
+won't contain the terms, turn the floors on:
+
+```swift
+try await manager.configureVocabularyBoosting(
+    vocabulary: vocabulary,
+    ctcModels: ctcModels,
+    config: VocabularyRescorer.Config(
+        spotterRescueMinSimilarity: 0.30,
+        spotterRescueMultiWordMinSimilarity: 0.50
+    )
+)
+```
+
+The same `config:` applies to `VocabularyBoostingSession` in batch mode, which shows the same
+trade-off (Earnings-22 TP/FP/FN 1211/4/63 → 1100/2/174).
 
 ## BK-Tree Approximate String Matching (Experimental)
 
@@ -713,7 +873,7 @@ The BK-tree path is experimental. In benchmarks, the default term-centric algori
 - Keep vocabularies focused on domain-specific terms that ASR commonly misrecognizes
 - Avoid adding common words that the ASR already handles well
 - Terms should be at least 4 characters (configurable via `minTermLength`)
-- The system automatically skips stopwords (a, the, and, etc.) to prevent false matches
+- The system automatically skips stopwords (a, the, and, etc.) to prevent false matches. A lone stopword that exactly matches a registered alias (e.g. `say` for `Sie`) is still scored, and replaced only if the CTC comparison favors the term
 
 ## File Reference
 

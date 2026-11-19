@@ -218,10 +218,19 @@ final class MandarinG2PTests: XCTestCase {
     }
 
     func testNormalizeTextFullwidthPunctuation() {
-        XCTAssertEqual(
-            MandarinG2P.normalizeText("你好，世界。"),
-            "你好,世界.")
-        XCTAssertEqual(MandarinG2P.normalizeText("！？；："), "!?;:")
+        // misaki's map_punctuation: the mark plus the space it adds.
+        XCTAssertEqual(MandarinG2P.normalizeText("你好，世界。"), "你好, 世界.")
+        XCTAssertEqual(MandarinG2P.normalizeText("苹果、香蕉"), "苹果, 香蕉")
+        XCTAssertEqual(MandarinG2P.normalizeText("！？；："), "! ? ; :")
+        XCTAssertEqual(MandarinG2P.normalizeText("（注意）好的！"), "(注意) 好的!")
+        XCTAssertEqual(MandarinG2P.normalizeText("《三体》"), "“三体”")
+    }
+
+    func testNormalizeTextCollapsesWhitespace() {
+        // A typed space after a fullwidth comma doesn't double misaki's.
+        XCTAssertEqual(MandarinG2P.normalizeText("你好， 世界"), "你好, 世界")
+        XCTAssertEqual(MandarinG2P.normalizeText("他说：「你好。」"), "他说: “你好. ”")
+        XCTAssertEqual(MandarinG2P.normalizeText("  你好  世界 "), "你好 世界")
     }
 
     func testPhonemizeRejectsEmpty() async throws {
@@ -257,8 +266,9 @@ final class MandarinG2PTests: XCTestCase {
         let g2p = MandarinG2P(dict: Self.smallDict())
         let out = try await g2p.phonemize("我不去")
         // 我 wǒ → "uo" final tokenises as the vocab Hanzi token "我".
-        // bu4-before-qu4 → bu2. qu4 → q + ü(ㄩ) + 4.
-        XCTAssertEqual(out, "我3ㄅㄨ2ㄑㄩ4")
+        // bu4-before-qu4 → bu2. qu4 → q + ü(ㄩ) + 4. 不 joins 去 as one
+        // word, so the only `/` is after 我.
+        XCTAssertEqual(out, "我3/ㄅㄨ2ㄑㄩ4")
     }
 
     func testPhonemizeKeepsPunctuation() async throws {
@@ -276,6 +286,38 @@ final class MandarinG2PTests: XCTestCase {
         let g2p = MandarinG2P(dict: Self.smallDict())
         let out = try await g2p.phonemize("你好,你好")
         XCTAssertEqual(out, "ㄋㄧ2ㄏㄠ3,ㄋㄧ2ㄏㄠ3")
+    }
+
+    func testPhonemizeSpacesFullwidthPunctuationLikeMisaki() async throws {
+        // misaki v1.1 emits `, ` for `，` but a bare `,` for an ASCII comma.
+        let g2p = MandarinG2P(dict: Self.smallDict())
+        let fullwidth = try await g2p.phonemize("你好，世界。")
+        XCTAssertEqual(fullwidth, "ㄋㄧ2ㄏㄠ3, ㄕ十4ㄐㄝ4.")
+        let enumeration = try await g2p.phonemize("你好、世界")
+        XCTAssertEqual(enumeration, "ㄋㄧ2ㄏㄠ3, ㄕ十4ㄐㄝ4")
+    }
+
+    func testPhonemizeSeparatesWordsWithSlash() async throws {
+        let g2p = MandarinG2P(dict: Self.smallDict())
+        let words = try await g2p.phonemize("你好世界")
+        XCTAssertEqual(words, "ㄋㄧ2ㄏㄠ3/ㄕ十4ㄐㄝ4")
+        // Two all-third-tone words of ≤ 3 characters merge: no `/`.
+        let merged = try await g2p.phonemize("我你好")
+        XCTAssertFalse(merged.contains("/"), merged)
+        // A space ends the run, so no `/` next to it.
+        let spaced = try await g2p.phonemize("你好 世界")
+        XCTAssertEqual(spaced, "ㄋㄧ2ㄏㄠ3 ㄕ十4ㄐㄝ4")
+    }
+
+    func testWordSeparatorsKeepHmmWordWhole() async throws {
+        // Per-character fallbacks of one segmenter word stay one word.
+        let segments: [MandarinG2P.Segment] = [
+            .pinyin(["tè"], word: "特"), .pinyin(["lǎng"], word: "朗"), .pinyin(["pǔ"], word: "普"),
+            .pinyin(["nǐ", "hǎo"], word: "你好"),
+        ]
+        let separators = MandarinG2P.wordSeparators(
+            segments: segments, wordStarts: [true, false, false, true])
+        XCTAssertEqual(separators, [false, false, false, true])
     }
 
     // MARK: - MandarinPinyinDict round-trip

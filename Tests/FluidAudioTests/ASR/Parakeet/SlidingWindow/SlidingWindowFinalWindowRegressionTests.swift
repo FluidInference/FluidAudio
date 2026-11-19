@@ -179,6 +179,46 @@ final class SlidingWindowFinalWindowRegressionTests: XCTestCase {
         }
     }
 
+    /// Each update carries the manager's text after it (#1113): the last one matches the manager,
+    /// seam edits included — clip 03's window 1 ends on the fragment "an", which the next window
+    /// retires (#897), an edit no window's own `text` shows.
+    func testUpdatesCarryTheManagersTextOnRealRecordings() async throws {
+        let models = try await loadModels()
+        let url = try fixtureURL("03-diff-explanation-16.9s.wav")
+        let manager = SlidingWindowAsrManager()
+        try await manager.loadModels(models)
+        try await manager.startStreaming()
+        let updates = await manager.transcriptionUpdates
+        let collector = Task {
+            var collected: [SlidingWindowTranscriptionUpdate] = []
+            for await update in updates { collected.append(update) }
+            return collected
+        }
+
+        let samples = try loadSamples(url)
+        var position = 0
+        while position < samples.count {
+            let end = min(position + 16_000, samples.count)
+            guard let buffer = Self.makeChunk(samples[position..<end]) else {
+                XCTFail("could not allocate chunk buffer")
+                break
+            }
+            await manager.streamAudio(buffer)
+            position = end
+        }
+        _ = try await manager.finish()
+        let confirmed = await manager.confirmedTranscript
+        let volatile = await manager.volatileTranscript
+        await manager.cancel()  // ends the update stream
+
+        let collected = await collector.value
+        let last = try XCTUnwrap(collected.last)
+        XCTAssertEqual(last.confirmedTranscript, confirmed)
+        XCTAssertEqual(last.volatileTranscript, volatile)
+        let text = "\(last.confirmedTranscript) \(last.volatileTranscript)".lowercased()
+        XCTAssertTrue(text.contains("code and analyzing"), "seam edit missing from the update's text: \(text)")
+    }
+
     func testFinalWindowKeepsTrailingWordsOnRealRecordings() async throws {
         let models = try await loadModels()
         for fixture in fixtures {

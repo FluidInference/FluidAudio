@@ -176,10 +176,13 @@ final class ChunkProcessorTests: XCTestCase {
         XCTAssertTrue(auto.resolvedMelChunkContext(for: .v2))
         XCTAssertTrue(auto.resolvedMelChunkContext(for: .tdtCtc110m))
         XCTAssertTrue(auto.resolvedMelChunkContext(for: nil))
+        // Issue #1031: the mel-context path loses text at Japanese long-form seams.
+        XCTAssertFalse(auto.resolvedMelChunkContext(for: .tdtJa))
 
         let explicitMel = ASRConfig(melChunkContext: true)
         XCTAssertTrue(explicitMel.resolvedMelChunkContext(for: .v3))
         XCTAssertTrue(explicitMel.resolvedMelChunkContext(for: .v2))
+        XCTAssertTrue(explicitMel.resolvedMelChunkContext(for: .tdtJa))
 
         let explicitNoMel = ASRConfig(melChunkContext: false)
         XCTAssertFalse(explicitNoMel.resolvedMelChunkContext(for: .v3))

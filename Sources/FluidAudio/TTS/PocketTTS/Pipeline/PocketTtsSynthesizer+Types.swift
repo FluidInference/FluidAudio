@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 extension PocketTtsSynthesizer {
@@ -24,3 +25,4 @@ extension PocketTtsSynthesizer {
     /// Both use discovery because CoreML auto-generates `var_NNN` names that
     /// differ across language packs and 6L/24L variants.
 }
+#endif

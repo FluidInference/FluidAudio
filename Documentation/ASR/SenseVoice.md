@@ -54,6 +54,24 @@ let manager = try await SenseVoiceManager.load()           // fp16/ANE (use useF
 let text = try await manager.transcribe(audioURL: url)
 ```
 
+### Emotion and audio-event confidence
+
+`transcribeDetailed(audio:)` also scores the leading query slots straight from the
+CTC logits. Each slot is a softmax over that slot's own tags, so the scores of one
+slot sum to 1 and a stray text token can't take an emotion's place.
+
+```swift
+let result = try await manager.transcribeDetailed(audio: samples)
+result.emotion            // SenseVoiceTagScore(tag: "HAPPY", probability: 0.94)
+result.event              // SenseVoiceTagScore(tag: "Speech", probability: 0.71)
+result.scores.emotion     // every emotion tag, most likely first
+result.scores.language    // language tags, including `nospeech`
+```
+
+```bash
+swift run -c release fluidaudiocli sensevoice-transcribe audio.wav --scores
+```
+
 ## Benchmarks
 
 Full canonical test sets on Apple M5 Pro (CoreML FP16 / ANE) — see

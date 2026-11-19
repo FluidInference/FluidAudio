@@ -108,10 +108,11 @@ Resources/
 !Tests/FluidAudioTests/TTS/LuxTts/Resources/**
 Tests/FluidAudioTests/TTS/LuxTts/Resources/*.wav
 # LuxTts bundled G2P lexicon (probe_lexicon.py in mobius zipvoice)
-!Sources/FluidAudio/TTS/LuxTts/G2p/Resources/
-!Sources/FluidAudio/TTS/LuxTts/G2p/Resources/**
+!Sources/LuxTtsG2pResources/Resources/
+!Sources/LuxTtsG2pResources/Resources/**
 scripts/
 !Scripts/parakeet_subset_benchmark.sh
+!Scripts/canary_fleurs_translation_pairs.py
 !Scripts/diarizer_subset_benchmark.sh
 
 # MiniMax TTS corpus is CC-BY-SA-4.0 derivative content fetched on demand

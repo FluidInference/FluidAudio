@@ -1,0 +1,26 @@
+LOAD_MODEL KokoroAlbert units=2
+LOAD_MODEL KokoroPostAlbert units=2
+LOAD_MODEL KokoroAlignment units=2
+LOAD_MODEL KokoroProsody_v2 units=2
+LOAD_MODEL KokoroNoise_v2 units=2
+LOAD_MODEL KokoroVocoder units=2
+LOAD_MODEL KokoroTail_v2 units=2
+LOAD_MODEL KokoroAlbert_32 units=2
+LOAD_MODEL KokoroAlbert_64 units=2
+LOAD_MODEL KokoroDecoderPre_120 units=2
+LOAD_MODEL KokoroDecoderPre_200 units=2
+LOAD_MODEL KokoroSourceGenerator units=2
+START zh all -2
+PREDICT Albert_64
+PREDICT PostAlbert
+PREDICT Alignment
+PREDICT Prosody
+PREDICT Decoder_200
+PREDICT SourceGenerator
+DONE zh all -2 ms=1197.009 frames=147 peak=0.69775390625
+START zh all -1
+PREDICT Albert_64
+PREDICT PostAlbert
+PREDICT Alignment
+PREDICT Prosody
+/AppleInternal/Library/BuildRoots/4~CV2iugCS017GRPdEjj32gfBJXr8YaxAcCWYlUuw/Library/Caches/com.apple.xbs/TemporaryDirectory.WK6jPd/Sources/MetalPerformanceShadersGraph/mpsgraph/MetalPerformanceShadersGraph/Runtimes/MPSRuntime/Operations/GPURNNOps.mm:1565: failed assertion `JIT not supported'

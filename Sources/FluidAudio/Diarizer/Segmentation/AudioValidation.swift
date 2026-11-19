@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 
 internal struct AudioValidation {
@@ -46,3 +47,4 @@ internal struct AudioValidation {
         return sqrt(squaredSum / Float(samples.count))
     }
 }
+#endif

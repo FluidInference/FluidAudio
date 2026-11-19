@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Jieba's character-position HMM, ported as a standalone Viterbi
@@ -165,3 +166,4 @@ public struct MandarinJiebaHmm: Sendable {
             count: JiebaHmmState.allCases.count)
     }
 }
+#endif

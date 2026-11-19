@@ -43,8 +43,9 @@ final class AsrModelsEncoderV2Tests: XCTestCase {
             ModelNames.ASR.jointV3File,
             ModelNames.ASR.encoderV2File,
         ] {
-            try FileManager.default.createDirectory(
-                at: repoDir.appendingPathComponent(file), withIntermediateDirectories: true)
+            let bundle = repoDir.appendingPathComponent(file)
+            try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+            try Data().write(to: bundle.appendingPathComponent("coremldata.bin"))
         }
         try Data("{}".utf8).write(
             to: repoDir.appendingPathComponent(ModelNames.ASR.vocabularyFile))
@@ -54,6 +55,37 @@ final class AsrModelsEncoderV2Tests: XCTestCase {
         XCTAssertTrue(
             AsrModels.modelsExist(at: repoDir, version: .v3, encoderPrecision: .int8V2))
         XCTAssertFalse(
+            AsrModels.modelsExist(at: repoDir, version: .v3, encoderPrecision: .int8))
+    }
+
+    /// The #1067 shape: an interrupted `.int8V2` download leaves an `Encoder_v2.mlmodelc`
+    /// directory with only `analytics/coremldata.bin` and `weights/weight.bin.partial`.
+    /// A bare existence check called that cache present, so `download` returned early
+    /// and the load purged the whole folder; it must count as not present.
+    func testModelsExistRejectsInterruptedEncoderDownload() throws {
+        let parentDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AsrModelsEncoderV2Tests-\(UUID().uuidString)")
+        let repoDir = parentDir.appendingPathComponent(Repo.parakeetV3.folderName)
+        defer { try? FileManager.default.removeItem(at: parentDir) }
+
+        for file in ModelNames.ASR.requiredModelsV3(precision: .int8) {
+            let bundle = repoDir.appendingPathComponent(file)
+            try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+            try Data().write(to: bundle.appendingPathComponent("coremldata.bin"))
+        }
+        try Data("{}".utf8).write(
+            to: repoDir.appendingPathComponent(ModelNames.ASR.vocabularyFile))
+        let interrupted = repoDir.appendingPathComponent(ModelNames.ASR.encoderV2File)
+        for dir in ["analytics", "weights"] {
+            try FileManager.default.createDirectory(
+                at: interrupted.appendingPathComponent(dir), withIntermediateDirectories: true)
+        }
+        try Data().write(to: interrupted.appendingPathComponent("analytics/coremldata.bin"))
+        try Data("w".utf8).write(to: interrupted.appendingPathComponent("weights/weight.bin.partial"))
+
+        XCTAssertFalse(
+            AsrModels.modelsExist(at: repoDir, version: .v3, encoderPrecision: .int8V2))
+        XCTAssertTrue(
             AsrModels.modelsExist(at: repoDir, version: .v3, encoderPrecision: .int8))
     }
 }

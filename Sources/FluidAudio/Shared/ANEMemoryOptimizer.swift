@@ -3,7 +3,7 @@ import CoreML
 import Foundation
 import Metal
 
-/// ANE-optimized memory management for speaker diarization pipeline
+/// ANE-optimized memory management shared by the diarization, ASR and VAD pipelines.
 public final class ANEMemoryOptimizer {
     // Use shared ANE constants
     public static let aneAlignment = ANEMemoryUtils.aneAlignment
@@ -25,10 +25,10 @@ public final class ANEMemoryOptimizer {
                 dataType: dataType,
                 zeroClear: true
             )
-        } catch ANEMemoryUtils.ANEMemoryError.allocationFailed {
-            throw DiarizerError.memoryAllocationFailed
+        } catch let error as ANEMemoryUtils.ANEMemoryError {
+            throw error
         } catch {
-            throw DiarizerError.memoryAllocationFailed
+            throw ANEMemoryUtils.ANEMemoryError.allocationFailed
         }
     }
 
@@ -96,7 +96,7 @@ public final class ANEMemoryOptimizer {
             sourceArray.shape.isEmpty ? 0 : sourceArray.strides[0].intValue * sourceArray.shape[0].intValue
 
         guard offset + viewSpan <= sourceSpan else {
-            throw DiarizerError.invalidArrayBounds
+            throw ANEMemoryUtils.ANEMemoryError.invalidArrayBounds
         }
 
         // Calculate byte offset

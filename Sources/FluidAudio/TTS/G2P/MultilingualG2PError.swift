@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Errors raised by ``MultilingualG2PModel``.
@@ -17,3 +18,4 @@ public enum MultilingualG2PError: Error, LocalizedError {
         }
     }
 }
+#endif

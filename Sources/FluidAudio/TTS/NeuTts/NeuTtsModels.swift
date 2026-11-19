@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -6,7 +7,7 @@ import Foundation
 /// repo root, plus `tokenizer.json` and `samples/<speaker>.json`).
 ///
 /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
-@available(macOS 15.0, iOS 18.0, *)
+@available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
 struct NeuTtsModels: Sendable {
 
     private static let logger = AppLogger(category: "NeuTtsModels")
@@ -107,3 +108,4 @@ struct NeuTtsModels: Sendable {
         return root
     }
 }
+#endif

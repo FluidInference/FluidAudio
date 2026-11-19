@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -10,7 +11,7 @@ extension PocketTtsSynthesizer {
 
     /// Whether the current OS can run the `.aneState` placement.
     static var isStatePlacementAvailable: Bool {
-        if #available(macOS 15.0, iOS 18.0, *) {
+        if #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) {
             return true
         }
         return false
@@ -50,11 +51,12 @@ extension PocketTtsSynthesizer {
     /// prefill and are then captured from the state).
     static func makeStateSession(
         voiceData: PocketTtsVoiceData,
-        temperature: Float = PocketTtsConstants.temperature,
+        temperature: Float? = nil,
         seed: UInt64? = nil,
         language: PocketTtsLanguage = .english,
         maxTokensPerChunk: Int = PocketTtsConstants.maxTokensPerChunk
     ) async throws -> PocketTtsSession {
+        let temperature = temperature ?? language.defaultTemperature
         let store = try currentModelStore()
         guard isStatePlacementAvailable else {
             throw PocketTTSError.processingFailed(
@@ -89,3 +91,4 @@ extension PocketTtsSynthesizer {
         return session
     }
 }
+#endif

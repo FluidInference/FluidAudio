@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Text frontend for the Kokoro ANE Japanese variant: MeCab tokenization over
@@ -34,3 +35,4 @@ actor JapaneseG2P {
         tokenizer.tokenize(JapaneseCutlet.normalize(text))
     }
 }
+#endif

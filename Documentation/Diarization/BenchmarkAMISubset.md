@@ -19,7 +19,7 @@ All results use collar=0.25s, ignoreOverlap=true.
 
 Pyannote segmentation + WeSpeaker embeddings + PLDA scoring + VBx clustering.
 
-Default configuration: step ratio 0.2, minSegmentDurationSeconds 1.0, clustering threshold 0.7.
+Default configuration: step ratio 0.2, minSegmentDurationSeconds 1.0, clustering threshold 0.7. Measured before #1049, with `exclusiveSegments: true` (one speaker at a time); the default now keeps overlapping speech. This row's scorer (`DiarizationMetricsCalculator`) skips overlapped reference speech and never charges an extra output speaker, so it cannot penalize overlapping output, and its DER is not comparable with pyannote's published numbers (no collar, overlap scored). See [Benchmarks.md](../Benchmarks.md#offline-diarization-pipeline) for the offline pipeline under that protocol.
 
 ```bash
 Scripts/diarizer_subset_benchmark.sh

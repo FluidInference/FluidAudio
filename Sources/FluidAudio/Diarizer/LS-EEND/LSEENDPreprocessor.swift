@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 import CoreML
 import Accelerate
@@ -382,3 +383,4 @@ public struct StreamingChunkQueue {
         self.buffer.append(contentsOf: repeatElement(0, count: leftContextFloats))
     }
 }
+#endif

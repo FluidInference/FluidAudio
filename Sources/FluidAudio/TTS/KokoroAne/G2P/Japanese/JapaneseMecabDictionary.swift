@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Read-only view of a MeCab binary dictionary set (`sys.dic`, `unk.dic`,
@@ -283,3 +284,4 @@ final class JapaneseMecabDictionary: Sendable {
         return Int(matrix.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: index, as: Int16.self) })
     }
 }
+#endif

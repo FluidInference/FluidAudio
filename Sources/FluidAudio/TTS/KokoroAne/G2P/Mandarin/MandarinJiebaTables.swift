@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Binary loader for the jieba HMM tables shipped at
@@ -224,3 +225,4 @@ public enum JiebaHmmState: Int, CaseIterable, Sendable {
     case end = 2
     case single = 3
 }
+#endif

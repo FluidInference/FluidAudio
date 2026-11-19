@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -167,6 +168,10 @@ public actor KokoroAneModelStore {
 
     private let logger = AppLogger(category: "KokoroAneModelStore")
 
+    /// Runtime architecture selected when the store is created.
+    public nonisolated let version: KokoroAneVersion
+    private var v3Pipeline: KokoroAneV3Pipeline?
+    private var loadingTask: Task<Void, Error>?
     private var models: [KokoroAneStage: MLModel] = [:]
     private var vocab: KokoroAneVocab?
     private var voicePacks: [String: KokoroAneVoicePack] = [:]
@@ -179,15 +184,19 @@ public actor KokoroAneModelStore {
     static let lexiconRetryInterval: TimeInterval = 300
     private var mandarinCustomLexicon: MandarinCustomLexicon = .empty
 
-    private let directory: URL?
+    /// Models root every asset of this store resolves under (`nil` = the
+    /// default TTS cache root).
+    public nonisolated let directory: URL?
     private let computeUnits: KokoroAneComputeUnits
     private let variant: KokoroAneVariant
 
     public init(
         directory: URL? = nil,
         computeUnits: KokoroAneComputeUnits = .default,
-        variant: KokoroAneVariant = .english
+        variant: KokoroAneVariant = .english,
+        version: KokoroAneVersion = .legacy
     ) {
+        self.version = version
         self.directory = directory
         self.computeUnits = computeUnits
         self.variant = variant
@@ -200,7 +209,42 @@ public actor KokoroAneModelStore {
     /// retryable: if any stage throws, `self.models` stays empty and the next
     /// call retries from scratch instead of returning early on a partial state.
     public func loadIfNeeded() async throws {
-        guard models.isEmpty else { return }
+        guard !isLoaded else { return }
+        if let task = loadingTask { return try await task.value }
+        let task = Task { try await self.loadModels() }
+        loadingTask = task
+        defer { loadingTask = nil }
+        try await task.value
+    }
+
+    private func loadModels() async throws {
+        if version == .v3 {
+            guard #available(macOS 15, iOS 18, tvOS 18, *) else {
+                throw KokoroAneError.inputProcessingFailed("ANE-v3 requires macOS 15 / iOS 18 or newer")
+            }
+            try KokoroAneV3Assets.validateVariant(variant)
+            guard [.default, .aneTailGpu, .aneTailCpu].contains(computeUnits) else {
+                throw KokoroAneError.inputProcessingFailed(
+                    "ANE-v3 supports the default, aneTailGpu or aneTailCpu routing only")
+            }
+            let root = try await KokoroAneV3Assets.ensure(
+                variant: variant, directory: directory,
+                fastVocoder: KokoroAneV3Pipeline.usesFastVocoder(computeUnits))
+            let loadedVocab = try KokoroAneVocab.load(from: root.appendingPathComponent("vocab.json"))
+            let voiceURL = try await KokoroAneV3Assets.ensureVoice(variant.defaultVoice, variant: variant, root: root)
+            let defaultPack = try KokoroAneVoicePack.load(from: voiceURL)
+            let pipeline = try KokoroAneV3Pipeline(
+                baseDirectory: root.appendingPathComponent("base"),
+                fastDirectory: root.appendingPathComponent("fast"),
+                decoderDirectory: root.appendingPathComponent("decoder"),
+                computeUnits: computeUnits)
+            try Task.checkCancellation()
+            v3Pipeline = pipeline
+            vocab = loadedVocab
+            voicePacks[variant.defaultVoice] = defaultPack
+            repoDirectory = root
+            return
+        }
 
         let repoDir = try await KokoroAneResourceDownloader.ensureModels(
             variant: variant, directory: directory)
@@ -234,6 +278,7 @@ public actor KokoroAneModelStore {
 
         // Commit. Past this point a partial-failure retry would re-download
         // and recompile, which is OK — that's the documented contract.
+        try Task.checkCancellation()
         self.models = pendingModels
         self.vocab = loadedVocab
         self.repoDirectory = repoDir
@@ -241,6 +286,31 @@ public actor KokoroAneModelStore {
         // Pre-load the default voice. Voice-pack failure does not invalidate
         // the model cache (voices are mutable runtime state).
         _ = try await voicePack(variant.defaultVoice)
+    }
+
+    func synthesizeV3(
+        inputIds: [Int32], styleS: [Float], styleTimbre: [Float], speed: Float,
+        pauses: [KokoroAnePauses.Span] = []
+    ) throws -> KokoroAneSynthesisResult {
+        guard let pipeline = v3Pipeline else { throw KokoroAneError.modelNotLoaded("ANE-v3") }
+        let result = try pipeline.synthesize(
+            inputIds: inputIds, style: styleTimbre + styleS, speed: speed, pauses: pauses)
+        let stages = result.stageMilliseconds
+        var timings = KokoroAneStageTimings()
+        timings.albert = stages.filter { $0.key == "Albert" || $0.key.hasPrefix("Albert_") }.values.reduce(0, +)
+        timings.postAlbert = stages["PostAlbert", default: 0]
+        timings.alignment = stages["Alignment", default: 0]
+        timings.prosody = stages["Prosody", default: 0]
+        timings.noise = stages["Noise", default: 0]
+        timings.vocoder = stages["Vocoder", default: 0]
+        timings.tail = stages["Tail", default: 0]
+        timings.nativeSource = stages["NativeSource", default: 0]
+        timings.decoder = stages.filter { $0.key.hasPrefix("Decoder_") }.values.reduce(0, +)
+        timings.generator = stages["SourceGenerator", default: 0]
+        return KokoroAneSynthesisResult(
+            samples: result.samples, sampleRate: KokoroAneConstants.sampleRate,
+            encoderTokens: inputIds.count, acousticFrames: result.acousticFrames, timings: timings,
+            inputIds: inputIds, predictedDurations: result.durationFrames, usedFastVocoder: result.usedFastVocoder)
     }
 
     public func model(for stage: KokoroAneStage) throws -> MLModel {
@@ -262,8 +332,13 @@ public actor KokoroAneModelStore {
         guard let repoDir = repoDirectory else {
             throw KokoroAneError.modelNotLoaded("voice pack (repo not initialized)")
         }
-        let url = try await KokoroAneResourceDownloader.ensureVoicePack(
-            voice, repoDirectory: repoDir, variant: variant)
+        let url: URL
+        if version == .v3 {
+            url = try await KokoroAneV3Assets.ensureVoice(voice, variant: variant, root: repoDir)
+        } else {
+            url = try await KokoroAneResourceDownloader.ensureVoicePack(
+                voice, repoDirectory: repoDir, variant: variant)
+        }
         let pack = try KokoroAneVoicePack.load(from: url)
         voicePacks[voice] = pack
         logger.info("Loaded voice pack '\(voice)'")
@@ -271,7 +346,7 @@ public actor KokoroAneModelStore {
     }
 
     public var isLoaded: Bool {
-        models.count == KokoroAneStage.allCases.count && vocab != nil
+        (version == .v3 ? v3Pipeline != nil : models.count == KokoroAneStage.allCases.count) && vocab != nil
     }
 
     /// Lazy-load and cache the Mandarin G2P pipeline (binary dicts +
@@ -366,11 +441,13 @@ public actor KokoroAneModelStore {
             throw KokoroAneError.inputProcessingFailed("French G2P requested on a non-french store")
         }
         let lexiconURL = try await KokoroAneResourceDownloader.ensureLexiconCache(
-            KokoroAneConstants.frenchLexiconCacheFile)
+            KokoroAneConstants.frenchLexiconCacheFile, directory: directory)
         let lexicon = try KokoroAneLexicon(contentsOf: lexiconURL)
+        let directory = self.directory
+        let multilingualG2P = MultilingualG2PModel.shared(directory: directory)
         let pipeline = FrenchG2P(lexicon: lexicon) { word in
-            try await KokoroAneResourceDownloader.ensureMultilingualG2PAssets(directory: nil)
-            return try await MultilingualG2PModel.shared.phonemize(word: word, language: .french)?.joined()
+            try await KokoroAneResourceDownloader.ensureMultilingualG2PAssets(directory: directory)
+            return try await multilingualG2P.phonemize(word: word, language: .french)?.joined()
         }
         frenchG2P = pipeline
         logger.info("Loaded French G2P (\(lexicon.count) lexicon entries)")
@@ -388,7 +465,7 @@ public actor KokoroAneModelStore {
         if let retryAfter = spanishLexiconRetryAfter, Date() < retryAfter { return .empty }
         do {
             let url = try await KokoroAneResourceDownloader.ensureLexiconCache(
-                KokoroAneConstants.spanishLexiconCacheFile)
+                KokoroAneConstants.spanishLexiconCacheFile, directory: directory)
             let lexicon = try KokoroAneLexicon(contentsOf: url)
             spanishLexiconCache = lexicon
             logger.info("Loaded Spanish lexicon (\(lexicon.count) exceptions)")
@@ -419,12 +496,19 @@ public actor KokoroAneModelStore {
             let tokenizer = try MandarinBertTokenizer.load(vocabURL: vocabURL)
             let catalog = try MandarinPolyphoneCatalog.load(fileURL: polyURL)
             let config = MLModelConfiguration()
-            config.computeUnits = .cpuAndNeuralEngine
+            // CPU only: the masked-softmax tail of this bundle comes back
+            // unnormalised on the ANE (candidate mass ≈ 0.01 instead of
+            // 1) and the GPU path pays a ~2.5 s per-process compile.
+            // fp32 CPU is exact at ~47 ms per polyphone query.
+            config.computeUnits = .cpuOnly
             let model = try MLModel(contentsOf: modelURL, configuration: config)
-            return MandarinG2pwModel(
+            return try MandarinG2pwModel(
                 model: model, tokenizer: tokenizer, catalog: catalog)
         } catch {
-            logger.info(
+            // Assets are on disk but unusable — louder than the
+            // missing-asset case so a stale bundle doesn't hide behind
+            // the dict fallback.
+            logger.warning(
                 "g2pW load failed (\(error.localizedDescription)) — "
                     + "Mandarin G2P will run dict-only")
             return nil
@@ -445,6 +529,8 @@ public actor KokoroAneModelStore {
     }
 
     public func cleanup() {
+        loadingTask?.cancel()
+        v3Pipeline = nil
         models.removeAll()
         voicePacks.removeAll()
         vocab = nil
@@ -456,3 +542,4 @@ public actor KokoroAneModelStore {
         spanishLexiconRetryAfter = nil
     }
 }
+#endif

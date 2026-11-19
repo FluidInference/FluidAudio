@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -10,7 +11,7 @@ import Foundation
 /// tables (CFG zeroes the text embedding BEFORE the positional add; the
 /// prefill context ends with two BOS embeds — both are upstream-faithful),
 /// sampling, SineGen randomness, and bucket padding/cropping.
-@available(macOS 15.0, iOS 18.0, *)
+@available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
 struct ChatterboxSynthesizer {
 
     private static let logger = AppLogger(category: "ChatterboxSynthesizer")
@@ -502,3 +503,4 @@ extension SplitMix64 {
         return Float((-2.0 * Foundation.log(u1)).squareRoot() * Foundation.cos(2.0 * .pi * u2))
     }
 }
+#endif

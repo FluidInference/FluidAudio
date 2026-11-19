@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Conservative pre-tokenization text normalization for English TTS
@@ -350,3 +351,4 @@ enum EnglishTextNormalizer {
         return mutable as String
     }
 }
+#endif

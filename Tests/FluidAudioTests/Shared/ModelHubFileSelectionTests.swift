@@ -96,6 +96,69 @@ final class ModelHubFileSelectionTests: XCTestCase {
         )
     }
 
+    // MARK: - kokoro root: no loose root .json sweep (#1044)
+
+    func testKokoroRootDownloadSkipsLooseRootJson() async throws {
+        // .kokoro requires the shared BART G2P pair + g2p_vocab.json. Its
+        // repo root also carries ~40 MB of per-language lexicon caches that
+        // used to ride in on the root .json allowance for every caller.
+        let encoder = ModelNames.G2P.encoderFile
+        let decoder = ModelNames.G2P.decoderFile
+        let vocab = ModelNames.G2P.vocabularyFile
+        TreeStubURLProtocol.trees = [
+            "": [
+                ["path": encoder, "type": "directory"],
+                ["path": decoder, "type": "directory"],
+                ["path": "G2PEncoder.mlpackage", "type": "directory"],
+                ["path": "MultilingualG2PEncoder.mlmodelc", "type": "directory"],
+                ["path": "voices", "type": "directory"],
+                ["path": vocab, "type": "file", "size": 10],
+                ["path": "config.json", "type": "file", "size": 10],
+                ["path": "us_lexicon_cache.json", "type": "file", "size": 10],
+                ["path": "fr_lexicon_cache.json", "type": "file", "size": 10],
+                ["path": "us_gold.json", "type": "file", "size": 10],
+                ["path": "gb_silver.json", "type": "file", "size": 10],
+                ["path": "README.md", "type": "file", "size": 10],
+            ],
+            encoder: [
+                ["path": "\(encoder)/coremldata.bin", "type": "file", "size": 10],
+                ["path": "\(encoder)/model.mil", "type": "file", "size": 10],
+            ],
+            decoder: [
+                ["path": "\(decoder)/coremldata.bin", "type": "file", "size": 10],
+                ["path": "\(decoder)/model.mil", "type": "file", "size": 10],
+            ],
+            "G2PEncoder.mlpackage": [
+                ["path": "G2PEncoder.mlpackage/Manifest.json", "type": "file", "size": 10]
+            ],
+            "MultilingualG2PEncoder.mlmodelc": [
+                ["path": "MultilingualG2PEncoder.mlmodelc/coremldata.bin", "type": "file", "size": 10]
+            ],
+            "voices": [
+                ["path": "voices/af_bella.json", "type": "file", "size": 10]
+            ],
+        ]
+        TreeStubURLProtocol.fileBody = body(10)
+
+        try await ModelHub.download(
+            .kokoro, to: workDir, variant: "g2p-only", configuration: stubConfiguration)
+
+        XCTAssertEqual(
+            try downloadedFiles(repoFolder: Repo.kokoro.folderName),
+            [
+                vocab,
+                "\(encoder)/coremldata.bin",
+                "\(encoder)/model.mil",
+                "\(decoder)/coremldata.bin",
+                "\(decoder)/model.mil",
+            ].sorted()
+        )
+        // Excluded directories are pruned, not merely filtered: the lister
+        // never asks for their subtrees.
+        XCTAssertFalse(TreeStubURLProtocol.treeRequests.contains { $0.contains("voices") })
+        XCTAssertFalse(TreeStubURLProtocol.treeRequests.contains { $0.contains("mlpackage") })
+    }
+
     // MARK: - subPath repo (prefix stripping, subPath metadata rules, #649 fallback)
 
     func testSubPathRepoStripsPrefixAppliesMetadataRulesAndFallsBackToRootAux() async throws {

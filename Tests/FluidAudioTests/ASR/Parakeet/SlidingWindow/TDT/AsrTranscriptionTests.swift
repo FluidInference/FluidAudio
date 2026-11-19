@@ -27,6 +27,7 @@ final class AsrTranscriptionTests: XCTestCase {
             100: "test",
             200: "▁token",
             300: "!",
+            0: "<unk>",
         ]
         await manager.setVocabularyForTesting(mockVocabulary)
     }
@@ -161,6 +162,35 @@ final class AsrTranscriptionTests: XCTestCase {
             XCTAssertEqual(tokenTimings[1].tokenId, 200)
             XCTAssertEqual(tokenTimings[2].tokenId, 300)
         }
+    }
+
+    func testProcessTranscriptionResultDropsUnknownTokens() async {
+        await setupMockVocabulary()
+        // Bark-style output: <unk> where the source text had quotation marks.
+        let result = await manager.processTranscriptionResult(
+            tokenIds: [1, 0, 2, 5, 0],
+            timestamps: [1, 2, 3, 4, 5],
+            confidences: [0.9, 0.1, 0.9, 0.9, 0.1],
+            tokenDurations: [1, 1, 1, 1, 1],
+            encoderSequenceLength: 100,
+            audioSampleCount: 16_000,
+            processingTime: 0.1
+        )
+
+        XCTAssertEqual(result.text, "hello world.")
+        XCTAssertEqual(result.tokenTimings?.map(\.tokenId), [1, 2, 5])
+        XCTAssertEqual(result.confidence, 0.9, accuracy: 0.001)
+    }
+
+    func testRawTokenTimingsKeepUnknownTokensForTheRevisionStream() async {
+        await setupMockVocabulary()
+        // The token-revision stream counts every decoder token the sliding window accumulates, so its
+        // timings must stay 1:1 with them even though the display path drops <unk> (#1035, #1054).
+        let tokenIds = [1, 0, 2, 5, 0]
+        let timings = await manager.rawTokenTimings(
+            tokenIds: tokenIds, timestamps: [1, 2, 3, 4, 5], confidences: [0.9, 0.1, 0.9, 0.9, 0.1])
+        XCTAssertEqual(timings.map(\.tokenId), tokenIds)
+        XCTAssertEqual(timings.map(\.token), ["hello", "<unk>", " world", ".", "<unk>"])
     }
 
     // MARK: - Chunk Processing Logic Tests

@@ -16,6 +16,16 @@ public enum AsrModelVersion: Sendable {
     /// English only. Same architecture and contract as v3; the encoder ships
     /// as exact five-value palettes (iOS 18+).
     case phonon2
+    /// Phonon-2.5 multilingual: v3-family contract with a dense LUT3 encoder.
+    /// The encoder defaults to CPU/GPU; ANE activation parity is not validated.
+    case phonon25
+    /// Underdog Bark 3.0 (Conway Research): post-training of v3, English, verbatim.
+    /// Same architecture and contract as v3; the encoder ships as exact five-value
+    /// palettes (iOS 18+). The model emits `<unk>` for quotation marks; transcripts drop it.
+    case bark3
+    /// Underdog Bark 3.0 Clean: drops fillers, false starts and repeated words.
+    /// Same contract and encoder encoding as `.bark3`.
+    case bark3Clean
     /// 110M parameter hybrid TDT-CTC model with fused preprocessor+encoder
     case tdtCtc110m
     /// 600M parameter TDT model for Japanese (ja) - hybrid CTC preprocessor/encoder + TDT decoder/joint v2
@@ -28,6 +38,9 @@ public enum AsrModelVersion: Sendable {
         case .redux: return .parakeetRedux
         case .ultra: return .parakeetUltra
         case .phonon2: return .phonon2
+        case .phonon25: return .phonon25
+        case .bark3: return .bark3
+        case .bark3Clean: return .bark3Clean
         case .tdtCtc110m: return .parakeetTdtCtc110m
         case .tdtJa: return .parakeetJa
         }
@@ -54,7 +67,7 @@ public enum AsrModelVersion: Sendable {
     public var blankId: Int {
         switch self {
         case .v2, .tdtCtc110m: return 1024
-        case .v3, .redux, .ultra, .phonon2: return 8192
+        case .v3, .redux, .ultra, .phonon2, .phonon25, .bark3, .bark3Clean: return 8192
         case .tdtJa: return 3072
         }
     }
@@ -67,12 +80,12 @@ public enum AsrModelVersion: Sendable {
         }
     }
 
-    /// v3 and its weight-compatible derivatives (Redux, Ultra, Phonon-2). Gates the v3-only
+    /// v3 and its weight-compatible derivatives (Redux, Ultra, Phonon-2/2.5, Bark). Gates the v3-only
     /// decode behaviours: `TdtDecoderV3`, silence-aligned chunking, blank
     /// recovery and the JointDecisionv3 top-K contract.
     public var isV3Family: Bool {
         switch self {
-        case .v3, .redux, .ultra, .phonon2: return true
+        case .v3, .redux, .ultra, .phonon2, .phonon25, .bark3, .bark3Clean: return true
         default: return false
         }
     }
@@ -90,6 +103,11 @@ public struct AsrModels: Sendable {
     public let joint: MLModel
     /// Optional CTC decoder head for custom vocabulary (encoder features → CTC logits)
     public let ctcHead: MLModel?
+    /// Shorter-window functions of a multifunction encoder, ascending by
+    /// length; empty for a single-shape encoder. A window runs on the
+    /// smallest function that holds it, so it pays Neural Engine time for
+    /// the audio it carries rather than for the full 15 s shape.
+    public let encoderLadder: [EncoderLadderFunction]
     public let configuration: MLModelConfiguration
     public let vocabulary: [Int: String]
     public let version: AsrModelVersion
@@ -102,11 +120,13 @@ public struct AsrModels: Sendable {
         decoder: MLModel,
         joint: MLModel,
         ctcHead: MLModel? = nil,
+        encoderLadder: [EncoderLadderFunction] = [],
         configuration: MLModelConfiguration,
         vocabulary: [Int: String],
         version: AsrModelVersion
     ) {
         self.encoder = encoder
+        self.encoderLadder = encoderLadder
         self.preprocessor = preprocessor
         self.decoder = decoder
         self.joint = joint
@@ -122,6 +142,72 @@ public struct AsrModels: Sendable {
     }
 }
 
+/// One window length of a multifunction encoder (`enc_<milliseconds>ms`).
+public struct EncoderLadderFunction: Sendable {
+    public let seconds: Double
+    /// Mel frames the function consumes (1 + 100 × seconds).
+    public let melFrames: Int
+    public let model: MLModel
+
+    /// Multifunction encoder function names are `enc_<milliseconds>ms`
+    /// (integer: Core ML's Neural Engine compiler crashes on a '.' in a
+    /// function name).
+    static func seconds(fromFunctionName name: String) -> Double? {
+        guard name.hasPrefix("enc_"), name.hasSuffix("ms"), let ms = Int(name.dropFirst(4).dropLast(2)) else {
+            return nil
+        }
+        return Double(ms) / 1000
+    }
+}
+
+extension AsrModels {
+    /// Load every `enc_<N>ms` function of a multifunction encoder at `path`.
+    /// Returns an empty array for a single-function encoder, or when the
+    /// platform predates multifunction models (macOS 15 / iOS 18).
+    static func loadEncoderLadder(
+        at path: URL, computeUnits: MLComputeUnits, defaultEncoder: MLModel
+    ) async -> [EncoderLadderFunction] {
+        guard #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) else { return [] }
+        let names: [String]
+        do {
+            names = try await MLModelAsset(url: path).functionNames
+        } catch {
+            return []
+        }
+        // The default function is already loaded as `defaultEncoder`; reuse it
+        // rather than hold a second instance of the same program.
+        let defaultMelFrames =
+            defaultEncoder.modelDescription.inputDescriptionsByName["mel"]?.multiArrayConstraint?.shape.last?.intValue
+        var ladder: [EncoderLadderFunction] = []
+        for name in names {
+            guard let seconds = EncoderLadderFunction.seconds(fromFunctionName: name) else { continue }
+            if let defaultMelFrames, defaultMelFrames == 1 + Int(seconds * 100) {
+                ladder.append(
+                    EncoderLadderFunction(seconds: seconds, melFrames: defaultMelFrames, model: defaultEncoder))
+                continue
+            }
+            let config = MLModelConfiguration()
+            config.computeUnits = computeUnits
+            config.allowLowPrecisionAccumulationOnGPU = true
+            config.functionName = name
+            let start = Date()
+            do {
+                let model = try MLModel(contentsOf: path, configuration: config)
+                let melFrames =
+                    model.modelDescription.inputDescriptionsByName["mel"]?.multiArrayConstraint?.shape.last?.intValue
+                    ?? (1 + Int(seconds * 100))
+                ladder.append(EncoderLadderFunction(seconds: seconds, melFrames: melFrames, model: model))
+                logger.info(
+                    "Loaded encoder function \(name) in \(String(format: "%.0f", Date().timeIntervalSince(start) * 1000)) ms"
+                )
+            } catch {
+                logger.warning("Encoder function \(name) failed to load: \(error.localizedDescription)")
+            }
+        }
+        return ladder.sorted { $0.seconds < $1.seconds }
+    }
+}
+
 extension AsrModels {
 
     private struct ModelSpec {
@@ -129,12 +215,32 @@ extension AsrModels {
         let computeUnits: MLComputeUnits
     }
 
+    /// Select encoder placement separately from decoder/joint configuration.
+    /// Phonon-2.5's published dense encoder has passed the GPU gate, while the
+    /// sparse ANE conversion has not. Keep ANE opt-in unavailable for this model:
+    /// without an explicit request its encoder runs on CPU/GPU, or on the CPU
+    /// when the configuration is CPU-only (background-safe / CI configurations).
+    static func resolvedEncoderComputeUnits(
+        for version: AsrModelVersion,
+        configuration: MLComputeUnits,
+        requested: MLComputeUnits? = nil
+    ) throws -> MLComputeUnits {
+        guard version == .phonon25 else { return requested ?? configuration }
+        let units = requested ?? (configuration == .cpuOnly ? .cpuOnly : .cpuAndGPU)
+        guard units == .cpuAndGPU || units == .cpuOnly else {
+            throw AsrModelsError.loadingFailed(
+                "Phonon-2.5 supports the GPU encoder or CPU-only diagnostics; "
+                    + "ANE encoder parity is not validated. Use encoderComputeUnits: .cpuAndGPU.")
+        }
+        return units
+    }
+
     private static func createModelSpecs(
         using config: MLModelConfiguration,
         version: AsrModelVersion,
         encoderPrecision: ParakeetEncoderPrecision,
         encoderComputeUnits: MLComputeUnits? = nil
-    ) -> [ModelSpec] {
+    ) throws -> [ModelSpec] {
         if version.hasFusedEncoder {
             // Fused preprocessor+encoder runs on ANE (it contains the conformer encoder)
             return [
@@ -153,23 +259,29 @@ extension AsrModels {
             // M-series) for ~+8% end-to-end RTFx, WER-neutral. ANE remains the default
             // because it is far more power-efficient on iOS; opt into GPU for
             // throughput-oriented / plugged-in workloads. See docs/perf/parakeet-v3-encoder.md.
+            // Phonon-2.5 is the exception: CPU/GPU by default, ANE placements rejected
+            // (see resolvedEncoderComputeUnits).
             ModelSpec(
                 fileName: fileNames.encoder,
-                computeUnits: encoderComputeUnits ?? config.computeUnits
+                computeUnits: try resolvedEncoderComputeUnits(
+                    for: version, configuration: config.computeUnits, requested: encoderComputeUnits)
             ),
         ]
     }
 
-    /// Redux's 2-bit and Phonon-2's five-value encoders use iOS 18 Core ML ops,
-    /// so they have no iOS 17 build. Fails fast there and points at `.ultra`.
+    /// Redux's 2-bit, Phonon-2's / Bark's five-value and Phonon-2.5's LUT3 encoders use iOS 18
+    /// Core ML ops, so they have no iOS 17 build. Fails fast there and points at `.ultra`.
     static func checkPlatformSupport(for version: AsrModelVersion) throws {
         let name: String
         switch version {
         case .redux: name = "Parakeet Redux"
         case .phonon2: name = "Phonon-2"
+        case .phonon25: name = "Phonon-2.5"
+        case .bark3: name = "Bark 3.0"
+        case .bark3Clean: name = "Bark 3.0 Clean"
         default: return
         }
-        if #available(macOS 15, iOS 18, *) { return }
+        if #available(macOS 15, iOS 18, tvOS 18, *) { return }
         throw AsrModelsError.loadingFailed(
             "\(name) requires iOS 18 / macOS 15 (its compressed encoder uses iOS 18 Core ML ops). "
                 + "Use AsrModelVersion.ultra on iOS 17 / macOS 14.")
@@ -181,10 +293,18 @@ extension AsrModels {
             .appendingPathComponent(version.repo.folderName)
     }
 
-    private static func inferredVersion(from directory: URL) -> AsrModelVersion? {
+    static func inferredVersion(from directory: URL) -> AsrModelVersion? {
         let directoryPath = directory.path.lowercased()
-        let knownVersions: [AsrModelVersion] = [.tdtCtc110m, .v2, .v3, .redux, .ultra, .phonon2, .tdtJa]
+        let knownVersions: [AsrModelVersion] = [
+            .tdtCtc110m, .v2, .v3, .redux, .ultra, .phonon25, .phonon2, .bark3Clean, .bark3, .tdtJa,
+        ]
 
+        // The model folder itself wins over a parent folder that merely contains another name
+        // (".../phonon-2.5-eval/phonon-2" is Phonon-2).
+        let folder = directory.lastPathComponent.lowercased()
+        if let exact = knownVersions.first(where: { $0.repo.folderName.lowercased() == folder }) {
+            return exact
+        }
         for version in knownVersions {
             if directoryPath.contains(version.repo.folderName.lowercased()) {
                 return version
@@ -221,7 +341,7 @@ extension AsrModels {
                 joint: Names.jointV3File,
                 vocabulary: Names.vocabularyFile
             )
-        case .redux, .ultra, .phonon2:
+        case .redux, .ultra, .phonon2, .phonon25, .bark3, .bark3Clean:
             // Same contract as v3 with a single encoder build.
             return (
                 encoder: Names.encoderFile,
@@ -248,7 +368,7 @@ extension AsrModels {
             return ModelNames.TDTJa.requiredModels
         case .v3:
             return Names.requiredModelsV3(precision: encoderPrecision)
-        case .redux, .ultra, .phonon2:
+        case .redux, .ultra, .phonon2, .phonon25, .bark3, .bark3Clean:
             return Names.requiredModelsV3()
         default:
             return version.hasFusedEncoder ? Names.requiredModelsFused : Names.requiredModels
@@ -269,6 +389,8 @@ extension AsrModels {
     ) throws -> AsrModels {
         try checkPlatformSupport(for: version)
         let config = configuration ?? defaultConfiguration()
+        _ = try resolvedEncoderComputeUnits(
+            for: version, configuration: config.computeUnits, requested: encoderComputeUnits)
         let names = getModelFileNames(version: version, encoderPrecision: encoderPrecision)
         func component(_ name: String, units: MLComputeUnits) throws -> MLModel {
             let url = directory.appendingPathComponent(name)
@@ -290,7 +412,8 @@ extension AsrModels {
             ? nil
             : component(
                 names.encoder,
-                units: encoderComputeUnits ?? config.computeUnits)
+                units: resolvedEncoderComputeUnits(
+                    for: version, configuration: config.computeUnits, requested: encoderComputeUnits))
         let ctcURL = directory.appendingPathComponent(Names.ctcHeadFile)
         let ctcHead =
             try FileManager.default.fileExists(atPath: ctcURL.path)
@@ -313,8 +436,8 @@ extension AsrModels {
     /// - Parameters:
     ///   - directory: Directory containing the model files
     ///   - configuration: Optional MLModel configuration. When provided, the configuration's
-    ///                   computeUnits will be respected. When nil, platform-optimized defaults
-    ///                   are used (per-model optimization based on model type).
+    ///                   computeUnits will be respected (Phonon-2.5's encoder: see below). When
+    ///                   nil, platform-optimized defaults are used (per-model optimization).
     ///   - version: ASR model version to load (defaults to v3)
     ///   - encoderComputeUnits: Optional override for the conformer encoder's compute units.
     ///                   When `nil` (default) the encoder uses the configuration's compute
@@ -322,12 +445,15 @@ extension AsrModels {
     ///                   on the GPU (~+8% RTFx, WER-neutral on Apple Silicon) for
     ///                   throughput-oriented workloads; ANE stays the default for power
     ///                   efficiency on iOS. See docs/perf/parakeet-v3-encoder.md.
+    ///                   Phonon-2.5 only accepts `.cpuAndGPU` (its default) or `.cpuOnly`
+    ///                   (also chosen when the configuration is CPU-only); ANE placements throw.
     ///
     /// - Returns: Loaded ASR models
     ///
     /// - Note: The default configuration pins the preprocessor to CPU and every other
     ///         Parakeet component to `.cpuAndNeuralEngine` to avoid GPU dispatch, which keeps
-    ///         background execution permitted on iOS.
+    ///         background execution permitted on iOS. Phonon-2.5 is an exception:
+    ///         its encoder defaults to CPU/GPU and is intended for foreground use.
     public static func load(
         from directory: URL,
         configuration: MLModelConfiguration? = nil,
@@ -343,7 +469,7 @@ extension AsrModels {
 
         let parentDirectory = directory.deletingLastPathComponent()
         let downloadVariant: String? = (version == .v3) ? encoderPrecision.rawValue : nil
-        let specs = createModelSpecs(
+        let specs = try createModelSpecs(
             using: config, version: version, encoderPrecision: encoderPrecision,
             encoderComputeUnits: encoderComputeUnits)
 
@@ -375,6 +501,17 @@ extension AsrModels {
 
         if !version.hasFusedEncoder && encoderModel == nil {
             throw AsrModelsError.loadingFailed("Failed to load encoder model (required for split frontend)")
+        }
+        var encoderLadder: [EncoderLadderFunction] = []
+        if let encoderModel, let encoderSpec = specs.first(where: { $0.fileName == fileNames.encoder }) {
+            encoderLadder = await loadEncoderLadder(
+                at: directory.appendingPathComponent(fileNames.encoder),
+                computeUnits: encoderSpec.computeUnits,
+                defaultEncoder: encoderModel
+            )
+            if !encoderLadder.isEmpty {
+                logger.info("Encoder ladder: \(encoderLadder.map { "\($0.seconds) s" }.joined(separator: ", "))")
+            }
         }
 
         // Load decoder first
@@ -458,6 +595,7 @@ extension AsrModels {
             decoder: decoderModel,
             joint: jointModel,
             ctcHead: ctcHeadModel,
+            encoderLadder: encoderLadder,
             configuration: config,
             vocabulary: try loadVocabulary(from: directory, version: version),
             version: version
@@ -588,11 +726,16 @@ extension AsrModels {
 extension AsrModels {
 
     @discardableResult
+    /// Download (and compile-warm) the models for `version`.
+    ///
+    /// - Parameter encoderComputeUnits: compute units the encoder is warmed with; `nil` uses the
+    ///   version's default placement (see `load(from:configuration:version:encoderPrecision:encoderComputeUnits:)`).
     public static func download(
         to directory: URL? = nil,
         force: Bool = false,
         version: AsrModelVersion = .v3,
         encoderPrecision: ParakeetEncoderPrecision = .int8,
+        encoderComputeUnits: MLComputeUnits? = nil,
         progressHandler: ProgressHandler? = nil
     ) async throws -> URL {
         try checkPlatformSupport(for: version)
@@ -600,8 +743,14 @@ extension AsrModels {
         logger.info("Downloading ASR models to: \(targetDir.path)")
         let parentDir = targetDir.deletingLastPathComponent()
         let downloadVariant: String? = (version == .v3) ? encoderPrecision.rawValue : nil
+        // A pinned repo (Phonon-2.5) is only "present" with its revision marker; ModelHub re-checks it on load.
+        let revision = ModelRegistry.mapRevision(version.repo.remotePath, default: version.repo.revision)
+        let revisionMatches = ModelCache.matchesRevision(
+            at: repoPath(from: targetDir, version: version), revision: revision)
 
-        if !force && modelsExist(at: targetDir, version: version, encoderPrecision: encoderPrecision) {
+        if !force && revisionMatches
+            && modelsExist(at: targetDir, version: version, encoderPrecision: encoderPrecision)
+        {
             logger.info("ASR models already present at: \(targetDir.path)")
             return targetDir
         }
@@ -633,7 +782,10 @@ extension AsrModels {
             specs = [
                 // Preprocessor ops map to CPU-only across all platforms.
                 DownloadSpec(fileName: Names.preprocessorFile, computeUnits: .cpuOnly),
-                DownloadSpec(fileName: fileNames.encoder, computeUnits: defaultUnits),
+                DownloadSpec(
+                    fileName: fileNames.encoder,
+                    computeUnits: try resolvedEncoderComputeUnits(
+                        for: version, configuration: defaultUnits, requested: encoderComputeUnits)),
                 DownloadSpec(fileName: fileNames.decoder, computeUnits: defaultUnits),
                 DownloadSpec(fileName: fileNames.joint, computeUnits: defaultUnits),
             ]
@@ -687,7 +839,8 @@ extension AsrModels {
         }
 
         logger.info("Vocabulary \(vocabularyFileName) missing after model download; fetching directly")
-        let remoteURL = try ModelRegistry.resolveModel(version.repo.remotePath, vocabularyFileName)
+        let revision = ModelRegistry.mapRevision(version.repo.remotePath, default: version.repo.revision)
+        let remoteURL = try ModelRegistry.resolveModel(version.repo.remotePath, vocabularyFileName, revision: revision)
         let data = try await ModelHub.fetchFile(
             from: remoteURL, description: vocabularyFileName)
         try FileManager.default.createDirectory(
@@ -704,10 +857,16 @@ extension AsrModels {
         encoderComputeUnits: MLComputeUnits? = nil,
         progressHandler: ProgressHandler? = nil
     ) async throws -> AsrModels {
+        // Same order as loadLocal/load: platform before encoder placement, both before any download.
+        try checkPlatformSupport(for: version)
+        let resolvedEncoder = try resolvedEncoderComputeUnits(
+            for: version, configuration: (configuration ?? defaultConfiguration()).computeUnits,
+            requested: encoderComputeUnits)
         let targetDir = try await download(
             to: directory,
             version: version,
             encoderPrecision: encoderPrecision,
+            encoderComputeUnits: resolvedEncoder,
             progressHandler: progressHandler
         )
         return try await load(
@@ -715,7 +874,7 @@ extension AsrModels {
             configuration: configuration,
             version: version,
             encoderPrecision: encoderPrecision,
-            encoderComputeUnits: encoderComputeUnits,
+            encoderComputeUnits: resolvedEncoder,
             progressHandler: progressHandler)
     }
 
@@ -729,23 +888,14 @@ extension AsrModels {
         version: AsrModelVersion,
         encoderPrecision: ParakeetEncoderPrecision = .int8
     ) -> Bool {
-        let fileManager = FileManager.default
-        let requiredFiles = getRequiredModels(version: version, encoderPrecision: encoderPrecision)
-
-        // Check in the ModelHub repo structure
-        let repoPath = repoPath(from: directory, version: version)
-
-        let modelsPresent = requiredFiles.allSatisfy { fileName in
-            let path = repoPath.appendingPathComponent(fileName)
-            return fileManager.fileExists(atPath: path.path)
-        }
-
-        // Also check for vocabulary file associated with the version
+        // Load-ready, not bare existence: an interrupted download leaves a bundle
+        // directory holding only `*.partial` weights (#1067). The vocabulary file
+        // associated with the version is required too (#748).
         let vocabularyFileName = getModelFileNames(version: version, encoderPrecision: encoderPrecision).vocabulary
-        let vocabPath = repoPath.appendingPathComponent(vocabularyFileName)
-        let vocabPresent = fileManager.fileExists(atPath: vocabPath.path)
-
-        return modelsPresent && vocabPresent
+        let requiredFiles = getRequiredModels(version: version, encoderPrecision: encoderPrecision)
+            .union([vocabularyFileName])
+        return ModelCache.isCacheComplete(
+            at: repoPath(from: directory, version: version), requiredFiles: requiredFiles)
     }
 
     public static func isModelValid(

@@ -14,7 +14,7 @@ final class PocketTtsStateEngineTests: XCTestCase {
 
     // MARK: - fp16 conversion (pure logic)
 
-    @available(macOS 15.0, iOS 18.0, *)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
     func assertFp16BufferMatchesSwiftRounding() {
         // Values chosen to exercise rounding, subnormals, and specials.
         let source: [Float] = [
@@ -36,14 +36,14 @@ final class PocketTtsStateEngineTests: XCTestCase {
     }
 
     func testFp16BufferMatchesSwiftRounding() throws {
-        guard #available(macOS 15.0, iOS 18.0, *) else {
+        guard #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) else {
             throw XCTSkip("MLState requires macOS 15+/iOS 18+")
         }
         assertFp16BufferMatchesSwiftRounding()
     }
 
     func testFp16SnapshotSplitsKVAndCarriesPosition() throws {
-        guard #available(macOS 15.0, iOS 18.0, *) else {
+        guard #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) else {
             throw XCTSkip("MLState requires macOS 15+/iOS 18+")
         }
         // One layer, tiny seq: K block = 1..N, V block = offset by 1e6
@@ -77,7 +77,7 @@ final class PocketTtsStateEngineTests: XCTestCase {
     }
 
     func testIsContiguous() throws {
-        guard #available(macOS 15.0, iOS 18.0, *) else {
+        guard #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) else {
             throw XCTSkip("MLState requires macOS 15+/iOS 18+")
         }
         XCTAssertTrue(
@@ -104,7 +104,7 @@ final class PocketTtsStateEngineTests: XCTestCase {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
-    @available(macOS 15.0, iOS 18.0, *)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
     private func loadEngine(from url: URL) throws -> PocketTtsStateEngine {
         func config(_ functionName: String) -> MLModelConfiguration {
             let c = MLModelConfiguration()
@@ -127,7 +127,7 @@ final class PocketTtsStateEngineTests: XCTestCase {
     /// bit-exact (the property Trial 23 proved from python; this validates
     /// the Swift plumbing — strides, fp16 handling, buffer naming).
     func testStateWriteReadRoundTripBitExact() async throws {
-        guard #available(macOS 15.0, iOS 18.0, *) else {
+        guard #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) else {
             throw XCTSkip("MLState requires macOS 15+/iOS 18+")
         }
         guard let url = installedStateModelURL() else {
@@ -161,7 +161,7 @@ final class PocketTtsStateEngineTests: XCTestCase {
     /// Full prefill → generate over the shared state: positions advance and
     /// the fused step yields finite latent/EOS outputs.
     func testPrefillAndGenerateAdvanceSharedState() async throws {
-        guard #available(macOS 15.0, iOS 18.0, *) else {
+        guard #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) else {
             throw XCTSkip("MLState requires macOS 15+/iOS 18+")
         }
         guard let url = installedStateModelURL() else {

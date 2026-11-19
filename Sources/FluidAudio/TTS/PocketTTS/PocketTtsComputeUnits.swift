@@ -1,3 +1,4 @@
+#if TTS
 import CoreML
 import Foundation
 
@@ -93,3 +94,4 @@ extension MLComputeUnits {
         }
     }
 }
+#endif

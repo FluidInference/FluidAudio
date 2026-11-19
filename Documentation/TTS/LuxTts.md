@@ -216,6 +216,13 @@ OOV words fall back to possessive/plural suffix rules, camelCase/all-caps
 handling, then letter spell-out; OOV token-id scalars are skipped with a
 warning, matching upstream.
 
+**License.** The lexicon and aux resources are generated from espeak-ng
+(GPL-3.0-or-later: its output plus tables parsed from `en_list`) and from
+FrequencyWords (CC-BY-SA-4.0) word lists. They are not covered by
+FluidAudio's Apache-2.0 license alone. See
+[`ThirdPartyLicenses/LuxTtsEnglishG2P-LICENSE.md`](../../ThirdPartyLicenses/LuxTtsEnglishG2P-LICENSE.md)
+for provenance and license texts.
+
 ## Tests
 
 ```bash

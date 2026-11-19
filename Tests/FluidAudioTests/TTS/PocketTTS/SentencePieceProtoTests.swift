@@ -27,8 +27,9 @@ final class SentencePieceProtoTests: XCTestCase {
         return withUnsafeBytes(of: &v) { Array($0) }
     }
 
-    /// Build a SentencePiece sub-message with string (field 1) and optional score (field 2)
-    private func makePieceMessage(string: String, score: Float? = nil) -> [UInt8] {
+    /// Build a SentencePiece sub-message with string (field 1), optional score
+    /// (field 2) and optional type (field 3)
+    private func makePieceMessage(string: String, score: Float? = nil, type: Int? = nil) -> [UInt8] {
         var body: [UInt8] = []
 
         // field 1, wire type 2 (string)
@@ -43,17 +44,29 @@ final class SentencePieceProtoTests: XCTestCase {
             body.append(contentsOf: makeFloat32Bytes(score))
         }
 
+        // field 3, wire type 0 (enum)
+        if let type = type {
+            body.append(contentsOf: makeTag(fieldNumber: 3, wireType: 0))
+            body.append(contentsOf: makeVarint(UInt64(type)))
+        }
+
         return body
     }
 
-    /// Wrap piece messages as top-level field 1 of ModelProto
-    private func wrapInModelProto(pieces: [[UInt8]]) -> Data {
+    /// Wrap piece messages as top-level field 1 of ModelProto, and an optional
+    /// TrainerSpec body as top-level field 2
+    private func wrapInModelProto(pieces: [[UInt8]], trainerSpec: [UInt8]? = nil) -> Data {
         var data: [UInt8] = []
         for piece in pieces {
             // Top-level field 1, wire type 2 (length-delimited)
             data.append(contentsOf: makeTag(fieldNumber: 1, wireType: 2))
             data.append(contentsOf: makeVarint(UInt64(piece.count)))
             data.append(contentsOf: piece)
+        }
+        if let trainerSpec = trainerSpec {
+            data.append(contentsOf: makeTag(fieldNumber: 2, wireType: 2))
+            data.append(contentsOf: makeVarint(UInt64(trainerSpec.count)))
+            data.append(contentsOf: trainerSpec)
         }
         return Data(data)
     }
@@ -101,6 +114,40 @@ final class SentencePieceProtoTests: XCTestCase {
         XCTAssertEqual(pieces.count, 1)
         XCTAssertEqual(pieces[0].piece, "test")
         XCTAssertEqual(pieces[0].score, 0, accuracy: 1e-5)
+    }
+
+    func testParsePieceType() throws {
+        let data = wrapInModelProto(pieces: [
+            makePieceMessage(string: "<unk>", score: 0, type: 2),
+            makePieceMessage(string: "<0x0A>", score: 0, type: 6),
+            makePieceMessage(string: "hello", score: -1),
+        ])
+
+        let pieces = try SentencePieceProto.parse(data)
+        XCTAssertEqual(pieces.map(\.type), [.unknown, .byte, .normal])
+    }
+
+    func testParseByteFallbackDefaultsToFalse() throws {
+        let data = wrapInModelProto(pieces: [makePieceMessage(string: "hello", score: -1)])
+        XCTAssertFalse(try SentencePieceProto.parseModel(data).byteFallback)
+    }
+
+    func testParseByteFallbackSkipsOtherTrainerSpecFields() throws {
+        var spec: [UInt8] = []
+        // input (field 1, string)
+        spec += makeTag(fieldNumber: 1, wireType: 2) + makeVarint(4) + Array("data".utf8)
+        // model_type (field 3, enum)
+        spec += makeTag(fieldNumber: 3, wireType: 0) + makeVarint(1)
+        // character_coverage (field 10, float)
+        spec += makeTag(fieldNumber: 10, wireType: 5) + makeFloat32Bytes(0.9995)
+        // byte_fallback (field 35, bool)
+        spec += makeTag(fieldNumber: 35, wireType: 0) + makeVarint(1)
+        let data = wrapInModelProto(
+            pieces: [makePieceMessage(string: "hello", score: -1)], trainerSpec: spec)
+
+        let model = try SentencePieceProto.parseModel(data)
+        XCTAssertTrue(model.byteFallback)
+        XCTAssertEqual(model.pieces.map(\.piece), ["hello"])
     }
 
     func testParseInvalidWireTypeThrows() {

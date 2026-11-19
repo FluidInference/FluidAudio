@@ -1,5 +1,9 @@
 # ANE Profiler
 
+The header below describes the original June audit. Later model sections state
+their own dates, configurations and metrics; see [Kokoro ANE v3](#kokoro-ane-v3)
+for the October M5 Pro routing, latency and telemetry checks.
+
 | | |
 |---|---|
 | **Measured** | 2026-06-05 |
@@ -237,14 +241,64 @@ Latency **measured on real synthesis**, warm (one short sentence; `tts --backend
 
 | Model | Type | ANE | GPU | CPU | ops | Size | Heavy graph → device |
 |-------|------|----:|----:|----:|----:|-----:|----------------------|
-| Kokoro ANE (7-stage) | batch (per utterance) | 75% | 0% | 25% | 1472 | 83 MB | Vocoder → ANE |
+| Kokoro ANE (legacy capability profile) | batch (per utterance) | 75% | 0% | 25% | 1472 | 83 MB | Vocoder → ANE |
 | Supertonic (`--ve-variant fp16`, legacy) | batch (8-step diffusion) | 30% | 0% | 70% | 1365 | 192 MB | VectorEstimator → **CPU** (dynamic shapes can't use ANE) |
 | Supertonic (default, int4 L-bucketed) | batch (8-step diffusion) | ~90% | 0% | ~10% | 1289 | 102 MB | VectorEstimator → **ANE** (fixed L-buckets) |
 | PocketTTS (v2.1) | streaming (autoregressive) | ~9% | ~31% | ~60% | 2629 | ~330 MB | flow_decoder_fused → **ANE**; flowlm/cond → GPU; mimi → CPU |
 
 **Component detail**
 
-### Kokoro ANE (7-stage)
+### Kokoro ANE v3
+
+**Separate check: M5 Pro, 24 GiB, macOS 27.0 (26A428), October 7, 2026.**
+The historical seven-stage op-count percentages below do not describe v3.
+
+| Stage | Requested compute policy in v0.17.6 |
+| --- | --- |
+| Static/dynamic Albert, PostAlbert, Alignment, Prosody, masked decoder | `.cpuAndNeuralEngine` |
+| Fast waveform generator | `.cpuAndGPU` |
+| Native source/STFT | CPU / Accelerate (outside Core ML) |
+| Long-input fallback Vocoder | `.cpuAndNeuralEngine` |
+| Long-input fallback Noise / Tail | `.cpuAndGPU` |
+
+This is hybrid routing, not `.all`. Allowed devices are not a guarantee that
+all operations execute on one device; CPU fallback is permitted. There is no
+strict ANE-only Core ML compute policy. The public v3 API retains this fixed
+routing; the policy overrides below were local diagnostic changes.
+
+Across the three language variants, `MLComputePlan` preferred ANE for about
+**98.8% of estimated operation cost in static Albert-64** and approximately
+**100% in DecoderPre-200**; the source/generator plan preferred GPU for about
+**100%**. PostAlbert, Alignment and fp32 Prosody preferred CPU in this audit.
+These percentages are **estimated cost weights within individual graphs**, not
+op counts, measured utilization, wall-time shares or a runtime execution trace.
+The 32-token and 120-frame buckets are not covered by those percentages.
+
+A separate real-input check measured hybrid medians of **49.45 / 35.85 / 53.97 ms**
+for English / Japanese / Mandarin. Forcing `.cpuAndNeuralEngine` throughout
+measured **511.40 / 474.45 / 584.19 ms**. Both `.all` and `.cpuAndGPU` hit
+`GPURNNOps.mm: JIT not supported` during Prosody on the second warmup in all
+three cases. See the [timing protocol and raw records](TTS/Benchmarks.md#compute-policy-comparison).
+
+**Interpreting asitop:** the live demo performs short bursts, while the observed
+powermetrics collector sampled roughly once per second. Samples near three demo
+clicks reported about **30.0 / 9.7 / 11.7 mW** of system-wide ANE power for
+English / Japanese / Mandarin. Those observations are not synchronized per-process
+energy measurements and are separate from the compute-policy timing run.
+The installed asitop display rounded low power to `0.0 W` / `0%`; a local viewer
+showed mW and the maximum observed sample over 60 seconds. That maximum is still
+a sampled average, not an instantaneous utilization peak. Neither those readings
+nor a compute plan establish which Kokoro operations actually ran on ANE;
+process-attributed runtime tracing remains outstanding.
+[Compute-plan records](TTS/Measurements/KokoroV3/compute-placement.json) and
+[system-wide power samples](TTS/Measurements/KokoroV3/ane-latest-clicks.json)
+preserve the separate sources for those observations.
+
+### Kokoro ANE (legacy seven-stage capability profile)
+
+Historical June profile under `.cpuAndNeuralEngine` throughout. Percentages are
+preferred-device operation counts, not production utilization or v3 routing.
+
 | Component | ANE | GPU | CPU | ops | Size | Lat ms |
 |-----------|----:|----:|----:|----:|-----:|-------:|
 | Albert | 94% | 0% | 6% | 310 | 6 MB | 6.5 |

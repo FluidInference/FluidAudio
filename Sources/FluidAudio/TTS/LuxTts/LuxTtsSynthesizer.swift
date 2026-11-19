@@ -1,3 +1,4 @@
+#if TTS
 import Accelerate
 @preconcurrency import CoreML
 import Foundation
@@ -379,3 +380,4 @@ struct LuxTtsSynthesizer {
         }
     }
 }
+#endif

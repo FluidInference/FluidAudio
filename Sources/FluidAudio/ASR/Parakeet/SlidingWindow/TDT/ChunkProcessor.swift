@@ -20,12 +20,40 @@ struct ChunkProcessor {
     struct ChunkStartDecision {
         let start: Int
         let useWarmupPrefix: Bool
+        /// The start sits in a pause (near-silence boundary), so the window
+        /// before it can end here instead of running its full length when
+        /// shorter windows are cheaper (`AsrManager.hasEncoderLadder`).
+        var pauseCut: Bool = false
     }
 
     // Stateless chunking aligned with CoreML reference:
     // - process ~14.96s of audio per window (frame-aligned) to stay under encoder limit
     // - 2.0s overlap (frame-aligned) to give the decoder slack when merging windows
     let overlapSeconds: Double = 2.0
+
+    /// Frames a token must sit past the right window's decode start before
+    /// its timing is trusted outright over the left window's copy (6 frames
+    /// = 480 ms). Emission times are stable from about 0.5 s into a window
+    /// and run early in its last ~1.4 s — see "Seam Timing" in
+    /// Documentation/ASR/LongTranscription.md. Inside the guard the copy
+    /// farther from its own window's edge wins, so a seam with only the
+    /// minimum overlap still gets the better of the two.
+    static let seamTimingHeadGuardFrames: Int = 6
+
+    /// A decoded window's extent in global encoder frames: where its decoder
+    /// started (warm-up prefix included — that is where the head bias
+    /// begins, not the first emitted frame) and where the audio it saw ended.
+    struct WindowFrames: Equatable {
+        let decodeStart: Int
+        let end: Int
+    }
+
+    /// The two windows either side of a seam, for the seam timing rule in
+    /// `mergeUsingMatches`. `nil` at a call site means the rule is off.
+    struct SeamWindows: Equatable {
+        let left: WindowFrames
+        let right: WindowFrames
+    }
 
     /// 80ms prepend from the previous chunk so the encoder's convolutions
     /// have left context (blank-first-frames fix, PR #264). Opt out via
@@ -101,6 +129,130 @@ struct ChunkProcessor {
         return max(defaultWarmupSamples, min(available, fill))
     }
 
+    /// One window of the dispatch plan: everything `process()` needs to
+    /// read, decode, and report a chunk. The plan is fixed before any task
+    /// is dispatched, so it is the single source of truth for which windows
+    /// decode and for the `windowCount` the host sees.
+    struct PlannedWindow: Equatable {
+        let index: Int
+        /// First sample the window emits tokens for.
+        let start: Int
+        /// Real-audio prefix decoded with its tokens suppressed (v3 no-mel
+        /// warmup, or the end-aligned backfill of a short final window).
+        let warmupSamples: Int
+        /// Mel/STFT context the decoder skips (default path only).
+        let contextSamples: Int
+        /// Where the window's visible span ends (drives host progress).
+        let chunkEnd: Int
+        /// Last sample fed to the encoder: `chunkEnd`, cut back to the last
+        /// speech-bearing frame on the final window or to the next pause.
+        let audioEnd: Int
+        let isLastChunk: Bool
+
+        var contextStart: Int { start - max(warmupSamples, contextSamples) }
+        var chunkStartOffset: Int { warmupSamples > 0 ? contextStart : start }
+        var emitTokensAfterFrame: Int? {
+            warmupSamples > 0 ? start / ASRConstants.samplesPerEncoderFrame : nil
+        }
+        var frames: WindowFrames {
+            WindowFrames(
+                decodeStart: chunkStartOffset / ASRConstants.samplesPerEncoderFrame,
+                end: audioEnd / ASRConstants.samplesPerEncoderFrame)
+        }
+    }
+
+    /// Lay out every window `process()` will decode. Follows `chunkStarts`
+    /// while they last, then keeps striding until a window's visible span
+    /// reaches EOF (that window is end-aligned and is the last one). Stops
+    /// early only when a window would hold no audio: a final window that
+    /// starts past the last speech-bearing frame, or a pause-cut window
+    /// that would end where it starts.
+    static func planWindows(
+        chunkStarts: [ChunkStartDecision],
+        chunkSamples: Int,
+        strideSamples: Int,
+        warmupPrefixSamples: Int,
+        melContextSamples: Int,
+        totalSamples: Int,
+        speechEnd: Int,
+        endAligned: Bool,
+        pauseCutWindows: Bool
+    ) -> [PlannedWindow] {
+        var plan: [PlannedWindow] = []
+        var decision = chunkStarts.first ?? ChunkStartDecision(start: 0, useWarmupPrefix: false)
+        var chunkStart = decision.start
+        var chunkIndex = 0
+
+        while chunkStart < totalSamples {
+            let defaultWarmupSamples =
+                chunkIndex > 0 && decision.useWarmupPrefix
+                ? min(warmupPrefixSamples, chunkStart) : 0
+            // A short final chunk fills its window backwards with real
+            // audio instead of zero padding (issue #747); V2-family
+            // decoders can't suppress the prefix and keep the old layout.
+            let warmupSamples =
+                endAligned
+                ? lastChunkWarmupSamples(
+                    chunkStart: chunkStart,
+                    defaultWarmupSamples: defaultWarmupSamples,
+                    chunkSamples: chunkSamples,
+                    totalSamples: totalSamples,
+                    speechEndSamples: speechEnd)
+                : defaultWarmupSamples
+            let visibleChunkSamples = max(
+                ASRConstants.samplesPerEncoderFrame,
+                chunkSamples - warmupSamples
+            )
+            let candidateEnd = chunkStart + visibleChunkSamples
+            let isLastChunk = candidateEnd >= totalSamples
+            let chunkEnd = isLastChunk ? totalSamples : candidateEnd
+
+            if chunkEnd <= chunkStart {
+                break
+            }
+            // The final window's audio stops at the last speech-bearing
+            // frame — a window ending inside a dead-silence run decodes
+            // degenerately. A pure-silence tail has nothing to decode.
+            var audioEnd = isLastChunk && endAligned ? min(chunkEnd, speechEnd) : chunkEnd
+            if pauseCutWindows, !isLastChunk, chunkIndex + 1 < chunkStarts.count,
+                chunkStarts[chunkIndex + 1].pauseCut
+            {
+                audioEnd = min(audioEnd, chunkStarts[chunkIndex + 1].start)
+            }
+            if audioEnd <= chunkStart {
+                break
+            }
+
+            // In the default path, contextSamples means mel/STFT context
+            // and is skipped by the decoder. In v3/no-mel mode, the
+            // warmup prefix is decoded from frame 0 and only its emitted
+            // tokens are suppressed.
+            let contextSamples = warmupSamples > 0 ? 0 : (chunkIndex > 0 ? melContextSamples : 0)
+            plan.append(
+                PlannedWindow(
+                    index: chunkIndex,
+                    start: chunkStart,
+                    warmupSamples: warmupSamples,
+                    contextSamples: contextSamples,
+                    chunkEnd: chunkEnd,
+                    audioEnd: audioEnd,
+                    isLastChunk: isLastChunk))
+            chunkIndex += 1
+
+            if isLastChunk {
+                break
+            }
+            if chunkIndex < chunkStarts.count {
+                decision = chunkStarts[chunkIndex]
+                chunkStart = decision.start
+            } else {
+                chunkStart += strideSamples
+                decision = ChunkStartDecision(start: chunkStart, useWarmupPrefix: false)
+            }
+        }
+        return plan
+    }
+
     /// Last speech-bearing sample of the recording: `totalSamples` minus
     /// the trailing run of frames whose RMS sits below `speechRmsFloor` —
     /// below the quietest real speech, so nothing transcribable is
@@ -132,7 +284,7 @@ struct ChunkProcessor {
     /// prefix twice. V2-family models keep the zero-padded final window.
     static func supportsSuppressedPrefix(_ version: AsrModelVersion?) -> Bool {
         switch version {
-        case .v3, .redux, .ultra, .phonon2, .tdtJa: return true
+        case .v3, .redux, .ultra, .phonon2, .phonon25, .bark3, .bark3Clean, .tdtJa: return true
         default: return false
         }
     }
@@ -164,7 +316,8 @@ struct ChunkProcessor {
         warmupPrefixSamples: Int,
         chunkSamples: Int,
         strideSamples: Int,
-        preferSilenceAlignment: Bool
+        preferSilenceAlignment: Bool,
+        preferLatePause: Bool = false
     ) throws -> [ChunkStartDecision] {
         guard preferSilenceAlignment || warmupPrefixSamples > 0 else {
             return regularChunkStarts(strideSamples: strideSamples)
@@ -172,7 +325,8 @@ struct ChunkProcessor {
         return try silenceAlignedChunkStarts(
             chunkSamples: chunkSamples,
             strideSamples: strideSamples,
-            canUseWarmupPrefix: warmupPrefixSamples > 0
+            canUseWarmupPrefix: warmupPrefixSamples > 0,
+            preferLatePause: preferLatePause
         )
     }
 
@@ -186,10 +340,92 @@ struct ChunkProcessor {
         return starts
     }
 
+    /// Earliest cut of the late-pause rule, before the window's end (10 s of a
+    /// 15 s window): a pause-cut window is encoded at its own length, so the
+    /// later the cut the fewer windows the recording takes.
+    static let latePauseBandSeconds: Double = 5.0
+
+    /// The window's latest pause: the midpoint of the last run of at least
+    /// `latePauseMinimumFrames` consecutive quiet frames inside the band's
+    /// final `latePauseBandSeconds`. Quiet is the reference engines' gate,
+    /// RMS below 0.18 × the window's peak frame RMS (and a −48 dBFS floor),
+    /// which admits breath pauses, not only dead silence. `nil` when the band
+    /// has no such run; the caller then falls back to the overlap rule.
+    static let latePauseMinimumFrames = 3
+    static let latePauseGateRatio: Float = 0.18
+    static let latePauseFloorRMS: Float = 0.004
+
+    /// Sum of squares of every 80 ms encoder frame of the recording, one
+    /// pass over the audio. `boundaryEnergyScore(centeredAt: f × frame,
+    /// halfWindowSamples: frame)` is the mean of frames f-1 and f.
+    func frameEnergySums() throws -> [Float] {
+        let frameSamples = ASRConstants.samplesPerEncoderFrame
+        let frameCount = (totalSamples + frameSamples - 1) / frameSamples
+        var sums = [Float](repeating: 0, count: frameCount)
+        let blockFrames = 256
+        var frame = 0
+        while frame < frameCount {
+            let frames = min(blockFrames, frameCount - frame)
+            let offset = frame * frameSamples
+            let samples = try readSamples(offset: offset, count: min(frames * frameSamples, totalSamples - offset))
+            samples.withUnsafeBufferPointer { buffer in
+                for index in 0..<frames {
+                    let start = index * frameSamples
+                    let end = min(start + frameSamples, buffer.count)
+                    var sum: Float = 0
+                    for sample in buffer[start..<end] { sum += sample * sample }
+                    sums[frame + index] = sum
+                }
+            }
+            frame += frames
+        }
+        return sums
+    }
+
+    func latestPauseCut(previousStart: Int, chunkSamples: Int, frameEnergySums sums: [Float]) -> Int? {
+        let frameSamples = ASRConstants.samplesPerEncoderFrame
+        let windowEnd = min(previousStart + chunkSamples, totalSamples) - frameSamples
+        let bandStart = max(
+            previousStart + frameSamples,
+            previousStart + chunkSamples - Int(Self.latePauseBandSeconds * Double(ASRConstants.sampleRate)))
+        guard windowEnd > bandStart else { return nil }
+        // Frame energies over the whole window set the gate; only the band is cut.
+        // The score at a frame boundary is the mean energy of the two frames around it.
+        var energies: [(start: Int, energy: Float)] = []
+        var frame = (previousStart + frameSamples) / frameSamples
+        while frame * frameSamples <= windowEnd, frame < sums.count {
+            energies.append((frame * frameSamples, (sums[frame - 1] + sums[frame]) / Float(2 * frameSamples)))
+            frame += 1
+        }
+        guard let peak = energies.map(\.energy).max(), peak > 0 else { return nil }
+        let gateRMS = max(Self.latePauseFloorRMS, Self.latePauseGateRatio * peak.squareRoot())
+        let gate = gateRMS * gateRMS
+        let band = energies.filter { $0.start >= bandStart }
+        guard band.count >= Self.latePauseMinimumFrames else { return nil }
+        // Walk back from the end of the band to the last quiet run.
+        var runEnd = band.count - 1
+        while runEnd >= 0 {
+            guard band[runEnd].energy <= gate else {
+                runEnd -= 1
+                continue
+            }
+            var runStart = runEnd
+            while runStart > 0, band[runStart - 1].energy <= gate {
+                runStart -= 1
+            }
+            if runEnd - runStart + 1 >= Self.latePauseMinimumFrames {
+                return band[(runStart + runEnd) / 2].start
+            }
+            runEnd = runStart - 1
+        }
+        return nil
+    }
+
     func silenceAlignedChunkStarts(
         chunkSamples: Int,
         strideSamples: Int,
-        canUseWarmupPrefix: Bool
+        canUseWarmupPrefix: Bool,
+        preferLatePause: Bool = false
     ) throws -> [ChunkStartDecision] {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
         let silenceSearchRadiusFrames = max(1, Int((4.0 * Double(ASRConstants.sampleRate)) / Double(frameSamples)))
@@ -201,7 +437,17 @@ struct ChunkProcessor {
         var previousStart = 0
         var target = strideSamples
 
+        let frameEnergySums = preferLatePause ? try frameEnergySums() : []
         while target < totalSamples {
+            if preferLatePause,
+                let cut = latestPauseCut(
+                    previousStart: previousStart, chunkSamples: chunkSamples, frameEnergySums: frameEnergySums)
+            {
+                starts.append(ChunkStartDecision(start: cut, useWarmupPrefix: false, pauseCut: true))
+                previousStart = cut
+                target = cut + strideSamples
+                continue
+            }
             let targetFrame = target / frameSamples
             let latestCoveredStart = previousStart + chunkSamples - minimumOverlapSamples
             let targetStart = min(max(targetFrame * frameSamples, previousStart + frameSamples), latestCoveredStart)
@@ -217,6 +463,7 @@ struct ChunkProcessor {
 
             var bestStart: Int
             var useWarmupPrefix = false
+            var pauseCut = false
             if foundNearSilence {
                 let shouldWarmup =
                     canUseWarmupPrefix ? (try shouldUseWarmupPrefix(at: silenceCandidate.start)) : false
@@ -238,6 +485,7 @@ struct ChunkProcessor {
                 } else {
                     bestStart = silenceCandidate.start
                     useWarmupPrefix = shouldWarmup
+                    pauseCut = true
                 }
             } else {
                 let valleyCandidate = try bestBoundaryCandidate(
@@ -252,12 +500,14 @@ struct ChunkProcessor {
 
             if bestStart <= previousStart {
                 bestStart = min(previousStart + strideSamples, totalSamples)
+                pauseCut = false
             }
 
             starts.append(
                 ChunkStartDecision(
                     start: bestStart,
-                    useWarmupPrefix: useWarmupPrefix
+                    useWarmupPrefix: useWarmupPrefix,
+                    pauseCut: pauseCut
                 )
             )
             previousStart = bestStart
@@ -431,13 +681,46 @@ struct ChunkProcessor {
         ).map { ($0.start, $0.useWarmupPrefix) }
     }
 
+    /// The windows `process()` would dispatch for this audio, laid out the
+    /// same way `process()` does it (same chunk starts, end alignment and
+    /// speech-end rule).
+    internal func plannedWindowsForTesting(
+        melChunkContext: Bool,
+        modelVersion: AsrModelVersion?,
+        pauseCutWindows: Bool = false
+    ) throws -> [PlannedWindow] {
+        let layout = chunkLayout(melChunkContext: melChunkContext, modelVersion: modelVersion)
+        let chunkStarts = try chunkStarts(
+            warmupPrefixSamples: layout.warmupPrefixSamples,
+            chunkSamples: layout.chunkSamples,
+            strideSamples: layout.strideSamples,
+            preferSilenceAlignment: !melChunkContext && modelVersion?.isV3Family == true,
+            preferLatePause: pauseCutWindows
+        )
+        let endAligned = Self.supportsSuppressedPrefix(modelVersion)
+        return Self.planWindows(
+            chunkStarts: chunkStarts,
+            chunkSamples: layout.chunkSamples,
+            strideSamples: layout.strideSamples,
+            warmupPrefixSamples: layout.warmupPrefixSamples,
+            melContextSamples: layout.melContextSamples,
+            totalSamples: totalSamples,
+            speechEnd: endAligned ? try speechEndSamples() : totalSamples,
+            endAligned: endAligned,
+            pauseCutWindows: pauseCutWindows
+        )
+    }
+
     internal func mergeTokenWindowsForTesting(
         left: [(token: Int, timestamp: Int, confidence: Float, duration: Int)],
         right: [(token: Int, timestamp: Int, confidence: Float, duration: Int)],
         spliceSafeTokenIds: Set<Int>? = nil,
-        caseVariantIds: [Int: Int]? = nil
+        caseVariantIds: [Int: Int]? = nil,
+        seam: SeamWindows? = nil
     ) -> [(token: Int, timestamp: Int, confidence: Float, duration: Int)] {
-        mergeChunks(left, right, spliceSafeTokenIds: spliceSafeTokenIds, caseVariantIds: caseVariantIds)
+        mergeChunks(
+            left, right, spliceSafeTokenIds: spliceSafeTokenIds, caseVariantIds: caseVariantIds,
+            seam: seam)
     }
     #endif
 
@@ -488,23 +771,43 @@ struct ChunkProcessor {
         let warmupPrefixSamples = layout.warmupPrefixSamples
         let chunkSamples = layout.chunkSamples
         let strideSamples = layout.strideSamples
+        // With a ladder encoder a window that ends at the pause the next one
+        // starts from costs only the audio it holds, and the pause makes the
+        // overlap unnecessary at that seam.
+        let pauseCutWindows = await manager.hasEncoderLadder
         let chunkStarts = try self.chunkStarts(
             warmupPrefixSamples: warmupPrefixSamples,
             chunkSamples: chunkSamples,
             strideSamples: strideSamples,
-            preferSilenceAlignment: !melChunkContext && modelVersion?.isV3Family == true
+            preferSilenceAlignment: !melChunkContext && modelVersion?.isV3Family == true,
+            preferLatePause: pauseCutWindows
         )
 
-        var chunkOutputs: [[TokenWindow]?] = []
-        var availableWorkers = Array(workers.indices)
-        var inFlight = 0
-        var chunkDecision = chunkStarts.first ?? ChunkStartDecision(start: 0, useWarmupPrefix: false)
-        var chunkStart = chunkDecision.start
-        var chunkIndex = 0
         let endAligned = Self.supportsSuppressedPrefix(modelVersion)
         // The final window must end at the last speech-bearing frame, not
         // EOF — see `speechEndSamples()`.
         let speechEnd = endAligned ? try speechEndSamples() : totalSamples
+        // Fixed before any task starts, so `windowCount` is the number of
+        // windows that decode rather than the number of planned starts.
+        let plan = Self.planWindows(
+            chunkStarts: chunkStarts,
+            chunkSamples: chunkSamples,
+            strideSamples: strideSamples,
+            warmupPrefixSamples: warmupPrefixSamples,
+            melContextSamples: melContextSamples,
+            totalSamples: totalSamples,
+            speechEnd: speechEnd,
+            endAligned: endAligned,
+            pauseCutWindows: pauseCutWindows
+        )
+
+        var chunkOutputs: [[TokenWindow]?] = Array(repeating: nil, count: plan.count)
+        // Each chunk's window in global frames, kept in step with
+        // `chunkOutputs` for the seam timing rule in the merge.
+        let chunkWindows = plan.map(\.frames)
+        let seamTimingRealignment = await manager.seamTimingRealignment
+        var availableWorkers = Array(workers.indices)
+        var inFlight = 0
 
         func collectNextResult(
             _ group: inout ThrowingTaskGroup<TaskResult, Error>
@@ -514,55 +817,18 @@ struct ChunkProcessor {
             chunkOutputs[finished.index] = finished.tokens
             availableWorkers.append(finished.workerIndex)
             inFlight -= 1
+            let window = chunkWindows[finished.index]
+            await manager.reportWindow(
+                index: finished.index, windowCount: plan.count,
+                startFrame: window.decodeStart, endFrame: window.end,
+                tokenIds: finished.tokens.map(\.token))
         }
 
         try await withThrowingTaskGroup(of: TaskResult.self) { group in
-            while chunkStart < totalSamples {
+            for window in plan {
                 try Task.checkCancellation()
-                let defaultWarmupSamples =
-                    chunkIndex > 0 && chunkDecision.useWarmupPrefix
-                    ? min(warmupPrefixSamples, chunkStart) : 0
-                // A short final chunk fills its window backwards with real
-                // audio instead of zero padding (issue #747); V2-family
-                // decoders can't suppress the prefix and keep the old layout.
-                let warmupSamples =
-                    endAligned
-                    ? Self.lastChunkWarmupSamples(
-                        chunkStart: chunkStart,
-                        defaultWarmupSamples: defaultWarmupSamples,
-                        chunkSamples: chunkSamples,
-                        totalSamples: totalSamples,
-                        speechEndSamples: speechEnd)
-                    : defaultWarmupSamples
-                let visibleChunkSamples = max(
-                    ASRConstants.samplesPerEncoderFrame,
-                    chunkSamples - warmupSamples
-                )
-                let candidateEnd = chunkStart + visibleChunkSamples
-                let isLastChunk = candidateEnd >= totalSamples
-                let chunkEnd = isLastChunk ? totalSamples : candidateEnd
-
-                if chunkEnd <= chunkStart {
-                    break
-                }
-                // The final window's audio stops at the last speech-bearing
-                // frame — a window ending inside a dead-silence run decodes
-                // degenerately. A pure-silence tail has nothing to decode.
-                let audioEnd = isLastChunk && endAligned ? min(chunkEnd, speechEnd) : chunkEnd
-                if audioEnd <= chunkStart {
-                    break
-                }
-
-                // In the default path, contextSamples means mel/STFT context
-                // and is skipped by the decoder. In v3/no-mel mode, the
-                // warmup prefix is decoded from frame 0 and only its emitted
-                // tokens are suppressed.
-                let contextSamples = warmupSamples > 0 ? 0 : (chunkIndex > 0 ? melContextSamples : 0)
-                let contextStart = chunkStart - max(warmupSamples, contextSamples)
-                let chunkLengthWithContext = audioEnd - contextStart
-                let chunkSamplesArray = try readSamples(offset: contextStart, count: chunkLengthWithContext)
-                let emitTokensAfterFrame =
-                    warmupSamples > 0 ? chunkStart / ASRConstants.samplesPerEncoderFrame : nil
+                let chunkSamplesArray = try readSamples(
+                    offset: window.contextStart, count: window.audioEnd - window.contextStart)
 
                 if availableWorkers.isEmpty {
                     try await collectNextResult(&group)
@@ -573,9 +839,6 @@ struct ChunkProcessor {
 
                 let workerIndex = availableWorkers.removeFirst()
                 let worker = workers[workerIndex]
-                let index = chunkIndex
-                let chunkStartOffset = warmupSamples > 0 ? contextStart : chunkStart
-                chunkOutputs.append(nil)
 
                 group.addTask {
                     var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
@@ -585,15 +848,15 @@ struct ChunkProcessor {
                         try await Self
                         .transcribeChunk(
                             samples: chunkSamplesArray,
-                            contextSamples: contextSamples,
-                            chunkStart: chunkStartOffset,
-                            isLastChunk: isLastChunk,
+                            contextSamples: window.contextSamples,
+                            chunkStart: window.chunkStartOffset,
+                            isLastChunk: window.isLastChunk,
                             using: worker,
                             decoderState: &decoderState,
                             maxModelSamples: maxModelSamples,
                             language: language,
-                            emitTokensAfterFrame: emitTokensAfterFrame,
-                            initialTimeIndexOverride: emitTokensAfterFrame == nil ? nil : 0
+                            emitTokensAfterFrame: window.emitTokensAfterFrame,
+                            initialTimeIndexOverride: window.emitTokensAfterFrame == nil ? nil : 0
                         )
 
                     guard
@@ -613,26 +876,13 @@ struct ChunkProcessor {
                         (token: $0.0.0.0, timestamp: $0.0.0.1, confidence: $0.0.1, duration: $0.1)
                     }
 
-                    return TaskResult(index: index, tokens: windowData, workerIndex: workerIndex)
+                    return TaskResult(index: window.index, tokens: windowData, workerIndex: workerIndex)
                 }
                 inFlight += 1
-                chunkIndex += 1
 
-                if let progressHandler, !isLastChunk {
-                    let progress = min(1.0, max(0.0, Double(chunkEnd) / Double(totalSamples)))
+                if let progressHandler, !window.isLastChunk {
+                    let progress = min(1.0, max(0.0, Double(window.chunkEnd) / Double(totalSamples)))
                     await progressHandler(progress)
-                }
-
-                if isLastChunk {
-                    break
-                }
-
-                if chunkIndex < chunkStarts.count {
-                    chunkDecision = chunkStarts[chunkIndex]
-                    chunkStart = chunkDecision.start
-                } else {
-                    chunkStart += strideSamples
-                    chunkDecision = ChunkStartDecision(start: chunkStart, useWarmupPrefix: false)
                 }
 
                 if availableWorkers.isEmpty && inFlight > 0 {
@@ -646,6 +896,8 @@ struct ChunkProcessor {
             }
         }
 
+        // Every slot is filled once the group has drained, so the outputs
+        // and `chunkWindows` share their indices.
         let orderedChunkOutputs = chunkOutputs.compactMap { $0 }
 
         guard var mergedTokens = orderedChunkOutputs.first else {
@@ -661,14 +913,16 @@ struct ChunkProcessor {
 
         if orderedChunkOutputs.count > 1 {
             let vocabulary = await manager.vocabulary
-            let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary)
+            let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary, modelVersion: modelVersion)
             let caseVariantIds = Self.caseVariantCanonicalIds(vocabulary: vocabulary)
-            for chunk in orderedChunkOutputs.dropFirst() {
+            for (index, chunk) in orderedChunkOutputs.enumerated().dropFirst() {
                 mergedTokens = mergeChunks(
                     mergedTokens,
                     chunk,
                     spliceSafeTokenIds: spliceSafeTokenIds,
-                    caseVariantIds: caseVariantIds
+                    caseVariantIds: caseVariantIds,
+                    seam: seamTimingRealignment
+                        ? SeamWindows(left: chunkWindows[index - 1], right: chunkWindows[index]) : nil
                 )
             }
             // The pairwise merges above already yield tokens in linear (text)
@@ -694,15 +948,16 @@ struct ChunkProcessor {
         // Documentation/ASR/LongTranscription.md.
         if orderedChunkOutputs.count > 1, mergedTokens.count > 1, await manager.seamGapRepair {
             let vocabulary = await manager.vocabulary
-            let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary)
+            let spliceSafeTokenIds = Self.spliceSafeTokenIds(vocabulary: vocabulary, modelVersion: modelVersion)
             let minGapSeconds = await manager.seamGapRepairMinGapSeconds
             let speechRmsThreshold = try adaptiveSpeechRmsThreshold()
 
             mergedTokens = try await repairSeamGaps(
                 in: mergedTokens,
-                using: workers[0],
+                using: workers,
                 decoderLayers: decoderLayers,
                 maxModelSamples: maxModelSamples,
+                ladderSeconds: await manager.encoderLadderSeconds,
                 minGapSeconds: minGapSeconds,
                 speechRmsThreshold: speechRmsThreshold,
                 spliceSafeTokenIds: spliceSafeTokenIds,
@@ -824,6 +1079,15 @@ struct ChunkProcessor {
             ids.insert(id)
         }
         return ids
+    }
+
+    /// The splice guard for one model. Japanese is written without word spaces, so no piece marks a word
+    /// start: the guard would read every piece as a mid-word continuation and drop tokens up to the next
+    /// punctuation mark ("愛をつかいます。" became "愛をつ。"). Nil merges by time and token match alone, which
+    /// is correct for an unspaced script (a token is never split across a seam).
+    static func spliceSafeTokenIds(vocabulary: [Int: String], modelVersion: AsrModelVersion?) -> Set<Int>? {
+        if modelVersion == .tdtJa { return nil }
+        return spliceSafeTokenIds(vocabulary: vocabulary)
     }
 
     /// Maps token IDs with a case-only twin to a shared canonical ID so the
@@ -967,11 +1231,14 @@ struct ChunkProcessor {
         }
     }
 
+    /// `seam` has no default: a caller that does not realign seam timing
+    /// says so with `nil` rather than opting out by omission.
     func mergeChunks(
         _ left: [TokenWindow],
         _ right: [TokenWindow],
         spliceSafeTokenIds: Set<Int>? = nil,
-        caseVariantIds: [Int: Int]? = nil
+        caseVariantIds: [Int: Int]? = nil,
+        seam: SeamWindows?
     ) -> [TokenWindow] {
         if left.isEmpty { return right }
         if right.isEmpty { return left }
@@ -1037,7 +1304,8 @@ struct ChunkProcessor {
                 overlapRight: overlapRight,
                 left: left,
                 right: right,
-                spliceSafeTokenIds: spliceSafeTokenIds
+                spliceSafeTokenIds: spliceSafeTokenIds,
+                seam: seam
             )
         }
 
@@ -1064,7 +1332,8 @@ struct ChunkProcessor {
             overlapRight: overlapRight,
             left: left,
             right: right,
-            spliceSafeTokenIds: spliceSafeTokenIds
+            spliceSafeTokenIds: spliceSafeTokenIds,
+            seam: seam
         )
     }
 
@@ -1097,10 +1366,32 @@ struct ChunkProcessor {
         overlapRight: [IndexedToken],
         left: [TokenWindow],
         right: [TokenWindow],
-        spliceSafeTokenIds: Set<Int>?
+        spliceSafeTokenIds: Set<Int>?,
+        seam: SeamWindows?
     ) -> [TokenWindow] {
         let leftIndices = matches.map { overlapLeft[$0.0].index }
         let rightIndices = matches.map { overlapRight[$0.1].index }
+
+        // Both windows decoded each matched token. The left copy sits in the
+        // tail of its window, where emission times run early; once the right
+        // copy is clear of its own window's head its timing is the reliable
+        // one, and inside the head the copy farther from its window's edge
+        // is the better bet. Identity (piece, casing, confidence) stays with
+        // the left window, which had real left context — see "Seam Timing"
+        // in Documentation/ASR/LongTranscription.md. Resolved up front so the
+        // unmatched tokens between two matches can be moved with them.
+        let resolved: [TokenWindow] = (0..<matches.count).map { idx in
+            var merged = left[leftIndices[idx]]
+            guard let seam else { return merged }
+            let rightCopy = right[rightIndices[idx]]
+            let framesIntoRightHead = rightCopy.timestamp - seam.right.decodeStart
+            let framesFromLeftTail = seam.left.end - merged.timestamp
+            if framesIntoRightHead >= Self.seamTimingHeadGuardFrames || framesIntoRightHead > framesFromLeftTail {
+                merged.timestamp = rightCopy.timestamp
+                merged.duration = rightCopy.duration
+            }
+            return merged
+        }
 
         var result: [TokenWindow] = []
 
@@ -1111,8 +1402,7 @@ struct ChunkProcessor {
         for idx in 0..<matches.count {
             let leftIndex = leftIndices[idx]
             let rightIndex = rightIndices[idx]
-
-            result.append(left[leftIndex])
+            result.append(resolved[idx])
 
             guard idx < matches.count - 1 else { continue }
 
@@ -1122,11 +1412,21 @@ struct ChunkProcessor {
             let gapLeft = nextLeftIndex > leftIndex + 1 ? Array(left[(leftIndex + 1)..<nextLeftIndex]) : []
             let gapRight = nextRightIndex > rightIndex + 1 ? Array(right[(rightIndex + 1)..<nextRightIndex]) : []
 
-            if gapRight.count > gapLeft.count {
-                result.append(contentsOf: gapRight)
-            } else {
-                result.append(contentsOf: gapLeft)
+            var gap = gapRight.count > gapLeft.count ? gapRight : gapLeft
+            if seam != nil {
+                // The matches either side may have moved to the right
+                // window's clock. Left-sourced gap tokens move with the
+                // match before them, and every gap token is held between
+                // its neighbours so the seam stays monotonic without the
+                // later clamp flattening a word to zero length.
+                let shift = gapRight.count > gapLeft.count ? 0 : resolved[idx].timestamp - left[leftIndex].timestamp
+                let lower = resolved[idx].timestamp
+                let upper = resolved[idx + 1].timestamp
+                for gapIndex in gap.indices {
+                    gap[gapIndex].timestamp = min(max(gap[gapIndex].timestamp + shift, lower), upper)
+                }
             }
+            result.append(contentsOf: gap)
         }
 
         if let lastRight = rightIndices.last, lastRight + 1 < right.count {
@@ -1238,9 +1538,41 @@ struct ChunkProcessor {
 
     // MARK: - Seam-gap repair (issue #758)
 
-    /// Probe budget per file — backstop against pathological inputs; sizing
-    /// rationale in "Post-Merge Repair Pass" (LongTranscription.md).
-    private var maxSeamGapRepairs: Int { 32 }
+    /// Probe budget — backstop against pathological inputs. Scales with the
+    /// audio: gap-heavy non-English speech (Italian oral history measured at
+    /// ~8 speech-bearing gaps per minute) needs far more than a flat 32 per
+    /// file, while the floor keeps short files fully covered.
+    private var maxSeamGapRepairs: Int {
+        let minutes = Double(totalSamples) / Double(ASRConstants.sampleRate) / 60
+        return max(32, Int(minutes * Double(Self.seamGapRepairsPerMinute)))
+    }
+
+    static let seamGapRepairsPerMinute = 12
+
+    /// Audio replayed either side of a gap in the short probe window. The
+    /// dropped phrase needs its immediate neighbours as context and nothing
+    /// else: a full-length window cold-started at the gap, or centred on it,
+    /// re-drops the same phrase (measured on Italian/German oral history),
+    /// while ±0.8 s recovers it.
+    static let seamGapShortWindowPadSeconds = 0.8
+
+    /// Gaps at least this long also get the full-length placements, the
+    /// seam-drop class the pass was built for (multi-second spans at
+    /// low-SNR seams) and the pass's original minimum gap.
+    static let seamGapFullWindowMinGapSeconds = 1.5
+
+    /// Lowest median token confidence accepted from a probe. Re-decoding a
+    /// gap that holds only noise hallucinates at 0.1–0.5 across the run;
+    /// genuine dropped speech decodes at 0.6–1.0 with the odd weak function
+    /// word ("a" at 0.38 inside "Are you ready? Just a little bit."), which
+    /// a per-token floor would throw away whole.
+    static let seamGapMinMedianConfidence: Float = 0.7
+
+    static func isConfidentSplice(_ candidate: [TokenWindow]) -> Bool {
+        guard !candidate.isEmpty else { return false }
+        let sorted = candidate.map { $0.confidence }.sorted()
+        return sorted[sorted.count / 2] >= seamGapMinMedianConfidence
+    }
 
     // Adaptive speech-gate constants. Per-value rationale (dBFS anchors,
     // clamp structure, percentile choice) lives in the constants table under
@@ -1327,9 +1659,59 @@ struct ChunkProcessor {
         return stream[neighborIndex]
     }
 
-    /// Filter a probe window's tokens to the spliceable run: strictly
-    /// in-gap, word-initial start, edge dedupe of re-heard border words —
-    /// rules and tolerances in "Post-Merge Repair Pass"
+    /// A word's text as the splice rules compare it: pieces joined, the
+    /// word marker, punctuation and diacritics dropped, case folded. A
+    /// piece missing from the vocabulary compares by id.
+    static func comparableWord(_ tokens: [Int], vocabulary: [Int: String]) -> String {
+        var text = ""
+        for token in tokens {
+            guard let piece = vocabulary[token] else {
+                text += "#\(token)"
+                continue
+            }
+            text += piece.unicodeScalars.filter {
+                $0 != "▁" && !CharacterSet.punctuationCharacters.contains($0) && !CharacterSet.symbols.contains($0)
+            }
+            .map(String.init).joined()
+        }
+        return text.folding(options: [.diacriticInsensitive, .caseInsensitive, .widthInsensitive], locale: nil)
+    }
+
+    /// The whole word bordering a gap — every piece of it, not just the
+    /// piece touching the gap — so a probe's re-hearing of that word can be
+    /// recognised whatever piece boundary it happens to land on. `step` -1
+    /// walks left from the token before the gap, +1 walks right from the
+    /// token after it.
+    static func neighborWord(
+        in stream: [TokenWindow],
+        from index: Int,
+        step: Int,
+        spliceSafeTokenIds: Set<Int>?,
+        vocabulary: [Int: String]
+    ) -> (text: String, timestamp: Int) {
+        let touching = wordNeighbor(in: stream, from: index, step: step, vocabulary: vocabulary)
+        guard let safeIds = spliceSafeTokenIds,
+            let touchingIndex = stream.firstIndex(where: {
+                $0.timestamp == touching.timestamp && $0.token == touching.token
+            })
+        else {
+            return (comparableWord([touching.token], vocabulary: vocabulary), touching.timestamp)
+        }
+        func isWordStart(_ i: Int) -> Bool {
+            safeIds.contains(stream[i].token) && !isPunctuationOnlyPiece(stream[i].token, vocabulary: vocabulary)
+        }
+        var start = touchingIndex
+        while start > 0, !isWordStart(start) { start -= 1 }
+        var end = start + 1
+        while end < stream.count, !isWordStart(end) { end += 1 }
+        let pieces = stream[start..<end].map { $0.token }
+        return (comparableWord(pieces, vocabulary: vocabulary), stream[start].timestamp)
+    }
+
+    /// Filter a probe window's tokens to the spliceable run: in-gap words
+    /// (including frame zero at the file boundary), completed when the gap
+    /// end cuts through one, with re-hearings of the bordering words removed
+    /// — rules and tolerances in "Post-Merge Repair Pass"
     /// (LongTranscription.md).
     static func spliceCandidate(
         windowTokens: [Int],
@@ -1338,22 +1720,36 @@ struct ChunkProcessor {
         windowDurations: [Int],
         gapStartFrame: Int,
         gapEndFrame: Int,
-        leadNeighbor: TokenWindow,
-        tailNeighbor: TokenWindow,
+        leadWord: (text: String, timestamp: Int)?,
+        tailWord: (text: String, timestamp: Int),
         spliceSafeTokenIds: Set<Int>?,
         vocabulary: [Int: String]
     ) -> [TokenWindow] {
         let edgeToleranceFrames = 6
-        func samePiece(_ a: Int, _ b: Int) -> Bool {
-            if a == b { return true }
-            guard let pieceA = vocabulary[a], let pieceB = vocabulary[b] else { return false }
-            return pieceA.lowercased() == pieceB.lowercased()
+        let samePositionFrames = 2
+
+        func isPunctuation(_ token: Int) -> Bool {
+            isPunctuationOnlyPiece(token, vocabulary: vocabulary)
+        }
+        // Without a vocabulary every token is its own word.
+        func isWordStart(_ token: Int) -> Bool {
+            guard let safeIds = spliceSafeTokenIds else { return true }
+            return safeIds.contains(token) && !isPunctuation(token)
+        }
+        // A continuation piece, or an apostrophe inside a word ("l" "'" "in…").
+        func continuesWord(at i: Int) -> Bool {
+            guard let safeIds = spliceSafeTokenIds, i < windowTokens.count else { return false }
+            if !safeIds.contains(windowTokens[i]) { return true }
+            return isPunctuation(windowTokens[i]) && i + 1 < windowTokens.count
+                && !safeIds.contains(windowTokens[i + 1])
         }
 
         var candidate: [TokenWindow] = []
+        var lastInGapIndex = -1
         for tokenIndex in 0..<windowTokens.count {
             let timestamp = windowTimestamps[tokenIndex]
-            guard timestamp > gapStartFrame, timestamp < gapEndFrame - 1 else { continue }
+            let afterStart = leadWord == nil ? timestamp >= gapStartFrame : timestamp > gapStartFrame
+            guard afterStart, timestamp < gapEndFrame - 1 else { continue }
             candidate.append(
                 (
                     token: windowTokens[tokenIndex],
@@ -1362,35 +1758,83 @@ struct ChunkProcessor {
                     duration: windowDurations[tokenIndex]
                 )
             )
+            lastInGapIndex = tokenIndex
         }
 
-        if let safeIds = spliceSafeTokenIds {
-            while let first = candidate.first, !safeIds.contains(first.token) {
+        // The gap end can cut through a word ("Dicev" | "ano"): pull in the
+        // pieces that complete it, clamped so they still sort before the
+        // token after the gap. A completion that runs on past the gap end
+        // is the probe hearing the tail word's audio differently
+        // ("nasceamo" against "parliamo"); that word is dropped below.
+        var overran = false
+        var next = lastInGapIndex + 1
+        while lastInGapIndex >= 0, continuesWord(at: next) {
+            if windowTimestamps[next] >= gapEndFrame { overran = true }
+            candidate.append(
+                (
+                    token: windowTokens[next],
+                    timestamp: min(windowTimestamps[next], gapEndFrame - 1),
+                    confidence: windowConfidences[next],
+                    duration: windowDurations[next]
+                )
+            )
+            next += 1
+        }
+
+        // A head fragment (continuation pieces of a word that started before
+        // the gap, or orphaned punctuation) is never spliced.
+        func trimHead() {
+            while let first = candidate.first, !isWordStart(first.token) {
                 candidate.removeFirst()
             }
         }
+        trimHead()
 
-        while let first = candidate.first,
-            samePiece(first.token, leadNeighbor.token),
-            abs(first.timestamp - leadNeighbor.timestamp) <= edgeToleranceFrames
-        {
-            candidate.removeFirst()
+        // Words: a word runs from a word-start piece to the next one, with
+        // its continuation pieces and punctuation attached.
+        func wordRanges() -> [Range<Int>] {
+            guard !candidate.isEmpty else { return [] }
+            var ranges: [Range<Int>] = []
+            var start = 0
+            for i in 1...candidate.count where i == candidate.count || isWordStart(candidate[i].token) {
+                ranges.append(start..<i)
+                start = i
+            }
+            return ranges
         }
-        while let last = candidate.last,
-            samePiece(last.token, tailNeighbor.token),
-            abs(tailNeighbor.timestamp - last.timestamp) <= edgeToleranceFrames
+        func text(_ range: Range<Int>) -> String {
+            comparableWord(candidate[range].map { $0.token }, vocabulary: vocabulary)
+        }
+
+        if overran, let last = wordRanges().last {
+            candidate.removeSubrange(last)
+        }
+
+        // Edge dedupe: the probe re-hears the words either side of the gap,
+        // often on a slightly shifted frame and sometimes as a different
+        // word ("Meu" for "Mio"). The same text within the tolerance, or any
+        // text at the same frames, is the neighbour, not a recovery. Genuine
+        // stutters ("I I") sit beyond the tolerance.
+        func echoesNeighbor(_ range: Range<Int>, _ neighbor: (text: String, timestamp: Int)) -> Bool {
+            let distance = abs(candidate[range.lowerBound].timestamp - neighbor.timestamp)
+            if distance <= samePositionFrames { return true }
+            return !neighbor.text.isEmpty && text(range) == neighbor.text && distance <= edgeToleranceFrames
+        }
+        while let leadWord, let first = wordRanges().first, echoesNeighbor(first, leadWord) {
+            candidate.removeSubrange(first)
+        }
+        while let last = wordRanges().last, echoesNeighbor(last, tailWord) {
+            candidate.removeSubrange(last)
+        }
+
+        // At most one trailing punctuation piece ("grazie.." came from two).
+        while candidate.count >= 2,
+            isPunctuation(candidate[candidate.count - 1].token),
+            isPunctuation(candidate[candidate.count - 2].token)
         {
             candidate.removeLast()
         }
-        // Removing an edge token can expose continuation pieces (or orphaned
-        // punctuation) at the head — re-trim.
-        if let safeIds = spliceSafeTokenIds {
-            while let first = candidate.first,
-                !safeIds.contains(first.token) || isPunctuationOnlyPiece(first.token, vocabulary: vocabulary)
-            {
-                candidate.removeFirst()
-            }
-        }
+        trimHead()
 
         return candidate
     }
@@ -1405,15 +1849,70 @@ struct ChunkProcessor {
     }
     #endif
 
-    /// Re-decode inter-token gaps that plausibly contain dropped speech with
-    /// a fresh seam-free window and splice in only in-gap tokens (issue
+    /// The smallest inter-token gap, in encoder frames, a repair probe looks
+    /// at. The rules for gaps shorter than `seamGapFullWindowMinGapSeconds`
+    /// (skip a gap inside a word, complete a word the gap end cuts through,
+    /// drop re-heard bordering words) need word boundaries. Without a word
+    /// guard (`spliceSafeTokenIds == nil`: tdtJa's unspaced vocabulary, or
+    /// none) every piece counts as a word, and short-gap probes splice
+    /// re-heard neighbour text back in ("モデルモデル", issue #1031), so those
+    /// vocabularies probe only the longer gaps.
+    static func seamGapMinGapFrames(minGapSeconds: Double, spliceSafeTokenIds: Set<Int>?) -> Int {
+        let frameDuration = ASRConstants.secondsPerEncoderFrame
+        let minGapFrames = max(2, Int(minGapSeconds / frameDuration))
+        guard spliceSafeTokenIds == nil else { return minGapFrames }
+        return max(minGapFrames, Int(seamGapFullWindowMinGapSeconds / frameDuration))
+    }
+
+    /// The window placements a gap probe tries, in order, as (start sample,
+    /// length) before clamping to the audio. A multi-second gap (the
+    /// seam-drop class this pass was built for) gets the full-length
+    /// placements first — cold-start AT the gap (replaying the pre-gap noise
+    /// can re-blank), then gap-centred — see "Placement matters" in
+    /// LongTranscription.md. The short window (the gap plus `padSamples`
+    /// either side, padded to the model window by the encoder) is their
+    /// fallback, and the only placement for a shorter gap. Tried first on a
+    /// long gap, it can recover just the gap's tail; the residual front keeps
+    /// the probed start, so no later pass re-probes it.
+    static func seamGapProbePlacements(
+        gapStartSample: Int,
+        gapEndSample: Int,
+        isLongGap: Bool,
+        windowSamples: Int,
+        padSamples: Int
+    ) -> [(start: Int, length: Int)] {
+        var placements: [(start: Int, length: Int)] = []
+        if isLongGap {
+            placements.append((gapStartSample, windowSamples))
+            placements.append(((gapStartSample + gapEndSample) / 2 - windowSamples / 2, windowSamples))
+        }
+        placements.append((gapStartSample - padSamples, gapEndSample - gapStartSample + 2 * padSamples))
+        return placements
+    }
+
+    /// One gap probe of the repair pass: the gap, the words bordering it,
+    /// and the audio of each window placement, in the order they are tried.
+    private struct SeamGapProbe: Sendable {
+        let gapStartFrame: Int
+        let gapEndFrame: Int
+        let leadWord: (text: String, timestamp: Int)?
+        let tailWord: (text: String, timestamp: Int)
+        let placements: [(start: Int, audio: [Float], isLastChunk: Bool)]
+    }
+
+    /// Re-decode gaps between words, or before the first one, that plausibly
+    /// contain dropped speech with a fresh seam-free window and splice in
+    /// only in-gap words (issue
     /// #758). Genuine silence splices nothing. See "Post-Merge Repair Pass"
-    /// in Documentation/ASR/LongTranscription.md.
+    /// in Documentation/ASR/LongTranscription.md. The probes of a pass are
+    /// independent (they read the pre-pass tokens), so they run across the
+    /// worker pool and are applied in gap order.
     private func repairSeamGaps(
         in tokens: [TokenWindow],
-        using manager: AsrManager,
+        using workers: [AsrManager],
         decoderLayers: Int,
         maxModelSamples: Int,
+        ladderSeconds: [Double],
         minGapSeconds: Double,
         speechRmsThreshold: Float,
         spliceSafeTokenIds: Set<Int>?,
@@ -1422,30 +1921,52 @@ struct ChunkProcessor {
     ) async throws -> [TokenWindow] {
         let frameSamples = ASRConstants.samplesPerEncoderFrame
         let frameDuration = ASRConstants.secondsPerEncoderFrame
-        let minGapFrames = max(2, Int(minGapSeconds / frameDuration))
+        let minGapFrames = Self.seamGapMinGapFrames(
+            minGapSeconds: minGapSeconds, spliceSafeTokenIds: spliceSafeTokenIds)
+        let fullWindowMinGapFrames = Int(Self.seamGapFullWindowMinGapSeconds / frameDuration)
         // Same frame-aligned usable window size the chunker uses (no context
-        // reservation — the repair window is decoded standalone).
+        // reservation — the repair window is decoded standalone). With a
+        // ladder encoder the probe runs on its smallest function: the splice
+        // keeps in-gap tokens only and a residual gap gets its own probe in
+        // the next round, so the short window recovers as much for a third
+        // of the encoder time.
+        let probeSamples = ladderSeconds.first.map { min(Int($0 * Double(ASRConstants.sampleRate)), maxModelSamples) }
         let windowSamples = max(
             frameSamples,
-            (maxModelSamples - ASRConstants.melHopSize) / frameSamples * frameSamples
+            ((probeSamples ?? maxModelSamples) - ASRConstants.melHopSize) / frameSamples * frameSamples
         )
+        let padSamples =
+            Int(Self.seamGapShortWindowPadSeconds * Double(ASRConstants.sampleRate))
+            / frameSamples * frameSamples
 
         var working = tokens
         var probes = 0
         var probedGapStarts = Set<Int>()
+        // The opening-window blank is reproduced on v3-family decoding.
+        // Other models retain their existing interior-only repair path.
+        let modelVersion = await workers[0].modelVersion
+        let firstGapIndex = modelVersion?.isV3Family == true ? -1 : 0
         // Iterate so a partial recovery's residual gap (start has moved)
         // gets its own probe; yielded-nothing gaps are memoized and skipped.
         for _ in 0..<3 {
-            var inserts: [TokenWindow] = []
+            var passProbes: [SeamGapProbe] = []
 
-            for index in 0..<(working.count - 1) {
+            for index in firstGapIndex..<(working.count - 1) {
                 guard probes < maxSeamGapRepairs else { break }
 
-                let current = working[index]
+                let current = index >= 0 ? working[index] : nil
                 let next = working[index + 1]
+                // A gap inside a word (slow "mille … novecento" between the
+                // pieces of "1929", or "E" … "'" written for "È") has nothing
+                // to splice: only gaps before a word start are probed.
+                if let safeIds = spliceSafeTokenIds,
+                    !safeIds.contains(next.token) || Self.isPunctuationOnlyPiece(next.token, vocabulary: vocabulary)
+                {
+                    continue
+                }
                 // Conservative end of the current token: its decoded duration
                 // when present, else one frame (mirrors mergeChunks).
-                let gapStartFrame = current.timestamp + max(1, current.duration)
+                let gapStartFrame = current.map { $0.timestamp + max(1, $0.duration) } ?? 0
                 let gapEndFrame = next.timestamp
                 guard gapEndFrame - gapStartFrame >= minGapFrames else { continue }
                 guard !probedGapStarts.contains(gapStartFrame) else { continue }
@@ -1460,65 +1981,84 @@ struct ChunkProcessor {
                 probedGapStarts.insert(gapStartFrame)
                 probes += 1
 
-                // Cold-start AT the gap first (replaying the pre-gap noise
-                // can re-blank), gap-centred fallback — see "Placement
-                // matters" in LongTranscription.md.
-                let gapCenterSample = (gapStartSample + gapEndSample) / 2
-                let placements = [gapStartSample, gapCenterSample - windowSamples / 2]
-                var recovered: [TokenWindow] = []
-
-                for placement in placements {
-                    var windowStart = max(0, min(placement, totalSamples - windowSamples))
+                let candidates = Self.seamGapProbePlacements(
+                    gapStartSample: gapStartSample,
+                    gapEndSample: gapEndSample,
+                    isLongGap: gapEndFrame - gapStartFrame >= fullWindowMinGapFrames,
+                    windowSamples: windowSamples,
+                    padSamples: padSamples
+                )
+                var placements: [(start: Int, audio: [Float], isLastChunk: Bool)] = []
+                if index < 0 {
+                    // A full window from sample zero repeats the cut that blanked.
+                    // End at the first surviving token instead; residual interior
+                    // gaps in a partial recovery use the existing later passes.
+                    let windowEnd = min(gapEndSample, windowSamples)
+                    let windowAudio = try readSamples(offset: 0, count: windowEnd)
+                    placements.append((0, windowAudio, windowEnd >= totalSamples))
+                }
+                for candidate in index < 0 ? [] : candidates {
+                    let length = min(candidate.length, windowSamples)
+                    var windowStart = max(0, min(candidate.start, totalSamples - length))
                     windowStart = windowStart / frameSamples * frameSamples
-                    let windowEnd = min(windowStart + windowSamples, totalSamples)
+                    let windowEnd = min(windowStart + length, totalSamples)
                     guard windowEnd > windowStart else { continue }
-
-                    var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
-                    decoderState.reset()
                     let windowAudio = try readSamples(offset: windowStart, count: windowEnd - windowStart)
-                    let (windowTokens, windowTimestamps, windowConfidences, windowDurations) =
-                        try await Self.transcribeChunk(
-                            samples: windowAudio,
-                            contextSamples: 0,
-                            chunkStart: windowStart,
-                            isLastChunk: windowEnd >= totalSamples,
-                            using: manager,
-                            decoderState: &decoderState,
-                            maxModelSamples: maxModelSamples,
-                            language: language
-                        )
-
-                    guard windowTokens.count == windowTimestamps.count,
-                        windowTokens.count == windowConfidences.count
-                    else { continue }
-                    let durations =
-                        windowDurations.count == windowTokens.count
-                        ? windowDurations : Array(repeating: 0, count: windowTokens.count)
-
-                    let candidate = Self.spliceCandidate(
-                        windowTokens: windowTokens,
-                        windowTimestamps: windowTimestamps,
-                        windowConfidences: windowConfidences,
-                        windowDurations: durations,
-                        gapStartFrame: gapStartFrame,
-                        gapEndFrame: gapEndFrame,
-                        leadNeighbor: Self.wordNeighbor(in: working, from: index, step: -1, vocabulary: vocabulary),
-                        tailNeighbor: Self.wordNeighbor(in: working, from: index + 1, step: 1, vocabulary: vocabulary),
-                        spliceSafeTokenIds: spliceSafeTokenIds,
-                        vocabulary: vocabulary
-                    )
-
-                    if !candidate.isEmpty {
-                        recovered = candidate
-                        break
-                    }
+                    placements.append((windowStart, windowAudio, windowEnd >= totalSamples))
                 }
 
-                guard !recovered.isEmpty else { continue }
+                passProbes.append(
+                    SeamGapProbe(
+                        gapStartFrame: gapStartFrame,
+                        gapEndFrame: gapEndFrame,
+                        leadWord: index >= 0
+                            ? Self.neighborWord(
+                                in: working, from: index, step: -1,
+                                spliceSafeTokenIds: spliceSafeTokenIds, vocabulary: vocabulary)
+                            : nil,
+                        tailWord: Self.neighborWord(
+                            in: working, from: index + 1, step: 1,
+                            spliceSafeTokenIds: spliceSafeTokenIds, vocabulary: vocabulary),
+                        placements: placements
+                    ))
+            }
+
+            guard !passProbes.isEmpty else { break }
+
+            var recoveredByProbe = [[TokenWindow]](repeating: [], count: passProbes.count)
+            try await withThrowingTaskGroup(of: (Int, Int, [TokenWindow]).self) { group in
+                var availableWorkers = Array(workers.indices)
+                for (probeIndex, probe) in passProbes.enumerated() {
+                    if availableWorkers.isEmpty, let (finished, workerIndex, recovered) = try await group.next() {
+                        recoveredByProbe[finished] = recovered
+                        availableWorkers.append(workerIndex)
+                    }
+                    let workerIndex = availableWorkers.removeFirst()
+                    let worker = workers[workerIndex]
+                    group.addTask {
+                        let recovered = try await Self.recoverSeamGap(
+                            probe,
+                            using: worker,
+                            decoderLayers: decoderLayers,
+                            maxModelSamples: maxModelSamples,
+                            spliceSafeTokenIds: spliceSafeTokenIds,
+                            vocabulary: vocabulary,
+                            language: language
+                        )
+                        return (probeIndex, workerIndex, recovered)
+                    }
+                }
+                for try await (finished, _, recovered) in group {
+                    recoveredByProbe[finished] = recovered
+                }
+            }
+
+            var inserts: [TokenWindow] = []
+            for (probe, recovered) in zip(passProbes, recoveredByProbe) where !recovered.isEmpty {
                 logger.info(
                     "Seam-gap repair: recovered \(recovered.count) tokens in "
-                        + String(format: "%.2fs", Double(gapStartFrame) * frameDuration) + "–"
-                        + String(format: "%.2fs", Double(gapEndFrame) * frameDuration) + " gap"
+                        + String(format: "%.2fs", Double(probe.gapStartFrame) * frameDuration) + "–"
+                        + String(format: "%.2fs", Double(probe.gapEndFrame) * frameDuration) + " gap"
                 )
                 inserts.append(contentsOf: recovered)
             }
@@ -1529,6 +2069,58 @@ struct ChunkProcessor {
         }
 
         return working
+    }
+
+    /// Decode one probe's placements in order and return the first confident
+    /// splice candidate (empty when every placement yields nothing).
+    private static func recoverSeamGap(
+        _ probe: SeamGapProbe,
+        using manager: AsrManager,
+        decoderLayers: Int,
+        maxModelSamples: Int,
+        spliceSafeTokenIds: Set<Int>?,
+        vocabulary: [Int: String],
+        language: Language?
+    ) async throws -> [TokenWindow] {
+        for placement in probe.placements {
+            var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
+            decoderState.reset()
+            let (windowTokens, windowTimestamps, windowConfidences, windowDurations) =
+                try await transcribeChunk(
+                    samples: placement.audio,
+                    contextSamples: 0,
+                    chunkStart: placement.start,
+                    isLastChunk: placement.isLastChunk,
+                    using: manager,
+                    decoderState: &decoderState,
+                    maxModelSamples: maxModelSamples,
+                    language: language
+                )
+
+            guard windowTokens.count == windowTimestamps.count,
+                windowTokens.count == windowConfidences.count
+            else { continue }
+            let durations =
+                windowDurations.count == windowTokens.count
+                ? windowDurations : Array(repeating: 0, count: windowTokens.count)
+
+            let candidate = spliceCandidate(
+                windowTokens: windowTokens,
+                windowTimestamps: windowTimestamps,
+                windowConfidences: windowConfidences,
+                windowDurations: durations,
+                gapStartFrame: probe.gapStartFrame,
+                gapEndFrame: probe.gapEndFrame,
+                leadWord: probe.leadWord,
+                tailWord: probe.tailWord,
+                spliceSafeTokenIds: spliceSafeTokenIds,
+                vocabulary: vocabulary
+            )
+            // A low-confidence candidate is a hallucination over noise, not
+            // a recovery; try the next placement.
+            if !candidate.isEmpty, isConfidentSplice(candidate) { return candidate }
+        }
+        return []
     }
 
     /// Cumulative duration of speech-like audio (per-frame RMS above the

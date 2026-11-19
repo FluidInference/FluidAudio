@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Compile-time constants for the Chatterbox Multilingual backend.
@@ -68,3 +69,4 @@ public enum ChatterboxConstants {
     public static let defaultLanguage = "en"
     public static let defaultVoice = "default"
 }
+#endif

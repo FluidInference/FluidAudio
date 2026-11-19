@@ -5,7 +5,7 @@ import Foundation
 ///
 /// Use cosine similarity between embeddings for speaker verification / diarization
 /// clustering. Pipeline: waveform -> [Preprocessor fp32/CPU] -> fbank [1,T,80]
-/// -> [CAM++ fp16/ANE] -> [1,192] -> L2 normalize.
+/// -> per-utterance mean subtraction -> [CAM++ fp32] -> [1,192] -> L2 normalize.
 ///
 /// - Note: Beta — this is a beta model conversion; API, model artifacts, and accuracy may change.
 public actor CampPlusEmbedder {
@@ -41,6 +41,7 @@ public actor CampPlusEmbedder {
         guard let fbank = feats.featureValue(for: "features")?.multiArrayValue else {
             throw ASRError.processingFailed("CAM++ preprocessor produced no `features`")
         }
+        try Self.subtractUtteranceMean(fbank)
         let out = try models.model.prediction(
             from: MLDictionaryFeatureProvider(dictionary: ["feats": MLFeatureValue(multiArray: fbank)]))
         guard let emb = out.featureValue(for: "embedding")?.multiArrayValue else {
@@ -55,6 +56,35 @@ public actor CampPlusEmbedder {
         }
         let norm = max(sqrt(v.reduce(0) { $0 + $1 * $1 }), 1e-9)
         return v.map { $0 / norm }
+    }
+
+    /// Subtracts each mel band's mean over the utterance from a `[1, T, 80]` fbank, in place.
+    ///
+    /// CAM++ is trained on mean-normalized fbank (3D-Speaker `FBank(mean_nor: true)`, FunASR
+    /// `extract_feature`), and neither CoreML graph normalizes: the preprocessor ends at `log` and
+    /// CAM++ feeds `feats` straight into its first conv. Without it the embedding of an AMI segment
+    /// sits at a median cosine of 0.74 to the PyTorch reference, and different speakers score
+    /// closer together (#985).
+    static func subtractUtteranceMean(_ fbank: MLMultiArray) throws {
+        guard fbank.dataType == .float32, fbank.shape.count == 3 else {
+            throw ASRError.processingFailed(
+                "CAM++ preprocessor features: expected float32 [1, T, 80], got \(fbank.dataType) \(fbank.shape)")
+        }
+        let frames = fbank.shape[1].intValue
+        let bands = fbank.shape[2].intValue
+        guard frames > 0 else { return }
+        fbank.withUnsafeMutableBytes { raw, strides in
+            guard let base = raw.bindMemory(to: Float32.self).baseAddress else { return }
+            let frameStride = strides[1]
+            let bandStride = strides[2]
+            for band in 0..<bands {
+                let column = base + band * bandStride
+                var sum: Double = 0
+                for frame in 0..<frames { sum += Double(column[frame * frameStride]) }
+                let mean = Float32(sum / Double(frames))
+                for frame in 0..<frames { column[frame * frameStride] -= mean }
+            }
+        }
     }
 
     /// Cosine similarity of two L2-normalized embeddings.

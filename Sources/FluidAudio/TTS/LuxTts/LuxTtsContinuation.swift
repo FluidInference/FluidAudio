@@ -1,3 +1,4 @@
+#if TTS
 import Accelerate
 import Foundation
 
@@ -328,3 +329,4 @@ enum LuxTtsContinuation {
         return bestEnd ?? min(max(idealEnd, minimumEnd), maxEnd)
     }
 }
+#endif

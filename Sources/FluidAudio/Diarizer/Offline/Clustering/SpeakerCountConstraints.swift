@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 import OSLog
 
@@ -75,3 +76,4 @@ struct SpeakerCountConstraints: Sendable {
         return detectedCount
     }
 }
+#endif

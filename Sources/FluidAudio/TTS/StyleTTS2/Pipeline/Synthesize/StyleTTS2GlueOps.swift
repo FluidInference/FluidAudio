@@ -1,3 +1,4 @@
+#if TTS
 import Accelerate
 import CoreML
 import Foundation
@@ -160,3 +161,4 @@ public enum StyleTTS2GlueOps {
         return (ref, s)
     }
 }
+#endif

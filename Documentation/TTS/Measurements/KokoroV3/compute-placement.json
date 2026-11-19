@@ -1,0 +1,302 @@
+[
+  {
+    "estimatedCost" : {
+
+    },
+    "language" : "en",
+    "model" : "base\/KokoroAlbert",
+    "operationsSupportingANE" : 303,
+    "preferredOperations" : {
+      "CPU" : 310,
+      "unknown" : 244
+    }
+  },
+  {
+    "estimatedCost" : {
+      "CPU" : 0.9999148906586185
+    },
+    "language" : "en",
+    "model" : "base\/KokoroPostAlbert",
+    "operationsSupportingANE" : 74,
+    "preferredOperations" : {
+      "CPU" : 98,
+      "unknown" : 173
+    }
+  },
+  {
+    "estimatedCost" : {
+      "CPU" : 0.9999999999999997
+    },
+    "language" : "en",
+    "model" : "base\/KokoroAlignment",
+    "operationsSupportingANE" : 12,
+    "preferredOperations" : {
+      "CPU" : 19,
+      "unknown" : 29
+    }
+  },
+  {
+    "estimatedCost" : {
+      "CPU" : 1
+    },
+    "language" : "en",
+    "model" : "base\/KokoroProsody_v2",
+    "operationsSupportingANE" : 0,
+    "preferredOperations" : {
+      "CPU" : 140,
+      "unknown" : 252
+    }
+  },
+  {
+    "estimatedCost" : {
+      "ANE" : 0.5203152309015737,
+      "CPU" : 0.47968476909842467
+    },
+    "language" : "en",
+    "model" : "base\/KokoroVocoder",
+    "operationsSupportingANE" : 648,
+    "preferredOperations" : {
+      "ANE" : 648,
+      "CPU" : 6,
+      "unknown" : 879
+    }
+  },
+  {
+    "estimatedCost" : {
+      "ANE" : 0.9881555442435253,
+      "CPU" : 0.011844455756474118
+    },
+    "language" : "en",
+    "model" : "fast\/KokoroAlbert_64",
+    "operationsSupportingANE" : 295,
+    "preferredOperations" : {
+      "ANE" : 295,
+      "CPU" : 8,
+      "unknown" : 235
+    }
+  },
+  {
+    "estimatedCost" : {
+      "ANE" : 1.0000000000000009
+    },
+    "language" : "en",
+    "model" : "decoder\/KokoroDecoderPre_200",
+    "operationsSupportingANE" : 258,
+    "preferredOperations" : {
+      "ANE" : 258,
+      "unknown" : 291
+    }
+  },
+  {
+    "estimatedCost" : {
+      "GPU" : 1.0000000000000102
+    },
+    "language" : "en",
+    "model" : "fast\/KokoroSourceGenerator",
+    "operationsSupportingANE" : 0,
+    "preferredOperations" : {
+      "GPU" : 1089,
+      "unknown" : 1075
+    }
+  },
+  {
+    "estimatedCost" : {
+
+    },
+    "language" : "ja",
+    "model" : "base\/KokoroAlbert",
+    "operationsSupportingANE" : 303,
+    "preferredOperations" : {
+      "CPU" : 310,
+      "unknown" : 244
+    }
+  },
+  {
+    "estimatedCost" : {
+      "CPU" : 0.9999148906586185
+    },
+    "language" : "ja",
+    "model" : "base\/KokoroPostAlbert",
+    "operationsSupportingANE" : 74,
+    "preferredOperations" : {
+      "CPU" : 98,
+      "unknown" : 173
+    }
+  },
+  {
+    "estimatedCost" : {
+      "CPU" : 0.9999999999999997
+    },
+    "language" : "ja",
+    "model" : "base\/KokoroAlignment",
+    "operationsSupportingANE" : 12,
+    "preferredOperations" : {
+      "CPU" : 19,
+      "unknown" : 29
+    }
+  },
+  {
+    "estimatedCost" : {
+      "CPU" : 1.0000000000000004
+    },
+    "language" : "ja",
+    "model" : "base\/KokoroProsody_v2",
+    "operationsSupportingANE" : 0,
+    "preferredOperations" : {
+      "CPU" : 140,
+      "unknown" : 252
+    }
+  },
+  {
+    "estimatedCost" : {
+      "ANE" : 0.5203152309015769,
+      "CPU" : 0.4796847690984255
+    },
+    "language" : "ja",
+    "model" : "base\/KokoroVocoder",
+    "operationsSupportingANE" : 648,
+    "preferredOperations" : {
+      "ANE" : 648,
+      "CPU" : 6,
+      "unknown" : 879
+    }
+  },
+  {
+    "estimatedCost" : {
+      "ANE" : 0.9881555442435253,
+      "CPU" : 0.011844455756474118
+    },
+    "language" : "ja",
+    "model" : "fast\/KokoroAlbert_64",
+    "operationsSupportingANE" : 295,
+    "preferredOperations" : {
+      "ANE" : 295,
+      "CPU" : 8,
+      "unknown" : 235
+    }
+  },
+  {
+    "estimatedCost" : {
+      "ANE" : 1.000000000000001
+    },
+    "language" : "ja",
+    "model" : "decoder\/KokoroDecoderPre_200",
+    "operationsSupportingANE" : 258,
+    "preferredOperations" : {
+      "ANE" : 258,
+      "unknown" : 291
+    }
+  },
+  {
+    "estimatedCost" : {
+      "GPU" : 1.0000000000000093
+    },
+    "language" : "ja",
+    "model" : "fast\/KokoroSourceGenerator",
+    "operationsSupportingANE" : 0,
+    "preferredOperations" : {
+      "GPU" : 1089,
+      "unknown" : 1075
+    }
+  },
+  {
+    "estimatedCost" : {
+
+    },
+    "language" : "zh",
+    "model" : "base\/KokoroAlbert",
+    "operationsSupportingANE" : 303,
+    "preferredOperations" : {
+      "CPU" : 310,
+      "unknown" : 244
+    }
+  },
+  {
+    "estimatedCost" : {
+      "CPU" : 0.9998897507275808
+    },
+    "language" : "zh",
+    "model" : "base\/KokoroPostAlbert",
+    "operationsSupportingANE" : 74,
+    "preferredOperations" : {
+      "CPU" : 98,
+      "unknown" : 173
+    }
+  },
+  {
+    "estimatedCost" : {
+      "CPU" : 1
+    },
+    "language" : "zh",
+    "model" : "base\/KokoroAlignment",
+    "operationsSupportingANE" : 12,
+    "preferredOperations" : {
+      "CPU" : 19,
+      "unknown" : 29
+    }
+  },
+  {
+    "estimatedCost" : {
+      "CPU" : 1.0000000000000038
+    },
+    "language" : "zh",
+    "model" : "base\/KokoroProsody_v2",
+    "operationsSupportingANE" : 0,
+    "preferredOperations" : {
+      "CPU" : 140,
+      "unknown" : 252
+    }
+  },
+  {
+    "estimatedCost" : {
+      "ANE" : 0.5198534448227075,
+      "CPU" : 0.4801465551772948
+    },
+    "language" : "zh",
+    "model" : "base\/KokoroVocoder",
+    "operationsSupportingANE" : 648,
+    "preferredOperations" : {
+      "ANE" : 648,
+      "CPU" : 6,
+      "unknown" : 879
+    }
+  },
+  {
+    "estimatedCost" : {
+      "ANE" : 0.9881555442435249,
+      "CPU" : 0.011844455756474115
+    },
+    "language" : "zh",
+    "model" : "fast\/KokoroAlbert_64",
+    "operationsSupportingANE" : 295,
+    "preferredOperations" : {
+      "ANE" : 295,
+      "CPU" : 8,
+      "unknown" : 235
+    }
+  },
+  {
+    "estimatedCost" : {
+      "ANE" : 1.000000000000001
+    },
+    "language" : "zh",
+    "model" : "decoder\/KokoroDecoderPre_200",
+    "operationsSupportingANE" : 258,
+    "preferredOperations" : {
+      "ANE" : 258,
+      "unknown" : 291
+    }
+  },
+  {
+    "estimatedCost" : {
+      "GPU" : 1.0000000000000095
+    },
+    "language" : "zh",
+    "model" : "fast\/KokoroSourceGenerator",
+    "operationsSupportingANE" : 0,
+    "preferredOperations" : {
+      "GPU" : 1089,
+      "unknown" : 1075
+    }
+  }
+]

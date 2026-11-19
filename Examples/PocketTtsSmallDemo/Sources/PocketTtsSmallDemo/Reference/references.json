@@ -1,0 +1,5 @@
+[
+  {"voice": "alba", "file": "pytorch_18m_alba.wav", "text": "Hello, and welcome. This is the eighteen million parameter Pocket TTS, rendered in PyTorch on the CPU as the reference take."},
+  {"voice": "marius", "file": "pytorch_18m_marius.wav", "text": "The quick brown fox jumps over the lazy dog, while the band plays softly in the background and nobody seems to mind."},
+  {"voice": "javert", "file": "pytorch_18m_javert.wav", "text": "Thank you for listening. Press the other button to hear the same sentence from Core ML, with the flow model on the Neural Engine."}
+]

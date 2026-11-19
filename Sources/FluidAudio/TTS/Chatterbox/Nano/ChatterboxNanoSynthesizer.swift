@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -11,7 +12,7 @@ import Foundation
 /// prefill context is cond ++ text ++ a single BOS), turbo sampling
 /// (temperature → top-k → top-p → repetition penalty), SineGen randomness,
 /// and bucket padding/cropping.
-@available(macOS 15.0, iOS 18.0, *)
+@available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
 struct ChatterboxNanoSynthesizer {
 
     private static let logger = AppLogger(category: "ChatterboxNanoSynthesizer")
@@ -413,3 +414,4 @@ struct ChatterboxNanoSynthesizer {
         return samples
     }
 }
+#endif

@@ -62,10 +62,18 @@ public struct TTS {
         // KokoroAne language variant — only consulted when backend == .kokoroAne.
         // Parsed from the `--variant` flag (en/english/zh/mandarin).
         var kokoroAneVariant: KokoroAneVariant = .english
+        var kokoroVersion: KokoroAneVersion = .legacy
+        // `--pause MARK=MS`, repeatable — KokoroAne punctuation pauses.
+        var kokoroPauses: [Character: Duration] = [:]
         // Inflect model size — only consulted when backend == .inflect.
         // Parsed from `--variant` (micro/nano) or the backend token
         // (inflect-micro / inflect-nano).
         var inflectVariant: InflectVariant = .micro
+        // Paradee weight precision and release — only consulted when backend == .paradee.
+        var paradeeVariant: ParadeeVariant = .int8
+        var paradeeVersion: ParadeeVersion = .v12
+        var paradeeSpeed: Float = ParadeeConstants.defaultSpeed
+        var paradeeSeed: UInt64 = 0
         var lexiconPath: String? = nil
         var text: String? = nil
         // KokoroAne: treat the positional/`--text` value as a pre-computed
@@ -80,9 +88,12 @@ public struct TTS {
         var pocketLanguage: PocketTtsLanguage = .english
         var pocketPlacement: PocketTtsModelPlacement = .gpu
         var pocketComputeUnits: PocketTtsComputeUnits = .default
-        var pocketTemperature: Float = PocketTtsConstants.temperature
+        var pocketTemperature: Float?
         // PocketTTS deterministic-seed mode (uses session API for fixed RNG).
         var pocketSeed: UInt64? = nil
+        // PocketTTS small models (`--backend pocket-small --model 7m`).
+        var pocketSmallModel: PocketTtsSmallModel = .english7m
+        var pocketSmallMimi: PocketTtsSmallMimiPrecision = .fp32
         // StyleTTS2 zero-shot args.
         var styletts2ReferencePath: String? = nil
         var styletts2Seed: UInt64 = 42
@@ -134,8 +145,26 @@ public struct TTS {
                     metricsPath = arguments[i + 1]
                     i += 1
                 }
+            case "--kokoro-version":
+                guard i + 1 < arguments.count, let version = KokoroAneVersion(rawValue: arguments[i + 1]) else {
+                    print("--kokoro-version expects legacy or v3")
+                    exit(1)
+                }
+                kokoroVersion = version
+                i += 1
             case "--phonemes":
                 treatAsPhonemes = true
+            case "--pause":
+                guard i + 1 < arguments.count, let separator = arguments[i + 1].lastIndex(of: "="),
+                    arguments[i + 1][..<separator].count == 1, let mark = arguments[i + 1].first,
+                    let milliseconds = Int(arguments[i + 1][arguments[i + 1].index(after: separator)...]),
+                    milliseconds >= 0
+                else {
+                    print("--pause expects MARK=MILLISECONDS, e.g. --pause 、=300")
+                    exit(1)
+                }
+                kokoroPauses[mark] = .milliseconds(milliseconds)
+                i += 1
             case "--variant", "--model-variant":
                 if i + 1 < arguments.count {
                     let value = arguments[i + 1].lowercased()
@@ -154,6 +183,10 @@ public struct TTS {
                         inflectVariant = .micro
                     case "nano", "inflect-nano":
                         inflectVariant = .nano
+                    case "int8":
+                        paradeeVariant = .int8
+                    case "fp32":
+                        paradeeVariant = .fp32
                     default:
                         logger.warning("Unknown variant preference '\(arguments[i + 1])'; ignoring")
                     }
@@ -170,6 +203,8 @@ public struct TTS {
                     switch value {
                     case "pocket", "pockettts":
                         backend = .pocketTts
+                    case "pocket-small", "pocketsmall", "pocket-tts-small", "pockettts-small":
+                        backend = .pocketTtsSmall
                     case "kokoro-ane", "kokoroane", "kokoro", "lai":
                         backend = .kokoroAne
                     case "styletts2", "style-tts2", "stts2":
@@ -192,6 +227,8 @@ public struct TTS {
                         backend = .chatterbox
                     case "chatterbox-nano":
                         backend = .chatterboxNano
+                    case "paradee", "paradee-8m":
+                        backend = .paradee
                     default:
                         logger.warning("Unknown backend '\(arguments[i + 1])'; using kokoro-ane")
                     }
@@ -219,6 +256,16 @@ public struct TTS {
                     }
                     i += 1
                 }
+            case "--paradee-version":
+                if i + 1 < arguments.count {
+                    let raw = arguments[i + 1].lowercased()
+                    if let v = ParadeeVersion(rawValue: raw.hasPrefix("v") ? String(raw.dropFirst()) : raw) {
+                        paradeeVersion = v
+                    } else {
+                        logger.warning("Unknown --paradee-version '\(arguments[i + 1])'; using 1.2. Valid: 1.0, 1.2.")
+                    }
+                    i += 1
+                }
             case "--total-steps":
                 if i + 1 < arguments.count, let v = Int(arguments[i + 1]) {
                     supertonicTotalSteps = v
@@ -228,6 +275,7 @@ public struct TTS {
                 if i + 1 < arguments.count, let v = Float(arguments[i + 1]) {
                     supertonicSpeed = v
                     luxttsSpeed = v
+                    paradeeSpeed = v
                     i += 1
                 }
             case "--prompt-audio":
@@ -282,6 +330,7 @@ public struct TTS {
                     luxttsSeed = parsed
                     neuttsSeed = parsed
                     chatterboxSeed = parsed
+                    paradeeSeed = parsed
                     i += 1
                 }
             case "--emotion":
@@ -350,6 +399,33 @@ public struct TTS {
                     }
                     i += 1
                 }
+            case "--model":
+                if i + 1 < arguments.count {
+                    guard let parsed = PocketTtsSmallModel(name: arguments[i + 1]) else {
+                        logger.error(
+                            "Unknown small Pocket TTS model '\(arguments[i + 1])'. Supported: "
+                                + PocketTtsSmallModel.allCases.map(\.rawValue).joined(separator: ", ")
+                                + " (aliases 18m, 7m, 2m, 18m-refl, 7m-refl, 2m-refl, phonon)")
+                        return
+                    }
+                    pocketSmallModel = parsed
+                    i += 1
+                }
+            case "--mimi":
+                if i + 1 < arguments.count {
+                    let raw = arguments[i + 1].lowercased()
+                    if let parsed = PocketTtsSmallMimiPrecision(rawValue: raw) {
+                        pocketSmallMimi = parsed
+                    } else if raw == "fp16" || raw == "fused" {
+                        pocketSmallMimi = .fp16Fused
+                    } else {
+                        logger.error(
+                            "Unknown --mimi '\(arguments[i + 1])'. Supported: "
+                                + PocketTtsSmallMimiPrecision.allCases.map(\.rawValue).joined(separator: ", "))
+                        return
+                    }
+                    i += 1
+                }
             case "--language":
                 if i + 1 < arguments.count {
                     let raw = arguments[i + 1].lowercased()
@@ -382,6 +458,12 @@ public struct TTS {
         }
 
         switch backend {
+        case .pocketTtsSmall:
+            await runPocketTtsSmall(
+                text: text, output: output, voice: voice, deEss: deEss,
+                model: pocketSmallModel, seed: pocketSeed,
+                temperature: arguments.contains("--temperature") ? pocketTemperature : nil,
+                computeUnits: pocketComputeUnits, mimiPrecision: pocketSmallMimi)
         case .pocketTts:
             await runPocketTts(
                 text: text, output: output, voice: voice, deEss: deEss,
@@ -393,8 +475,8 @@ public struct TTS {
         case .kokoroAne:
             await runKokoroAne(
                 text: text, output: output, voice: voice, metricsPath: metricsPath,
-                variant: kokoroAneVariant, lexiconPath: lexiconPath,
-                treatAsPhonemes: treatAsPhonemes)
+                variant: kokoroAneVariant, version: kokoroVersion, lexiconPath: lexiconPath,
+                treatAsPhonemes: treatAsPhonemes, pauses: kokoroPauses)
         case .styletts2:
             await runStyleTTS2(
                 text: text, ipa: styletts2Ipa,
@@ -439,6 +521,97 @@ public struct TTS {
             await runChatterboxNano(
                 text: text, output: output, capacity: nanoCapacity,
                 seed: chatterboxSeed, metricsPath: metricsPath)
+        case .paradee:
+            await runParadee(
+                text: text, output: output, version: paradeeVersion, variant: paradeeVariant,
+                voice: voice, treatAsPhonemes: treatAsPhonemes, speed: paradeeSpeed, seed: paradeeSeed,
+                metricsPath: metricsPath)
+        }
+    }
+
+    /// Run Paradee-8M TTS. With `--phonemes` the positional text is treated as
+    /// a misaki-style phoneme string and bypasses the English frontend.
+    private static func runParadee(
+        text: String, output: String,
+        version: ParadeeVersion, variant: ParadeeVariant,
+        voice voiceName: String, treatAsPhonemes: Bool,
+        speed: Float, seed: UInt64,
+        metricsPath: String?
+    ) async {
+        do {
+            guard let voice = ParadeeVoice(rawValue: voiceName), version.voices.contains(voice) else {
+                print(
+                    "Paradee \(version.rawValue) has no voice '\(voiceName)'. Voices: "
+                        + version.voices.map(\.rawValue).joined(separator: ", "))
+                exit(1)
+            }
+            let tStart = Date()
+            let manager = ParadeeManager(version: version, variant: variant)
+
+            let tLoad0 = Date()
+            try await manager.initialize()
+            let tLoad1 = Date()
+
+            logger.info(
+                "Paradee \(version.rawValue) \(variant.rawValue) \(voice.rawValue) "
+                    + "\(treatAsPhonemes ? "phoneme" : "text") synthesis")
+            let tSynth0 = Date()
+            let samples =
+                treatAsPhonemes
+                ? try await manager.synthesize(phonemes: text, voice: voice, speed: speed, noiseSeed: seed)
+                : try await manager.synthesize(text: text, voice: voice, speed: speed, noiseSeed: seed)
+            let tSynth1 = Date()
+
+            let outURL = resolveInputURL(output)
+            try FileManager.default.createDirectory(
+                at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let wav = try AudioWAV.data(
+                from: samples, sampleRate: Double(ParadeeConstants.sampleRate), normalize: false)
+            try wav.write(to: outURL)
+
+            let loadS = tLoad1.timeIntervalSince(tLoad0)
+            let synthS = tSynth1.timeIntervalSince(tSynth0)
+            let totalS = tSynth1.timeIntervalSince(tStart)
+            let audioSecs = Double(samples.count) / Double(ParadeeConstants.sampleRate)
+            let rtfx = synthS > 0 ? audioSecs / synthS : 0
+
+            logger.info("Paradee synthesis complete")
+            logger.info("  Load: \(String(format: "%.3f", loadS))s")
+            logger.info("  Synthesis: \(String(format: "%.3f", synthS))s")
+            logger.info("  Audio: \(String(format: "%.3f", audioSecs))s")
+            logger.info("  RTFx: \(String(format: "%.2f", rtfx))x")
+            logger.info("  Total: \(String(format: "%.3f", totalS))s")
+            logger.info("  Output: \(outURL.path)")
+
+            if let metricsPath {
+                let metricsDict: [String: Any] = [
+                    "backend": "paradee-\(version.rawValue)-\(variant.rawValue)",
+                    "voice": voice.rawValue,
+                    "text": text,
+                    "phonemes_mode": treatAsPhonemes,
+                    "speed": Double(speed),
+                    "seed": seed,
+                    "output": outURL.path,
+                    "model_load_time_s": loadS,
+                    "inference_time_s": synthS,
+                    "audio_duration_s": audioSecs,
+                    "realtime_speed": rtfx,
+                    "total_time_s": totalS,
+                ]
+                let artifactsRoot = try ensureArtifactsRoot()
+                let mURL = resolveOutputURL(
+                    metricsPath, artifactsRoot: artifactsRoot, expectsDirectory: false)
+                try FileManager.default.createDirectory(
+                    at: mURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                let json = try JSONSerialization.data(
+                    withJSONObject: metricsDict, options: [.prettyPrinted])
+                try json.write(to: mURL)
+                logger.info("Metrics saved: \(mURL.path)")
+            }
+        } catch {
+            logger.error("Paradee Error: \(error)")
+            print("Paradee failed: \(error)")
+            exit(1)
         }
     }
 
@@ -694,7 +867,7 @@ public struct TTS {
         voiceData: PocketTtsVoiceData?,
         seed: UInt64,
         deEss: Bool,
-        temperature: Float
+        temperature: Float?
     ) async throws -> Data {
         logger.info("PocketTTS deterministic mode: seed=\(seed)")
         let session = try await makePocketSeededSession(
@@ -726,7 +899,7 @@ public struct TTS {
         voice: String,
         voiceData: PocketTtsVoiceData?,
         seed: UInt64,
-        temperature: Float
+        temperature: Float?
     ) async throws -> PocketTtsSession {
         if let voiceData = voiceData {
             return try await manager.makeSession(
@@ -740,6 +913,59 @@ public struct TTS {
             seed: seed)
     }
 
+    /// `--backend pocket-small`: the 18m / 7m / 2m models through the MLState
+    /// MLState package. Shipped voices only (no cloning yet).
+    private static func runPocketTtsSmall(
+        text: String, output: String, voice: String, deEss: Bool,
+        model: PocketTtsSmallModel, seed: UInt64?, temperature: Float?,
+        computeUnits: PocketTtsComputeUnits, mimiPrecision: PocketTtsSmallMimiPrecision
+    ) async {
+        guard #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) else {
+            logger.error("PocketTTS small models need macOS 15+/iOS 18+ (MLState)")
+            return
+        }
+        do {
+            let tStart = Date()
+            let pocketVoice = voice == TtsConstants.recommendedVoice ? model.defaultVoice : voice
+            // --compute-units steers the MLState functions (prefill / generate / generate_decode);
+            // the fp32 Mimi decoder of the default mode is always CPU.
+            let units: MLComputeUnits = computeUnits.flowLM ?? .cpuAndNeuralEngine
+            let manager = PocketTtsSmallManager(
+                model: model, defaultVoice: pocketVoice, computeUnits: units, mimiPrecision: mimiPrecision)
+            logger.info("PocketTTS small model: \(model.rawValue), mimi \(mimiPrecision.rawValue)")
+            let tLoad0 = Date()
+            try await manager.initialize()
+            let tLoad1 = Date()
+            if let arch = await manager.arch {
+                logger.info(
+                    "  arch: d_model \(arch.dModel), \(arch.numLayers) layers, \(arch.numHeads)/\(arch.numKvHeads) heads, "
+                        + "flow \(arch.flowType), eos threshold \(arch.eosThreshold), temperature \(temperature ?? arch.temperature)"
+                )
+            }
+            let tSynth0 = Date()
+            let wav = try await manager.synthesize(
+                text: text, voice: pocketVoice, temperature: temperature, seed: seed, deEss: deEss)
+            let tSynth1 = Date()
+
+            let outURL = resolveInputURL(output)
+            try FileManager.default.createDirectory(
+                at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try wav.write(to: outURL)
+
+            let synthS = tSynth1.timeIntervalSince(tSynth0)
+            let audioSecs = Double(max(0, wav.count - 44)) / (Double(PocketTtsConstants.audioSampleRate) * 2.0)
+            logger.info("PocketTTS small synthesis complete")
+            logger.info("  Load: \(String(format: "%.3f", tLoad1.timeIntervalSince(tLoad0)))s")
+            logger.info("  Synthesis: \(String(format: "%.3f", synthS))s")
+            logger.info("  Audio: \(String(format: "%.3f", audioSecs))s")
+            logger.info("  RTFx: \(String(format: "%.2f", synthS > 0 ? audioSecs / synthS : 0))x")
+            logger.info("  Total: \(String(format: "%.3f", tSynth1.timeIntervalSince(tStart)))s")
+            logger.info("  Output: \(outURL.path)")
+        } catch {
+            logger.error("PocketTTS small synthesis failed: \(error)")
+        }
+    }
+
     private static func runPocketTts(
         text: String, output: String, voice: String, deEss: Bool,
         metricsPath: String?, cloneVoicePath: String?,
@@ -748,7 +974,7 @@ public struct TTS {
         seed: UInt64? = nil,
         placement: PocketTtsModelPlacement = .gpu,
         computeUnits: PocketTtsComputeUnits = .default,
-        temperature: Float = PocketTtsConstants.temperature
+        temperature: Float? = nil
     ) async {
         do {
             let tStart = Date()
@@ -895,7 +1121,8 @@ public struct TTS {
 
     private static func runKokoroAne(
         text: String, output: String, voice: String, metricsPath: String?,
-        variant: KokoroAneVariant, lexiconPath: String?, treatAsPhonemes: Bool
+        variant: KokoroAneVariant, version: KokoroAneVersion, lexiconPath: String?, treatAsPhonemes: Bool,
+        pauses: [Character: Duration]
     ) async {
         do {
             let tStart = Date()
@@ -907,7 +1134,7 @@ public struct TTS {
                 voice == TtsConstants.recommendedVoice
                 ? variant.defaultVoice : voice
             let manager = KokoroAneManager(
-                variant: variant, defaultVoice: resolvedVoice)
+                variant: variant, defaultVoice: resolvedVoice, version: version)
 
             // --lexicon is Mandarin-only. For English, log + ignore so users
             // aren't silently surprised by a flag with no effect.
@@ -923,6 +1150,8 @@ public struct TTS {
                             + "supports a custom lexicon.")
                 }
             }
+
+            await manager.setPunctuationPauses(pauses)
 
             let tLoad0 = Date()
             try await manager.initialize()
@@ -980,6 +1209,10 @@ public struct TTS {
                     + " noise=\(String(format: "%.1f", detailed.timings.noise))"
                     + " vocoder=\(String(format: "%.1f", detailed.timings.vocoder))"
                     + " tail=\(String(format: "%.1f", detailed.timings.tail))"
+                    + " nativeSource=\(String(format: "%.1f", detailed.timings.nativeSource))"
+                    + " decoder=\(String(format: "%.1f", detailed.timings.decoder))"
+                    + " generator=\(String(format: "%.1f", detailed.timings.generator))"
+                    + " fastVocoder=\(detailed.usedFastVocoder)"
                     + " total=\(String(format: "%.1f", detailed.timings.totalMs))"
             )
 
@@ -1534,10 +1767,19 @@ public struct TTS {
             Options:
               --output, -o         Output WAV path (default: output.wav)
               --voice, -v          Voice name (default: af_heart for KokoroAne, alba for PocketTTS)
-              --backend            TTS backend: kokoro-ane (default), pocket, styletts2,
+              --backend            TTS backend: kokoro-ane (default), pocket, pocket-small, styletts2,
                                    supertonic3, luxtts, neutts (beta), inflect (beta),
                                    chatterbox (beta, multilingual, macOS 15+),
-                                   chatterbox-nano (beta, English + [laugh]/[chuckle] tags, macOS 15+)
+                                   chatterbox-nano (beta, English + [laugh]/[chuckle] tags, macOS 15+),
+                                   paradee (beta, 8M English; v1.2 voices af_heart,
+                                     bf_isabella, am_puck, bm_fable)
+                                   Paradee:
+                                     --voice af_heart           voice (bf_/bm_ get British phonemes)
+                                     --paradee-version 1.2      release: 1.2 (default) or 1.0 (af_heart only)
+                                     --variant int8|fp32        weights (default int8)
+                                     --speed 1.0                speech rate (default 1.0)
+                                     --seed N                   source-noise seed (default 0)
+                                     --phonemes                 treat input as misaki phonemes
                                    Chatterbox (built-in voice, 18 languages):
                                      --lang de                  language code (default en)
                                      --seed N                   sampling seed (default 42)
@@ -1576,6 +1818,9 @@ public struct TTS {
                                      word  @bopomofo1        (escape: @-prefixed,
                                                               bypasses tone sandhi)
                                    Ignored for KokoroAne English (no lexicon support yet).
+              --kokoro-version     Kokoro architecture: legacy (default) or v3 (en/ja/zh, macOS 15 / iOS 18+).
+              --pause MARK=MS      KokoroAne pause at a punctuation mark, in milliseconds
+                                   (repeatable, e.g. --pause 、=300 --pause ，=400).
               --variant            KokoroAne language (values: en,zh,ja,es,fr).
                                    For --backend kokoro-ane --variant zh, Hanzi
                                    input is auto-phonemized through the bundled
@@ -1594,6 +1839,14 @@ public struct TTS {
               --voice-file FILE    Load previously saved voice .bin file
               --save-voice FILE    Save cloned voice to .bin file for later use
 
+            PocketTTS small models (--backend pocket-small, macOS 15+/iOS 18+, FlowLM on the Neural Engine):
+              --model ID           english_18m_2026-10 | english_7m_2026-10 (default) | english_2m_2026-10
+                                   or their *_refl_2026-10 twins; aliases 18m, 7m, 2m, 18m-refl, 7m-refl, 2m-refl
+                                   phonon-31m-en (alias phonon): Gradium Phonon 31m, 103 voices (default, en_us_Easton, ...)
+              --mimi MODE          fp32 (default: Mimi decoder fp32 on the CPU, clean noise floor) or
+                                   fp16-fused (one ANE dispatch per frame, faster, -72 dBFS hiss in pauses)
+              --voice, --seed, --temperature, --compute-units apply; voice cloning not yet supported
+
             PocketTTS Language Packs:
               --language ID        Language pack (default: english)
                                    Supported: english, french_24l,
@@ -1601,7 +1854,7 @@ public struct TTS {
                                    portuguese, portuguese_24l, spanish, spanish_24l
                                    Note: French is 24-layer only (no 6-layer pack upstream)
               --seed N             Deterministic-mode seed (uses session API for fixed RNG)
-              --temperature T      Generation temperature (default 0.7)
+              --temperature T      Generation temperature (default: the pack's, 0.7; 0.3 for english_2026-10)
               --compute-units U    PocketTTS per-stage routing: default, no-ane (keep every
                                    stage off the Neural Engine, #881), all, cpu-gpu, cpu-ane, cpu-only
               --placement P        Model placement: gpu (default), ane (rank-4 ANE models),

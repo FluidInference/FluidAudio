@@ -1,3 +1,4 @@
+#if Diarizer
 import Foundation
 
 /// Errors surfaced by the offline diarization pipeline.
@@ -8,6 +9,8 @@ public enum OfflineDiarizationError: Error, LocalizedError {
     case processingFailed(String)
     case noSpeechDetected
     case exportFailed(String)
+    /// A time span passed to `embedSpans` is not finite, ends before it starts, or starts after the audio ends.
+    case invalidSpan(String)
 
     public var errorDescription: String? {
         switch self {
@@ -23,6 +26,8 @@ public enum OfflineDiarizationError: Error, LocalizedError {
             return "No speech detected in audio"
         case .exportFailed(let message):
             return "Failed to export data: \(message)"
+        case .invalidSpan(let message):
+            return "Invalid span: \(message)"
         }
     }
 }
@@ -42,6 +47,10 @@ public struct OfflineDiarizerConfig: Sendable {
         public var stepRatio: Double
         public var speechOnsetThreshold: Float
         public var speechOffsetThreshold: Float
+        /// Windows per segmentation model call (1...32). Peak memory grows with it: a 10 s window adds
+        /// about 13 MB, so 32 peaks near 400 MB while 8 stays near 100 MB. Smaller batches don't change
+        /// the output, and 8 runs at about the same speed per window as 32.
+        public var batchSize: Int
 
         public static let community = Segmentation(
             windowDurationSeconds: 10.0,
@@ -51,7 +60,8 @@ public struct OfflineDiarizerConfig: Sendable {
             // This with 1.0 min speech duration gives us ~1.4% worse DER but 2x the speed.
             stepRatio: 0.2,
             speechOnsetThreshold: 0.5,
-            speechOffsetThreshold: 0.5
+            speechOffsetThreshold: 0.5,
+            batchSize: 32
         )
 
         public init(
@@ -61,7 +71,8 @@ public struct OfflineDiarizerConfig: Sendable {
             minDurationOff: Double,
             stepRatio: Double,
             speechOnsetThreshold: Float,
-            speechOffsetThreshold: Float
+            speechOffsetThreshold: Float,
+            batchSize: Int = 32
         ) {
             self.windowDurationSeconds = windowDurationSeconds
             self.sampleRate = sampleRate
@@ -70,6 +81,7 @@ public struct OfflineDiarizerConfig: Sendable {
             self.stepRatio = stepRatio
             self.speechOnsetThreshold = speechOnsetThreshold
             self.speechOffsetThreshold = speechOffsetThreshold
+            self.batchSize = batchSize
         }
     }
 
@@ -204,17 +216,25 @@ public struct OfflineDiarizerConfig: Sendable {
         public var minGapDurationSeconds: Double
 
         /// When true, output segments are made non-overlapping by trimming later segments
-        /// so that only one speaker is active at any given time.
+        /// so that only one speaker is active at any given time: a segment that starts while an
+        /// earlier one is still active starts when that one ends, and is dropped if nothing, or less
+        /// than `Embedding.minSegmentDurationSeconds`, is left.
+        /// Use it when every instant needs a single speaker, for example to attribute ASR words.
+        ///
+        /// Defaults to false, which keeps overlapping speech like pyannote community-1's main
+        /// `speaker_diarization` output. Trimming drops the second speaker of every overlap, which
+        /// counts as missed speech when overlap is scored (#1049).
+        ///
         /// This is independent of `Embedding.excludeOverlap` which controls overlap masking
         /// during embedding extraction.
         public var exclusiveSegments: Bool
 
         public static let community = PostProcessing(
             minGapDurationSeconds: 0.1,
-            exclusiveSegments: true
+            exclusiveSegments: false
         )
 
-        public init(minGapDurationSeconds: Double, exclusiveSegments: Bool = true) {
+        public init(minGapDurationSeconds: Double, exclusiveSegments: Bool = false) {
             self.minGapDurationSeconds = minGapDurationSeconds
             self.exclusiveSegments = exclusiveSegments
         }
@@ -382,6 +402,12 @@ public struct OfflineDiarizerConfig: Sendable {
         guard segmentation.stepRatio > 0, segmentation.stepRatio <= 1 else {
             throw OfflineDiarizationError.invalidConfiguration(
                 "segmentation.stepRatio must be within (0, 1], got \(segmentation.stepRatio)"
+            )
+        }
+
+        guard (1...32).contains(segmentation.batchSize) else {
+            throw OfflineDiarizationError.invalidBatchSize(
+                "segmentation.batchSize must be within 1...32 (the segmentation model's batch range), got \(segmentation.batchSize)"
             )
         }
 
@@ -752,3 +778,4 @@ extension OfflineDiarizerConfig {
         return copy
     }
 }
+#endif

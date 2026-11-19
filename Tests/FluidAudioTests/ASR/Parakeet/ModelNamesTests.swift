@@ -9,10 +9,9 @@ final class ModelNamesTests: XCTestCase {
 
     func testRepoRemotePathContainsOwner() {
         for repo in Repo.allCases {
-            XCTAssertTrue(
-                repo.remotePath.contains("FluidInference/"),
-                "\(repo) remotePath should contain 'FluidInference/'"
-            )
+            // Phonon-2.5 initially uses the validated contributor-hosted artifacts.
+            let owner = repo == .phonon25 ? "Muesli-HQ/" : "FluidInference/"
+            XCTAssertTrue(repo.remotePath.hasPrefix(owner), "\(repo) remotePath should start with '\(owner)'")
         }
     }
 
@@ -52,8 +51,9 @@ final class ModelNamesTests: XCTestCase {
 
     func testModelFileExtensions() {
         // `.txt` covers vocab/token text files (e.g. LuxTTS `tokens.txt`),
-        // which are legitimate model artifacts.
-        let validExtensions: Set<String> = [".mlmodelc", ".json", ".bin", ".txt"]
+        // which are legitimate model artifacts. `.mlirb` / `.hash` are the files of a
+        // Core AI `.aimodel` bundle, listed individually (LFM3-Audio Core AI repo).
+        let validExtensions: Set<String> = [".mlmodelc", ".json", ".bin", ".txt", ".mlirb", ".hash"]
         let validDirectories: Set<String> = ["constants_bin"]
 
         for repo in Repo.allCases {
@@ -202,6 +202,19 @@ final class ModelNamesTests: XCTestCase {
         XCTAssertEqual(required, ModelNames.getRequiredModelNames(for: repo, variant: "int4"))
         XCTAssertTrue(required.contains(ModelNames.ASR.encoderFile))
         XCTAssertTrue(required.contains(ModelNames.ASR.jointV3File))
+    }
+
+    func testBarkReposShareOneHubRepoWithAFolderEach() {
+        for (repo, folder) in [(Repo.bark3, "bark-3.0"), (Repo.bark3Clean, "bark-3.0-clean")] {
+            XCTAssertEqual(repo.remotePath, "FluidInference/bark-3.0-coreml")
+            XCTAssertEqual(repo.name, "bark-3.0-coreml")
+            XCTAssertEqual(repo.subPath, folder)
+            // One path component: AsrModels resolves `<parent>/<folderName>` from the cache directory.
+            XCTAssertEqual(repo.folderName, folder)
+            XCTAssertFalse(repo.folderName.contains("/"))
+            // Single encoder build: the GPU `Encoder_lut3.mlmodelc` next to it is never downloaded.
+            XCTAssertEqual(ModelNames.getRequiredModelNames(for: repo, variant: nil), ModelNames.ASR.requiredModelsV3())
+        }
     }
 
     func testPhonon2RepoProperties() {

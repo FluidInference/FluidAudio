@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -185,3 +186,4 @@ extension Float {
         self = (sign == 1 ? -1 : 1) * value
     }
 }
+#endif

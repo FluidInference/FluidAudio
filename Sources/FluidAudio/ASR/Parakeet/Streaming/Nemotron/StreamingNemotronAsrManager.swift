@@ -65,6 +65,9 @@ public actor StreamingNemotronAsrManager {
     // Callbacks
     internal var partialCallback: NemotronPartialCallback?
 
+    /// See `setEncoderOutputCallback(_:)`.
+    internal var onEncoderOutput: StreamingEncoderOutputCallback?
+
     /// Chunk size for auto-download. Set by `StreamingModelVariant.createManager()`
     /// to determine which HuggingFace repo to download from in `loadModels()`.
     internal var requestedChunkSize: NemotronChunkSize?
@@ -291,6 +294,7 @@ public actor StreamingNemotronAsrManager {
 
         // Process complete chunks
         while self.audioBuffer.count >= config.chunkSamples {
+            try Task.checkCancellation()
             let chunk = Array(self.audioBuffer.prefix(config.chunkSamples))
             try await processChunk(chunk)
             // Recheck buffer count after await to handle actor reentrancy
@@ -303,6 +307,8 @@ public actor StreamingNemotronAsrManager {
 
     /// Finish processing and return final transcript
     public func finish() async throws -> String {
+        try Task.checkCancellation()
+
         // Check if models are loaded
         guard let tokenizer = tokenizer,
             melExtractor != nil,
@@ -377,6 +383,7 @@ extension StreamingNemotronAsrManager: StreamingAsrManager {
         }
 
         while audioBuffer.count >= config.chunkSamples {
+            try Task.checkCancellation()
             let chunk = Array(audioBuffer.prefix(config.chunkSamples))
             try await processChunk(chunk)
             let samplesToRemove = min(config.chunkSamples, audioBuffer.count)
@@ -386,5 +393,18 @@ extension StreamingNemotronAsrManager: StreamingAsrManager {
 
     public func setPartialTranscriptCallback(_ callback: @escaping @Sendable (String) -> Void) {
         self.partialCallback = callback
+    }
+
+    /// Register a hook that receives each encoder step's raw outputs (see
+    /// `StreamingEncoderOutputCallback`). Pass nil to remove.
+    ///
+    /// `localFrames` indexes the time axis (axis 2) of `encoded` and is always the whole chunk;
+    /// the last chunk of `finish()` includes the zero padding that fills it. Global frames
+    /// restart at 0 after `reset()`. The encoder cache outputs are not included.
+    ///
+    /// Runs synchronously on this actor before the chunk is decoded: copy what you need and
+    /// return quickly.
+    public func setEncoderOutputCallback(_ callback: StreamingEncoderOutputCallback?) {
+        self.onEncoderOutput = callback
     }
 }

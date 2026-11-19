@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Port of Misaki's Cutlet frontend (`misaki/cutlet.py`, MIT, adapted from
@@ -387,3 +388,4 @@ enum JapaneseNumberReader {
         }
     }
 }
+#endif

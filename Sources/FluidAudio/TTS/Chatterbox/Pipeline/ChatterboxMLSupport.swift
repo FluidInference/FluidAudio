@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -93,7 +94,7 @@ enum ChatterboxMLSupport {
     /// Copy prefill KV (`[layers, batch, heads, maxContext, headDim]`,
     /// possibly strided fp16) into the decode model's per-layer fp16
     /// `MLState` buffers (`kv_k_<i>` / `kv_v_<i>`).
-    @available(macOS 15.0, iOS 18.0, *)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
     static func seedState(
         _ state: MLState, kvK: MLMultiArray, kvV: MLMultiArray,
         layerCount: Int, layerElements: Int
@@ -120,3 +121,4 @@ enum ChatterboxMLSupport {
         }
     }
 }
+#endif

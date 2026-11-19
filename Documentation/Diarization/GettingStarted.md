@@ -266,7 +266,7 @@ The offline controller mirrors the reference pipeline:
 - `embedding`: Batch size and overlap handling. Keep `excludeOverlap` enabled for community-1 style powerset outputs.
 - `clustering`: The VBx warm-start threshold plus pyannote's Fa/Fb priors.
 - `vbx`: Max iterations and convergence tolerance for the refinement loop.
-- `postProcessing`: Minimum gap duration when stitching segments back together.
+- `postProcessing`: Minimum gap duration when stitching segments back together, and `exclusiveSegments`. It defaults to `false`, which keeps overlapping speech like pyannote's main `speaker_diarization` output. Set it to `true` when you need one speaker at a time, for example to attribute ASR words; a segment that starts while an earlier one is still active is then trimmed to start when that one ends. The CLI flags are `--exclusive-segments` and `--overlapping-segments` (the default).
 - `export`: Optional `embeddingsPath` for dumping per-speaker vectors to JSON.
 
 #### Why VBx has no transition (self-loop) prior
@@ -279,6 +279,7 @@ Consequences for tuning ([#879](https://github.com/FluidInference/FluidAudio/iss
 
 - `clustering.warmStartFa` / `warmStartFb` scale the evidence in the ELBO. They change how many clusters survive, not how often the speaker may change; a sweep can move the speaker count from 9 to 22 while leaving DER and turn alternation bit-identical.
 - Turn-taking sensitivity lives in segmentation. A smaller `segmentation.stepRatio` (denser windows) and a lower `minSegmentDurationSeconds` recover short turns that a coarser step absorbs into their neighbours, at the cost of more segments. On far-field meetings with rapid exchanges, `stepRatio 0.1` is the setting that has measured best for alternation.
+- Peak memory is set by `segmentation.batchSize`, the number of 10 s windows per segmentation model call (default 32, range 1...32). Each window adds about 13 MB at the peak: 32 windows reach about 400 MB, 8 windows about 100 MB, with identical output and about the same speed per window. Lower it on iPhone, where a 400 MB spike risks a jetsam kill.
 - Adding a transition prior would mean diverging from the pyannote recipe and building a temporally meaningful observation sequence that handles overlapping local tracks first. It is not planned.
 
 `prepareModels` captures Core ML compilation timings (and download durations when a fresh fetch is needed), so `DiarizationResult.timings` reflects audio loading, segmentation, embedding, clustering, and post-processing costs in one place. Per-speaker embeddings are exposed in `speakerDatabase` for downstream analytics without toggling debug flags.
@@ -327,6 +328,22 @@ This approach is useful when you need to:
 - Implement custom cleanup or caching logic
 
 For most use cases, the simpler `manager.process(url)` API is recommended.
+
+#### Embedding Known Spans
+
+When the speaker turns already exist (from another diarizer, or a transcript), `embedSpans` returns one 256-dim
+WeSpeaker embedding per time span, skipping segmentation and clustering. The vectors are the same kind as
+`speakerDatabase` values (raw, not normalized), so they can be compared with cosine similarity:
+
+```swift
+let embeddings = try await manager.embedSpans(
+    audioSource: source,
+    spans: [12.0..<18.5, 40.2..<44.0]
+)
+```
+
+Each span is repeated to fill the 10 s model window. Spans longer than a window are cut into equal pieces and their
+embeddings averaged. Predictions run in batches of `embedding.batchSize` windows.
 
 ## Streaming/Real-time Processing
 
@@ -724,7 +741,7 @@ swift run fluidaudiocli diarization-benchmark --single-file ES2004a
 ## Troubleshooting
 
 ### High DER on certain audio
-- Check if audio has overlapping speech (not yet supported)
+- Check if audio has overlapping speech: `DiarizerManager` handles it poorly (see the comparison table above). The offline pipeline keeps overlapping speakers unless `exclusiveSegments` is `true`.
 - Ensure 16kHz sampling rate
 - Verify audio isn't too noisy
 

@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -84,3 +85,4 @@ public enum StyleTTS2MultiArray {
         return arr.shape.map { $0.intValue }
     }
 }
+#endif

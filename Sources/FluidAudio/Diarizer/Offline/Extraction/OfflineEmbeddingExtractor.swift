@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 import CoreML
 import Foundation
@@ -63,7 +64,8 @@ private struct OfflineChunkBatchInfo: Sendable {
 struct OfflineEmbeddingExtractor {
     private let fbankModel: MLModel
     private let embeddingModel: MLModel
-    private let pldaTransform: PLDATransform
+    /// Only `extractEmbeddings` needs it; span embedding (`embedSpan`, `embedSpans`) doesn't.
+    private let pldaTransform: PLDATransform?
     private let config: OfflineDiarizerConfig
     private let logger = AppLogger(category: "OfflineEmbedding")
     private let memoryOptimizer = ANEMemoryOptimizer()
@@ -81,7 +83,7 @@ struct OfflineEmbeddingExtractor {
     init(
         fbankModel: MLModel,
         embeddingModel: MLModel,
-        pldaTransform: PLDATransform,
+        pldaTransform: PLDATransform?,
         config: OfflineDiarizerConfig
     ) {
         self.fbankModel = fbankModel
@@ -229,10 +231,14 @@ struct OfflineEmbeddingExtractor {
     /// Extract a single raw 256-dim embedding over an exact time span of the audio.
     ///
     /// Used by span re-embedding post-passes (zero-vote re-embed; the fork's
-    /// short-segment relabel): the span's samples are placed at the
-    /// start of a zero-padded model window and an all-active weight mask covering only the
-    /// span's frames is applied, so the embedding reflects the span's speaker exclusively
-    /// (neighboring audio never leaks in through the mask).
+    /// short-segment relabel). The span's samples are repeated to fill the model window
+    /// and every frame is weighted, so the embedding reflects the span's speaker
+    /// exclusively (neighboring audio never enters the window).
+    ///
+    /// The window is not zero-padded: the bundled FBank subtracts the mean log-mel over
+    /// the whole window, and zero samples sit at the log floor, so for a span much
+    /// shorter than the window that mean is mostly padding and the speaker is lost
+    /// (#968).
     ///
     /// - Parameters:
     ///   - audioSource: Full-session audio source (same one used by the main pipeline).
@@ -245,55 +251,151 @@ struct OfflineEmbeddingExtractor {
         startSeconds: Double,
         endSeconds: Double
     ) throws -> [Float] {
-        let sampleRate = Double(config.sampleRate)
-        let startSample = max(0, Int((startSeconds * sampleRate).rounded()))
-        let endSample = min(audioSource.sampleCount, Int((endSeconds * sampleRate).rounded()))
-        let spanLength = min(endSample - startSample, config.samplesPerWindow)
-        guard spanLength > 0 else {
+        let samples = try sampleRange(audioSource: audioSource, startSeconds: startSeconds, endSeconds: endSeconds)
+        let truncated = samples.lowerBound..<min(samples.upperBound, samples.lowerBound + config.samplesPerWindow)
+        guard let embedding = try embedWindows(audioSource: audioSource, pieces: [(0, truncated)], spanCount: 1).first
+        else {
+            throw OfflineDiarizationError.processingFailed("embedSpan: no embedding produced")
+        }
+        return embedding
+    }
+
+    /// Raw 256-dim embeddings for many spans of one audio source, in input order.
+    ///
+    /// Each span is embedded like `embedSpan`, except that spans longer than one model window
+    /// are cut into equal pieces of at most one window and the pieces' embeddings averaged (the
+    /// pipeline's speaker centroids are means of raw embeddings too). FBANK and embedding
+    /// predictions run in batches of up to `embeddingBatchSize` windows.
+    func embedSpans(
+        audioSource: AudioSampleSource,
+        spans: [Range<Double>]
+    ) throws -> [[Float]] {
+        var pieces: [(span: Int, samples: Range<Int>)] = []
+        for (index, span) in spans.enumerated() {
+            let samples = try sampleRange(
+                audioSource: audioSource, startSeconds: span.lowerBound, endSeconds: span.upperBound)
+            for piece in Self.spanPieces(samples, windowLength: config.samplesPerWindow) {
+                pieces.append((index, piece))
+            }
+        }
+        return try embedWindows(audioSource: audioSource, pieces: pieces, spanCount: spans.count)
+    }
+
+    /// Splits `range` into the fewest equal pieces of at most `windowLength` samples.
+    static func spanPieces(_ range: Range<Int>, windowLength: Int) -> [Range<Int>] {
+        guard !range.isEmpty, windowLength > 0 else { return [] }
+        let count = (range.count + windowLength - 1) / windowLength
+        return (0..<count).map { piece in
+            let start = range.lowerBound + range.count * piece / count
+            let end = range.lowerBound + range.count * (piece + 1) / count
+            return start..<end
+        }
+    }
+
+    /// Sample range of a time span, clamped to the audio.
+    private func sampleRange(
+        audioSource: AudioSampleSource,
+        startSeconds: Double,
+        endSeconds: Double
+    ) throws -> Range<Int> {
+        try Self.sampleRange(
+            startSeconds: startSeconds, endSeconds: endSeconds,
+            sampleRate: config.sampleRate, sampleCount: audioSource.sampleCount)
+    }
+
+    /// Sample range of a time span, clamped to `0..<sampleCount`. Spans come from callers' timestamps, so a
+    /// non-finite, reversed or out-of-range one throws `invalidSpan` instead of trapping in `Int(_:)`, and a
+    /// span with no samples left throws `processingFailed`.
+    static func sampleRange(
+        startSeconds: Double,
+        endSeconds: Double,
+        sampleRate: Int,
+        sampleCount: Int
+    ) throws -> Range<Int> {
+        guard startSeconds.isFinite, endSeconds.isFinite else {
+            throw OfflineDiarizationError.invalidSpan("span [\(startSeconds)s, \(endSeconds)s) is not finite")
+        }
+        guard endSeconds >= startSeconds else {
+            throw OfflineDiarizationError.invalidSpan("span [\(startSeconds)s, \(endSeconds)s) ends before it starts")
+        }
+        let rate = Double(sampleRate)
+        let audioSeconds = Double(sampleCount) / rate
+        guard startSeconds < audioSeconds else {
+            throw OfflineDiarizationError.invalidSpan(
+                "span [\(startSeconds)s, \(endSeconds)s) starts after the audio ends (\(audioSeconds)s)"
+            )
+        }
+        // Clamped as Doubles first: `Int(_:)` traps outside its range.
+        let total = Double(sampleCount)
+        let startSample = Int(min(max((startSeconds * rate).rounded(), 0), total))
+        let endSample = Int(min(max((endSeconds * rate).rounded(), 0), total))
+        guard endSample > startSample else {
             throw OfflineDiarizationError.processingFailed(
                 "embedSpan: empty span [\(startSeconds)s, \(endSeconds)s)"
             )
         }
+        return startSample..<endSample
+    }
 
-        var buffer = [Float](repeating: 0, count: config.samplesPerWindow)
-        try buffer.withUnsafeMutableBufferPointer { pointer in
-            guard let baseAddress = pointer.baseAddress else {
-                throw OfflineDiarizationError.processingFailed(
-                    "embedSpan: failed to access span buffer"
-                )
-            }
-            try audioSource.copySamples(
-                into: baseAddress,
-                offset: startSample,
-                count: spanLength
+    /// Embeds each piece (at most one window long) tiled to fill the window, in batches, and
+    /// returns the mean embedding of each span's pieces.
+    private func embedWindows(
+        audioSource: AudioSampleSource,
+        pieces: [(span: Int, samples: Range<Int>)],
+        spanCount: Int
+    ) throws -> [[Float]] {
+        guard config.samplesPerWindow > 0 else {
+            throw OfflineDiarizationError.invalidConfiguration(
+                "segmentation.windowDurationSeconds must be positive to embed spans"
             )
         }
+        // Every frame holds the span's own audio, so the mask covers the whole window.
+        let weightsArray = try prepareWeightsInput(
+            weights: [Float](repeating: 1, count: weightFrameCount)
+        )
+        var sums = [[Float]](repeating: [], count: spanCount)
+        var counts = [Int](repeating: 0, count: spanCount)
+        let batchLimit = min(modelBatchLimit, 32)
 
-        let fbankInput = try buffer.withUnsafeBufferPointer { pointer -> MLMultiArray in
-            guard let baseAddress = pointer.baseAddress else {
-                throw OfflineDiarizationError.processingFailed("embedSpan: failed to access span buffer")
+        for batchStart in stride(from: 0, to: pieces.count, by: batchLimit) {
+            try Task.checkCancellation()
+            let batch = pieces[batchStart..<min(batchStart + batchLimit, pieces.count)]
+            let audioArrays = try batch.map { piece -> MLMultiArray in
+                var span = [Float](repeating: 0, count: piece.samples.count)
+                try span.withUnsafeMutableBufferPointer { pointer in
+                    guard let baseAddress = pointer.baseAddress else {
+                        throw OfflineDiarizationError.processingFailed("embedSpan: failed to access span buffer")
+                    }
+                    try audioSource.copySamples(
+                        into: baseAddress, offset: piece.samples.lowerBound, count: piece.samples.count)
+                }
+                let window = Self.tiledWindow(span, length: config.samplesPerWindow)
+                return try window.withUnsafeBufferPointer { pointer -> MLMultiArray in
+                    guard let baseAddress = pointer.baseAddress else {
+                        throw OfflineDiarizationError.processingFailed("embedSpan: failed to access span buffer")
+                    }
+                    return try prepareFbankInput(chunkPointer: baseAddress, length: window.count)
+                }
             }
-            return try prepareFbankInput(chunkPointer: baseAddress, length: spanLength)
+            let fbankFeatures = try runFbankBatch(audioArrays: audioArrays)
+            let embeddings = try runEmbeddingBatch(fbankFeatures: fbankFeatures, weightsArray: weightsArray)
+            for (piece, embedding) in zip(batch, embeddings) {
+                sums[piece.span] = sums[piece.span].isEmpty ? embedding : zip(sums[piece.span], embedding).map(+)
+                counts[piece.span] += 1
+            }
         }
-        let fbankFeatures = try runFbankModel(audioArray: fbankInput)
+        return zip(sums, counts).map { sum, count in sum.map { $0 / Float(max(count, 1)) } }
+    }
 
-        // All-active mask over exactly the frames covering the span; zero elsewhere so the
-        // zero-padded tail of the window contributes nothing to the pooled embedding.
-        let spanFraction = Double(spanLength) / Double(config.samplesPerWindow)
-        let activeFrames = max(
-            1,
-            min(weightFrameCount, Int((spanFraction * Double(weightFrameCount)).rounded()))
-        )
-        var weights = [Float](repeating: 0, count: weightFrameCount)
-        for frame in 0..<activeFrames {
-            weights[frame] = 1
+    /// Repeats `span` end to end until it fills `length` samples.
+    static func tiledWindow(_ span: [Float], length: Int) -> [Float] {
+        guard !span.isEmpty else { return [Float](repeating: 0, count: length) }
+        var window = [Float]()
+        window.reserveCapacity(length)
+        while window.count < length {
+            window.append(contentsOf: span.prefix(length - window.count))
         }
-        let weightsArray = try prepareWeightsInput(weights: weights)
-
-        return try runEmbeddingModel(
-            fbankFeatures: fbankFeatures,
-            weightsArray: weightsArray
-        )
+        return window
     }
 
     func extractEmbeddings<S: AsyncSequence>(
@@ -389,6 +491,9 @@ struct OfflineEmbeddingExtractor {
         func flushPending() async throws {
             guard !pendingEmbeddings.isEmpty else { return }
             let pldaStart = clock.now
+            guard let pldaTransform else {
+                throw OfflineDiarizationError.modelNotLoaded("PLDA transform")
+            }
             let rhoBatch = try await pldaTransform.transform(pendingEmbeddings)
             pldaDuration += pldaStart.duration(to: clock.now)
             pldaOutputCount += rhoBatch.count
@@ -798,10 +903,32 @@ struct OfflineEmbeddingExtractor {
                     "FBANK model missing \(fbankOutputName) output at batch index \(index)"
                 )
             }
+            recenterOnSignal(featureArray, audio: audioArrays[index])
             results.append(featureArray)
         }
 
         return results
+    }
+
+    /// Applies `SilenceAwareFbank` to one `[1, 1, bands, frames]` FBANK output in place.
+    private func recenterOnSignal(_ features: MLMultiArray, audio: MLMultiArray) {
+        guard features.dataType == .float32, audio.dataType == .float32, features.shape.count == 4 else {
+            return
+        }
+        let bandCount = features.shape[2].intValue
+        let frameCount = features.shape[3].intValue
+        let audioPointer = audio.dataPointer.assumingMemoryBound(to: Float.self)
+        let silent = SilenceAwareFbank.silentFrames(
+            audio: UnsafeBufferPointer(start: audioPointer, count: audio.count),
+            frameCount: frameCount
+        )
+        SilenceAwareFbank.recenter(
+            features: features.dataPointer.assumingMemoryBound(to: Float.self),
+            bandCount: bandCount,
+            bandStride: features.strides[2].intValue,
+            frameStride: features.strides[3].intValue,
+            silent: silent
+        )
     }
 
     private func prepareFbankInput(
@@ -873,25 +1000,52 @@ struct OfflineEmbeddingExtractor {
         fbankFeatures: MLMultiArray,
         weightsArray: MLMultiArray
     ) throws -> [Float] {
-        let provider = ZeroCopyDiarizerFeatureProvider(
-            features: [
-                fbankFeatureName: MLFeatureValue(multiArray: fbankFeatures),
-                weightInputName: MLFeatureValue(multiArray: weightsArray),
-            ]
-        )
-        let options = MLPredictionOptions()
+        guard let embedding = try runEmbeddingBatch(fbankFeatures: [fbankFeatures], weightsArray: weightsArray).first
+        else {
+            throw OfflineDiarizationError.processingFailed("Embedding model produced no output")
+        }
+        return embedding
+    }
+
+    /// Runs the embedding model once per FBANK feature array, with the same frame weights for all.
+    private func runEmbeddingBatch(
+        fbankFeatures: [MLMultiArray],
+        weightsArray: MLMultiArray
+    ) throws -> [[Float]] {
+        guard !fbankFeatures.isEmpty else { return [] }
+        let providers: [MLFeatureProvider] = fbankFeatures.map { features in
+            ZeroCopyDiarizerFeatureProvider(
+                features: [
+                    fbankFeatureName: MLFeatureValue(multiArray: features),
+                    weightInputName: MLFeatureValue(multiArray: weightsArray),
+                ]
+            )
+        }
         if #available(macOS 14.0, iOS 17.0, *) {
-            fbankFeatures.prefetchToNeuralEngine()
+            for features in fbankFeatures {
+                features.prefetchToNeuralEngine()
+            }
             weightsArray.prefetchToNeuralEngine()
         }
-
-        let output = try embeddingModel.prediction(from: provider, options: options)
-        guard let embeddingArray = output.featureValue(for: embeddingOutputName)?.multiArrayValue else {
-            throw OfflineDiarizationError.processingFailed("Embedding model missing \(embeddingOutputName) output")
+        let outputBatch = try embeddingModel.predictions(
+            from: MLArrayBatchProvider(array: providers),
+            options: MLPredictionOptions()
+        )
+        guard outputBatch.count == fbankFeatures.count else {
+            throw OfflineDiarizationError.processingFailed(
+                "Embedding batch produced \(outputBatch.count) outputs for \(fbankFeatures.count) inputs"
+            )
         }
-
-        let pointer = embeddingArray.dataPointer.assumingMemoryBound(to: Float.self)
-        return Array(UnsafeBufferPointer(start: pointer, count: embeddingArray.count))
+        return try (0..<outputBatch.count).map { index in
+            guard
+                let embeddingArray = outputBatch.features(at: index)
+                    .featureValue(for: embeddingOutputName)?.multiArrayValue
+            else {
+                throw OfflineDiarizationError.processingFailed("Embedding model missing \(embeddingOutputName) output")
+            }
+            let pointer = embeddingArray.dataPointer.assumingMemoryBound(to: Float.self)
+            return Array(UnsafeBufferPointer(start: pointer, count: embeddingArray.count))
+        }
     }
 
     private static func milliseconds(from duration: Duration) -> Double {
@@ -1031,3 +1185,4 @@ struct OfflineEmbeddingExtractor {
         return 0
     }
 }
+#endif

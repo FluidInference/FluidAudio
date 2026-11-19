@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// A MeCab-compatible Viterbi tokenizer over ``JapaneseMecabDictionary``.
@@ -170,3 +171,4 @@ struct JapaneseTokenizer {
         }
     }
 }
+#endif

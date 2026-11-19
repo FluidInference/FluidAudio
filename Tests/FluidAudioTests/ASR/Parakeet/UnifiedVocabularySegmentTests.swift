@@ -16,6 +16,26 @@ struct UnifiedVocabularySegmentTests {
         )
     }
 
+    // MARK: - releasedSegmentText (#967)
+
+    @Test
+    func unmodifiedSegmentKeepsItsOwnTextAndSeparator() {
+        // The session hands back the caller's text when nothing was replaced; prefixing it again doubled the space.
+        let segment = " send the draft to Maya"
+        let unchanged = VocabularyRescorer.RescoreOutput(
+            text: segment, replacements: [], wasModified: false, detectedTerms: ["EMEA"])
+        #expect(StreamingUnifiedAsrManager.releasedSegmentText(segment, rescored: unchanged) == segment)
+    }
+
+    @Test
+    func modifiedSegmentRestoresTheLeadingSeparator() {
+        let rebuilt = VocabularyRescorer.RescoreOutput(
+            text: "coding in Tuist", replacements: [], wasModified: true, detectedTerms: ["Tuist"])
+        let released = StreamingUnifiedAsrManager.releasedSegmentText
+        #expect(released(" coding in twist", rebuilt) == " coding in Tuist")
+        #expect(released("coding in twist", rebuilt) == "coding in Tuist")
+    }
+
     // MARK: - vocabSegmentCut
 
     @Test

@@ -1,3 +1,4 @@
+#if Diarizer
 import Accelerate
 @preconcurrency import CoreML
 import Foundation
@@ -17,6 +18,8 @@ public final class OfflineDiarizerManager {
     // CoreML models are not Sendable but are used read-only after initialization.
     // We manage the safety ourselves by only writing during initialization.
     nonisolated(unsafe) private var models: OfflineDiarizerModels?
+    /// Runs `embedSpans`; replaced with the models, like them only written during initialization.
+    nonisolated(unsafe) private var spanEmbedder: OfflineSpanEmbedder?
 
     public init(config: OfflineDiarizerConfig = .default) {
         self.config = config
@@ -34,6 +37,7 @@ public final class OfflineDiarizerManager {
                     + "See https://github.com/FluidInference/FluidAudio/issues/878")
         }
         self.models = models
+        self.spanEmbedder = OfflineSpanEmbedder(models: models, config: config)
         logger.info("Offline diarizer models initialized")
     }
 
@@ -505,6 +509,42 @@ public final class OfflineDiarizerManager {
             chunkEmbeddings: publicChunkEmbeddings,
             timings: timings
         )
+    }
+
+    /// Embeds time spans of `audioSource` directly, without segmentation or clustering.
+    ///
+    /// Returns one raw (not L2-normalized) 256-dim speaker embedding per span, in order: the same
+    /// kind of vector as `DiarizationResult.speakerDatabase` values. Use it when the speaker turns
+    /// are already known, e.g. to get a voice embedding per turn from another diarizer's output.
+    ///
+    /// Each span is repeated to fill the model window and every frame is weighted, so only the
+    /// span's own audio counts. Spans longer than a window are cut into equal pieces of at most
+    /// one window and their embeddings averaged. Predictions run in batches of up to
+    /// `embedding.batchSize` windows.
+    ///
+    /// The Core ML work runs off the caller's executor, and calls on one manager run one at a
+    /// time (they share its models). Cancellation is checked between batches. Don't call it
+    /// while `process(audio:)` or `prepare` is running on the same manager.
+    ///
+    /// - Parameters:
+    ///   - audioSource: Mono audio at the model's sample rate.
+    ///   - spans: Time spans in seconds; each must be finite and start within the audio.
+    /// - Returns: One embedding per span.
+    /// - Throws: `OfflineDiarizationError.invalidSpan` for a non-finite or reversed span or one
+    ///   that starts after the audio ends, `.processingFailed` for a span with no samples, and
+    ///   `.invalidConfiguration` / `.invalidBatchSize` when the config doesn't validate.
+    public func embedSpans(
+        audioSource: AudioSampleSource,
+        spans: [Range<TimeInterval>]
+    ) async throws -> [[Float]] {
+        try config.validate()
+        if models == nil {
+            try await prepareModels()
+        }
+        guard let spanEmbedder else {
+            throw OfflineDiarizationError.modelNotLoaded("offline-diarizer")
+        }
+        return try await spanEmbedder.embedSpans(audioSource: audioSource, spans: spans)
     }
 
     /// Map the internal `[TimedEmbedding] + assignments` pair to the public
@@ -1043,3 +1083,33 @@ public final class OfflineDiarizerManager {
         logger.info("Exported \(payload.count) embeddings to \(path)")
     }
 }
+
+/// Owns the extractor `embedSpans` uses. Being an actor, it runs one call at a time on the shared
+/// Core ML models and keeps that synchronous work off the caller's executor; the extractor (model
+/// descriptions, shapes, no PLDA) is built on first use and kept.
+@available(macOS 14.0, iOS 17.0, *)
+private actor OfflineSpanEmbedder {
+    private let models: OfflineDiarizerModels
+    private let config: OfflineDiarizerConfig
+    private var extractor: OfflineEmbeddingExtractor?
+
+    init(models: OfflineDiarizerModels, config: OfflineDiarizerConfig) {
+        self.models = models
+        self.config = config
+    }
+
+    func embedSpans(audioSource: AudioSampleSource, spans: [Range<TimeInterval>]) throws -> [[Float]] {
+        let extractor =
+            self.extractor
+            ?? OfflineEmbeddingExtractor(
+                fbankModel: models.fbankModel,
+                embeddingModel: models.embeddingModel,
+                pldaTransform: nil,
+                config: config
+            )
+        self.extractor = extractor
+        return try extractor.embedSpans(audioSource: audioSource, spans: spans)
+    }
+}
+
+#endif

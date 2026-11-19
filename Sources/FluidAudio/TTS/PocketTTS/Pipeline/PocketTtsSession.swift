@@ -1,3 +1,4 @@
+#if TTS
 @preconcurrency import CoreML
 import Foundation
 
@@ -209,9 +210,20 @@ public actor PocketTtsSession {
     }
 
     /// Start the generation loop. Must be called once after init.
+    ///
+    /// The generation task retains the session until `generateLoop` returns
+    /// (after `finish()` or `cancel()`), so one-shot callers need not keep the
+    /// session alive while its frames stream is consumed. Owners of a
+    /// persistent session (`PocketTtsManager.makeSession`) must call
+    /// `finish()` or `cancel()` before dropping it: an abandoned session keeps
+    /// its models loaded and its task waiting for text until then.
     func start() {
-        generationTask = Task { [weak self] in
-            guard let self else { return }
+        // Strong capture on purpose: one-shot callers (synthesizeStreamingStateful)
+        // keep only `frames`, so the session can be released before this task
+        // body runs; a weak capture then returned without finishing the stream
+        // and the consumer waited forever. The task holds the session until the
+        // text stream is finished or `cancel()` is called.
+        generationTask = Task {
             await self.generateLoop()
         }
         frameContinuation.onTermination = { [weak self] _ in
@@ -273,7 +285,7 @@ public actor PocketTtsSession {
             // `.aneState`: MLState multifunction pipeline. The store refuses
             // to load these models on pre-15/18 OSes, so this gate is
             // unreachable in practice — it exists for the compiler.
-            guard #available(macOS 15.0, iOS 18.0, *) else {
+            guard #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) else {
                 throw PocketTTSError.processingFailed(
                     "PocketTTS `.aneState` placement requires macOS 15+/iOS 18+")
             }
@@ -388,7 +400,7 @@ public actor PocketTtsSession {
 
     /// The lazily-created `PocketTtsStateEngine` for this session. One engine
     /// (and one underlying `MLState`) per session, reused across utterances.
-    @available(macOS 15.0, iOS 18.0, *)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
     private func stateEngine() throws -> PocketTtsStateEngine {
         if let engine = stateEngineRef as? PocketTtsStateEngine {
             return engine
@@ -407,7 +419,7 @@ public actor PocketTtsSession {
     /// Computed once: shipped voices convert their pre-baked snapshot
     /// directly; cloned voices run the `[bos_before_voice, voice...]` block
     /// through the stateful prefill once and capture the resulting state.
-    @available(macOS 15.0, iOS 18.0, *)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
     private func stateVoiceFp16Snapshot(
         engine: PocketTtsStateEngine
     ) async throws -> PocketTtsStateEngine.Fp16Snapshot {
@@ -457,7 +469,7 @@ public actor PocketTtsSession {
     /// noise draws BEFORE the post-EOS break is evaluated, so the draw
     /// stream differs from the IO placements after the final frame — seeds
     /// are reproducible within a placement, not across placements).
-    @available(macOS 15.0, iOS 18.0, *)
+    @available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
     private func generateChunkStateful(
         text: String,
         isMidSentence: Bool,
@@ -556,3 +568,4 @@ public actor PocketTtsSession {
         }
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if TTS
 import Foundation
 
 /// Public API for NeuTTS-2E synthesis (emotional English TTS, 24 kHz).
@@ -13,7 +14,7 @@ import Foundation
 /// let audio = try await manager.synthesize(
 ///     text: "I can't believe it's finally here!", speaker: "emily", emotion: "happy")
 /// ```
-@available(macOS 15.0, iOS 18.0, *)
+@available(macOS 15.0, iOS 18.0, tvOS 18.0, *)
 public actor NeuTtsManager {
 
     private static let logger = AppLogger(category: "NeuTtsManager")
@@ -68,3 +69,4 @@ public actor NeuTtsManager {
         return Audio(samples: result.samples, sampleRate: NeuTtsConstants.sampleRate)
     }
 }
+#endif

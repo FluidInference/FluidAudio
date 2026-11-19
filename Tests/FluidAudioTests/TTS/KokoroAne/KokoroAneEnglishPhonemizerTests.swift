@@ -630,6 +630,17 @@ final class KokoroAneEnglishPhonemizerTests: XCTestCase {
         }
     }
 
+    func testBritishCliticUsesIBeforeZ() async throws {
+        // Misaki `_s` with `british`: `ɪz` after sibilants, the rest unchanged.
+        XCTAssertEqual(KokoroAneEnglishPhonemizer.clitic(after: "bˈɒs", british: true), "ɪz")
+        XCTAssertEqual(KokoroAneEnglishPhonemizer.clitic(after: "kˈat", british: true), "s")
+        XCTAssertEqual(KokoroAneEnglishPhonemizer.clitic(after: "dˈɒɡ", british: true), "z")
+        let phonemizer = KokoroAneEnglishPhonemizer(
+            wordToPhonemes: ["boss": ["b", "ˈ", "ɒ", "s"]], allowedPunctuation: punctuation, british: true)
+        let result = try await phonemizer.phonemize("boss's") { _ in ["<g2p>"] }
+        XCTAssertEqual(result, "bˈɒsɪz")
+    }
+
     // MARK: - Without lexicon (pre-#691 behavior preserved)
 
     func testEmptyLexiconFallsBackToG2PForEveryWord() async throws {
