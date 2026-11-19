@@ -71,7 +71,7 @@ public struct TTS {
         var inflectVariant: InflectVariant = .micro
         // Paradee weight precision and release — only consulted when backend == .paradee.
         var paradeeVariant: ParadeeVariant = .int8
-        var paradeeVersion: ParadeeVersion = .v12
+        var paradeeVersion: ParadeeVersion = .v13
         var paradeeSpeed: Float = ParadeeConstants.defaultSpeed
         var paradeeSeed: UInt64 = 0
         var lexiconPath: String? = nil
@@ -262,7 +262,8 @@ public struct TTS {
                     if let v = ParadeeVersion(rawValue: raw.hasPrefix("v") ? String(raw.dropFirst()) : raw) {
                         paradeeVersion = v
                     } else {
-                        logger.warning("Unknown --paradee-version '\(arguments[i + 1])'; using 1.2. Valid: 1.0, 1.2.")
+                        logger.warning(
+                            "Unknown --paradee-version '\(arguments[i + 1])'; using 1.3. Valid: 1.0, 1.2, 1.3.")
                     }
                     i += 1
                 }
@@ -530,7 +531,7 @@ public struct TTS {
     }
 
     /// Run Paradee-8M TTS. With `--phonemes` the positional text is treated as
-    /// a misaki-style phoneme string and bypasses the English frontend.
+    /// a phoneme string and bypasses the text frontend.
     private static func runParadee(
         text: String, output: String,
         version: ParadeeVersion, variant: ParadeeVariant,
@@ -549,7 +550,7 @@ public struct TTS {
             let manager = ParadeeManager(version: version, variant: variant)
 
             let tLoad0 = Date()
-            try await manager.initialize()
+            try await manager.initialize(voices: [voice])
             let tLoad1 = Date()
 
             logger.info(
@@ -1771,15 +1772,17 @@ public struct TTS {
                                    supertonic3, luxtts, neutts (beta), inflect (beta),
                                    chatterbox (beta, multilingual, macOS 15+),
                                    chatterbox-nano (beta, English + [laugh]/[chuckle] tags, macOS 15+),
-                                   paradee (beta, 8M English; v1.2 voices af_heart,
-                                     bf_isabella, am_puck, bm_fable)
+                                   paradee (beta, 8M; v1.3 voices af_heart, bf_isabella,
+                                     am_puck, bm_fable, hf_alpha, hm_omega (Hindi),
+                                     ff_siwis (French), em_alex (Spanish))
                                    Paradee:
-                                     --voice af_heart           voice (bf_/bm_ get British phonemes)
-                                     --paradee-version 1.2      release: 1.2 (default) or 1.0 (af_heart only)
+                                     --voice af_heart           voice; its language reads the text
+                                     --paradee-version 1.3      release: 1.3 (default), 1.2 (English) or
+                                                                1.0 (af_heart only)
                                      --variant int8|fp32        weights (default int8)
                                      --speed 1.0                speech rate (default 1.0)
                                      --seed N                   source-noise seed (default 0)
-                                     --phonemes                 treat input as misaki phonemes
+                                     --phonemes                 treat input as phonemes
                                    Chatterbox (built-in voice, 18 languages):
                                      --lang de                  language code (default en)
                                      --seed N                   sampling seed (default 42)

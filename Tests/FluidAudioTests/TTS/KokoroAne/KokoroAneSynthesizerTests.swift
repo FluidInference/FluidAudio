@@ -16,6 +16,21 @@ final class KokoroAneStageBundleNameTests: XCTestCase {
         XCTAssertEqual(KokoroAneStage.prosody.bundleName, "KokoroProsody_v2.mlmodelc")
         XCTAssertEqual(ModelNames.KokoroAne.prosody, "KokoroProsody_v2.mlmodelc")
     }
+
+    func testFp32VocoderIsOptIn() {
+        // The fp16 Vocoder stays the default; `.float32` swaps in v2, which
+        // fixes robotic onsets on SME CPUs (#1135). Other stages are unaffected.
+        XCTAssertEqual(KokoroAneStage.vocoder.bundleName, "KokoroVocoder.mlmodelc")
+        XCTAssertTrue(ModelNames.KokoroAne.requiredCoreMLModels.contains("KokoroVocoder.mlmodelc"))
+        XCTAssertFalse(ModelNames.KokoroAne.requiredCoreMLModels.contains(ModelNames.KokoroAne.vocoderFloat32))
+        XCTAssertEqual(
+            KokoroAneModelStore.bundleName(for: .vocoder, vocoderPrecision: .float16), "KokoroVocoder.mlmodelc")
+        XCTAssertEqual(
+            KokoroAneModelStore.bundleName(for: .vocoder, vocoderPrecision: .float32), "KokoroVocoder_v2.mlmodelc")
+        for stage in KokoroAneStage.allCases where stage != .vocoder {
+            XCTAssertEqual(KokoroAneModelStore.bundleName(for: stage, vocoderPrecision: .float32), stage.bundleName)
+        }
+    }
 }
 
 /// Joining per-chunk results for long text input (#712, #940).

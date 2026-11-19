@@ -2,7 +2,7 @@
 import AVFoundation
 import XCTest
 
-import FluidAudio
+@testable import FluidAudio
 
 /// Protects full-recording authority and recording isolation when prior batch windows are reused.
 @MainActor
@@ -17,7 +17,7 @@ final class BatchWindowReuseExperimentTests: XCTestCase {
         XCTAssertEqual(actual?.map(\.confidence), expected?.map(\.confidence), file: file, line: line)
     }
 
-    func testGrowingRealRecordingPreservesFinalTokensAndResetRejectsPreviousRecording() async throws {
+    private func loadSpeech() throws -> [Float] {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["FLUIDAUDIO_RUN_EXACT_WINDOW_EXPERIMENT"] == "1")
         #if SWIFT_PACKAGE
         let url = try XCTUnwrap(
@@ -32,8 +32,40 @@ final class BatchWindowReuseExperimentTests: XCTestCase {
                 pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)))
         try file.read(into: buffer)
         let channel = try XCTUnwrap(buffer.floatChannelData?[0])
-        let samples = Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
         XCTAssertEqual(file.processingFormat.sampleRate, 16_000)
+        return Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength)))
+    }
+
+    // An interior window may get a different flush decision when evaluated in
+    // a longer recording. Its cached tokens must never cross that boundary.
+    func testIdenticalAudioDoesNotReuseAcrossPendingTokenFlushPolicies() async throws {
+        let samples = Array(try loadSpeech().prefix(ASRConstants.maxModelSamples))
+        let version = AsrModelVersion.v3
+        let models = try AsrModels.loadLocal(from: AsrModels.defaultCacheDirectory(for: version), version: version)
+        let manager = AsrManager(models: models)
+        func decode(flush: Bool) async throws -> [Int] {
+            try await ChunkProcessor.transcribeChunk(
+                samples: samples, contextSamples: 0, chunkStart: 0, isLastChunk: false,
+                flushPendingTokens: flush, using: manager, decoderLayers: version.decoderLayers,
+                maxModelSamples: ASRConstants.maxModelSamples, language: .english).tokens
+        }
+
+        let uncached = try await decode(flush: true)
+        XCTAssertFalse(uncached.isEmpty)
+        await manager.beginBatchWindowReuseExperiment()
+        _ = try await decode(flush: false)
+        let flushed = try await decode(flush: true)
+        let stats = await manager.batchWindowReuseExperimentStatistics()
+        XCTAssertEqual(stats.misses, 2, "A different flush decision requires a fresh decode")
+        XCTAssertEqual(flushed, uncached)
+        _ = try await decode(flush: true)
+        let reused = await manager.batchWindowReuseExperimentStatistics()
+        XCTAssertEqual(reused.hits, 1)
+        await manager.cleanup()
+    }
+
+    func testGrowingRealRecordingPreservesFinalTokensAndResetRejectsPreviousRecording() async throws {
+        let samples = try loadSpeech()
         for version: AsrModelVersion in [.v2, .v3, .tdtCtc110m] {
             let models = try AsrModels.loadLocal(from: AsrModels.defaultCacheDirectory(for: version), version: version)
             let manager = AsrManager(models: models)

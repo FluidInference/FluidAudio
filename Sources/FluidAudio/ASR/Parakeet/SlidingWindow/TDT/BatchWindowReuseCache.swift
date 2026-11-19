@@ -7,6 +7,7 @@ internal actor BatchWindowReuseCache {
         let contextSamples: Int
         let chunkStart: Int
         let isLastChunk: Bool
+        let flushPendingTokens: Bool?
         let maxModelSamples: Int
         let language: String?
         let emitTokensAfterFrame: Int?
@@ -14,12 +15,14 @@ internal actor BatchWindowReuseCache {
 
         init(
             samples: [Float], contextSamples: Int, chunkStart: Int, isLastChunk: Bool,
-            maxModelSamples: Int, language: Language?, emitTokensAfterFrame: Int?, initialTimeIndex: Int?
+            flushPendingTokens: Bool?, maxModelSamples: Int, language: Language?,
+            emitTokensAfterFrame: Int?, initialTimeIndex: Int?
         ) {
             self.pcm = samples.withUnsafeBytes { Data($0) }
             self.contextSamples = contextSamples
             self.chunkStart = chunkStart
             self.isLastChunk = isLastChunk
+            self.flushPendingTokens = flushPendingTokens
             self.maxModelSamples = maxModelSamples
             self.language = language?.rawValue
             self.emitTokensAfterFrame = emitTokensAfterFrame

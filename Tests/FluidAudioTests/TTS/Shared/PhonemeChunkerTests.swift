@@ -19,6 +19,15 @@ final class PhonemeChunkerTests: XCTestCase {
         XCTAssertEqual(chunk("  hello world  ", 100), ["hello world"])
     }
 
+    /// Each chunk keeps its first and last word; only the whitespace around them goes. Release builds
+    /// once trimmed every chunk back to its outer spaces ("saves one life, saves the world").
+    func testChunksKeepTheirFirstAndLastWords() {
+        let chunks = chunk("whoever saves one life, saves the world entire.", 24)
+        XCTAssertGreaterThan(chunks.count, 1)
+        XCTAssertEqual(chunks.joined(separator: " "), "whoever saves one life, saves the world entire.")
+        XCTAssertTrue(chunks.allSatisfy { $0 == $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+    }
+
     func testBlankInputReturnsEmpty() {
         XCTAssertEqual(chunk("", 100), [])
         XCTAssertEqual(chunk("   ", 100), [])

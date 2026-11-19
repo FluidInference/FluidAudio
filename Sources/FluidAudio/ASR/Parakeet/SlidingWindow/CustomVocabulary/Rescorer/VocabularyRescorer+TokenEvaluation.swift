@@ -123,12 +123,30 @@ extension VocabularyRescorer {
         let marginFrames = Int(marginSeconds / frameDuration)
         let originalSearchStart = max(0, Int(candidate.spanStartTime / frameDuration) - marginFrames)
         let originalSearchEnd = min(logProbs.count, Int(candidate.spanEndTime / frameDuration) + marginFrames)
-        let (originalCtcScore, _, _) = spotter.ctcWordSpotConstrained(
+        var (originalCtcScore, _, _) = spotter.ctcWordSpotConstrained(
             logProbs: logProbs,
             keywordTokens: originalTokens,
             searchStartFrame: originalSearchStart,
             searchEndFrame: originalSearchEnd
         )
+        // The transcript's punctuation is not speech. CTC emits a mark at some pauses (`Okay,`) and not at others
+        // (a sentence-final `matter.`), and an unspoken mark drags the per-token average down far enough that a
+        // term beats the word that was said (`matter.` -2.96 and `matter` -1.15 against a boosted `Matterport`
+        // -1.52, #1151). Score the phrase as spoken too and keep the better of the two, as the term keeps the
+        // better of its two tokenizations.
+        let spokenPhrase = Self.strippingBoundaryPunctuation(candidate.originalPhrase)
+        if spokenPhrase != candidate.originalPhrase {
+            let spokenTokens = tokenizer.encode(spokenPhrase)
+            if !spokenTokens.isEmpty && spokenTokens != originalTokens {
+                let (spokenScore, _, _) = spotter.ctcWordSpotConstrained(
+                    logProbs: logProbs,
+                    keywordTokens: spokenTokens,
+                    searchStartFrame: originalSearchStart,
+                    searchEndFrame: originalSearchEnd
+                )
+                originalCtcScore = max(originalCtcScore, spokenScore)
+            }
+        }
 
         // Apply adaptive context-biasing weight, scaled to the variant
         // tokenization that actually scored best.
@@ -209,10 +227,15 @@ extension VocabularyRescorer {
     }
 
     /// Whether the TDT decoder heard every word of the candidate's span with at least
-    /// `ContextBiasingConstants.confidentWordMinConfidence`.
+    /// `ContextBiasingConstants.confidentWordMinConfidence`. A word of punctuation alone (a standalone `-`) isn't
+    /// speech and doesn't count either way (#1151).
     static func isConfidentlyHeard(_ candidate: CTCMatchCandidate, wordTimings: [WordTiming]) -> Bool {
-        guard !candidate.spanIndices.isEmpty else { return false }
-        return candidate.spanIndices.allSatisfy { index in
+        let spoken = candidate.spanIndices.filter { index in
+            !wordTimings.indices.contains(index)
+                || wordTimings[index].word.unicodeScalars.contains(where: { CharacterSet.alphanumerics.contains($0) })
+        }
+        guard !spoken.isEmpty else { return false }
+        return spoken.allSatisfy { index in
             guard wordTimings.indices.contains(index), let confidence = wordTimings[index].minConfidence else {
                 return false
             }

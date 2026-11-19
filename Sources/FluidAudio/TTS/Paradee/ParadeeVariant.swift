@@ -24,6 +24,8 @@ public enum ParadeeVariant: String, Sendable, CaseIterable {
         case (.v10, .fp32): return .paradeeFp32
         case (.v12, .int8): return .paradeeV12Int8
         case (.v12, .fp32): return .paradeeV12Fp32
+        case (.v13, .int8): return .paradeeV13Int8
+        case (.v13, .fp32): return .paradeeV13Fp32
         }
     }
 }

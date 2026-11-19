@@ -52,6 +52,9 @@ public class NemotronMultilingualFleursBenchmark {
         /// LibriSpeech subset, only used when `dataset == .librispeech`.
         /// One of "test-clean" (default), "test-other", "dev-clean", "dev-other".
         var librispeechSubset: String = "test-clean"
+        /// Opt-in split 2240 ms encoder (#1116), for Neural Engines that reject
+        /// the single encoder.
+        var splitEncoder: Bool = false
     }
 
     public struct LanguageResult {
@@ -160,7 +163,9 @@ public class NemotronMultilingualFleursBenchmark {
             logger.info("Forcing computeUnits = \(units)")
         }
         let manager = StreamingNemotronMultilingualAsrManager(configuration: mlConfig)
-        try await manager.loadModels(from: config.modelDir)
+        let splitDir =
+            config.splitEncoder ? try await StreamingNemotronMultilingualAsrManager.downloadSplitEncoder() : nil
+        try await manager.loadModels(from: config.modelDir, splitEncoderDirectory: splitDir)
         if config.forcedPrefix {
             await manager.setForcedPrefix(true)
             logger.info("Forced-prefix decoding enabled (Whisper-style hard language lock)")
@@ -585,6 +590,7 @@ extension NemotronMultilingualFleursBenchmark {
         var librispeechSubset = "test-clean"
         var autoDownload = false
         var chunkMs = 2240
+        var splitEncoder = false
         // Force which model folder --auto-download fetches ("latin" or
         // "multilingual"), independent of --languages. Lets you run the same
         // language (e.g. English) against both shipped models.
@@ -675,6 +681,8 @@ extension NemotronMultilingualFleursBenchmark {
                 }
             case "--auto-download":
                 autoDownload = true
+            case "--split-encoder":
+                splitEncoder = true
             case "--model-variant":
                 if i + 1 < arguments.count {
                     modelVariant = arguments[i + 1].lowercased()
@@ -692,6 +700,13 @@ extension NemotronMultilingualFleursBenchmark {
                 logger.warning("Unknown option: \(arguments[i])")
             }
             i += 1
+        }
+
+        if splitEncoder,
+            let problem = NemotronMultilingualTranscribe.splitEncoderTierProblem(modelDir: modelDir, chunkMs: chunkMs)
+        {
+            logger.error(problem)
+            return
         }
 
         // Resolve the model directory: either an explicit local --model-dir, or
@@ -723,7 +738,7 @@ extension NemotronMultilingualFleursBenchmark {
                 let folder = StreamingNemotronMultilingualAsrManager.languageDirectory(for: downloadHint)
                 logger.info("Auto-downloading \(folder)/\(chunkMs)ms from HuggingFace (lang=\(languages[0]))...")
                 modelDir = try await StreamingNemotronMultilingualAsrManager.downloadVariant(
-                    languageCode: downloadHint, chunkMs: chunkMs)
+                    languageCode: downloadHint, chunkMs: chunkMs, includeEncoder: !splitEncoder)
             } catch {
                 logger.error("Auto-download failed: \(error)")
                 return
@@ -775,7 +790,8 @@ extension NemotronMultilingualFleursBenchmark {
             dumpSamplesPath: dumpSamplesPath,
             promptOverride: promptOverride,
             computeUnits: computeUnits,
-            librispeechSubset: librispeechSubset
+            librispeechSubset: librispeechSubset,
+            splitEncoder: splitEncoder
         )
 
         let benchmark = NemotronMultilingualFleursBenchmark(config: config)
@@ -877,6 +893,8 @@ extension NemotronMultilingualFleursBenchmark {
                             --dump-samples <path>    Write per-sample JSONL with raw + English/basic
                                                      normalized hyp/ref + per-sample WER under each
                                                      (for normalizer debugging)
+                            --split-encoder          Opt-in: run the 2240 ms encoder as three models, for
+                                                     Neural Engines that reject the single one (#1116)
                             --debug                  Verbose logging
                             --help, -h               Show this help
 

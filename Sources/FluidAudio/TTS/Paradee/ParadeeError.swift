@@ -10,7 +10,7 @@ public enum ParadeeError: Error, LocalizedError {
     /// `.all` / `.cpuAndGPU` abort in MPSGraph on the LSTMs.
     case unsupportedComputeUnits(String)
     case inputProcessingFailed(String)
-    /// The loaded release has no such voice (v1.0 has `af_heart` only).
+    /// The loaded release has no such voice (v1.0 has `af_heart` only, v1.2 the English voices).
     case unsupportedVoice(voice: String, version: String)
     /// A chunk's predicted duration exceeded the acoustic model's frame axis.
     case durationOverflow(frames: Int, maxFrames: Int)
@@ -33,7 +33,8 @@ public enum ParadeeError: Error, LocalizedError {
         case .inputProcessingFailed(let detail):
             return "Paradee input processing failed: \(detail)"
         case .unsupportedVoice(let voice, let version):
-            return "Paradee \(version) has no voice \(voice); v1.2 has af_heart, bf_isabella, am_puck and bm_fable."
+            let voices = ParadeeVersion(rawValue: version)?.voices.map(\.rawValue).joined(separator: ", ") ?? "?"
+            return "Paradee \(version) has no voice \(voice); its voices are \(voices)."
         case .durationOverflow(let frames, let maxFrames):
             return "Predicted duration \(frames) frames exceeds the model limit (\(maxFrames)); shorten the input."
         case .predictionFailed(let detail):

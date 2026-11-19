@@ -729,7 +729,8 @@ enum CohereBenchmark {
                 The Cohere encoder accepts a 35s window. Audio longer than 35s is
                 automatically chunked with 5s overlap (matching upstream
                 `overlap_chunk_second: 5`) and adjacent chunks are stitched via
-                token-level longest-common-substring merge.
+                token-level longest-common-substring merge. Japanese and Chinese
+                audio is instead cut at pauses into chunks of at most 20s.
 
             Examples:
                 # LibriSpeech test-clean, English, 100 utterances

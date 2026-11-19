@@ -22,6 +22,23 @@ public enum CohereAsrConfig {
     /// Sliding-window hop (seconds) for long-form audio: 35 − 5 = 30 s.
     public static var chunkHopSeconds: Float { maxAudioSeconds - chunkOverlapSeconds }
 
+    /// Longest chunk `transcribeLong` decodes for a language written without
+    /// spaces (Japanese, Chinese). There the 35 s sliding window loses whole
+    /// sentences: a window that starts a few seconds into an utterance makes
+    /// the model skip ahead and end early, and windows holding several
+    /// sentences drop some. Such audio is cut into non-overlapping chunks that
+    /// start and end at pauses instead (#1140).
+    public static let pauseChunkSeconds: Float = 20.0
+
+    /// How far before each chunk limit `transcribeLong` looks for the pause to
+    /// cut at, so pause chunks run 10–20 s. Upstream `split_audio_chunks_energy`
+    /// searches only the last 5 s of a 35 s chunk.
+    public static let pauseSearchSeconds: Float = 10.0
+
+    /// Window over which the pause search compares energy (100 ms), upstream
+    /// `min_energy_window_samples: 1600`.
+    public static let pauseEnergyWindowSamples: Int = 1_600
+
     /// Vocabulary size.
     public static let vocabSize: Int = 16_384
 
@@ -111,6 +128,13 @@ public enum CohereAsrConfig {
         case chinese = "zh"
         case vietnamese = "vi"
         case korean = "ko"
+
+        /// Whether the language is written without spaces between words
+        /// (upstream `NO_SPACE_LANGS`). `transcribeLong` cuts such audio at
+        /// pauses and joins the chunk texts with no separator.
+        public var writesWithoutSpaces: Bool {
+            self == .japanese || self == .chinese
+        }
 
         public var englishName: String {
             switch self {

@@ -359,32 +359,47 @@ struct OfflineEmbeddingExtractor {
 
         for batchStart in stride(from: 0, to: pieces.count, by: batchLimit) {
             try Task.checkCancellation()
-            let batch = pieces[batchStart..<min(batchStart + batchLimit, pieces.count)]
-            let audioArrays = try batch.map { piece -> MLMultiArray in
-                var span = [Float](repeating: 0, count: piece.samples.count)
-                try span.withUnsafeMutableBufferPointer { pointer in
-                    guard let baseAddress = pointer.baseAddress else {
-                        throw OfflineDiarizationError.processingFailed("embedSpan: failed to access span buffer")
-                    }
-                    try audioSource.copySamples(
-                        into: baseAddress, offset: piece.samples.lowerBound, count: piece.samples.count)
-                }
-                let window = Self.tiledWindow(span, length: config.samplesPerWindow)
-                return try window.withUnsafeBufferPointer { pointer -> MLMultiArray in
-                    guard let baseAddress = pointer.baseAddress else {
-                        throw OfflineDiarizationError.processingFailed("embedSpan: failed to access span buffer")
-                    }
-                    return try prepareFbankInput(chunkPointer: baseAddress, length: window.count)
-                }
-            }
-            let fbankFeatures = try runFbankBatch(audioArrays: audioArrays)
-            let embeddings = try runEmbeddingBatch(fbankFeatures: fbankFeatures, weightsArray: weightsArray)
-            for (piece, embedding) in zip(batch, embeddings) {
-                sums[piece.span] = sums[piece.span].isEmpty ? embedding : zip(sums[piece.span], embedding).map(+)
-                counts[piece.span] += 1
+            // Each batch's Core ML outputs are autoreleased. `embedSpans` runs on an actor, whose
+            // thread does not drain them, so without this pool iOS kept every call's outputs.
+            try autoreleasepool {
+                try embedBatch(
+                    pieces[batchStart..<min(batchStart + batchLimit, pieces.count)],
+                    audioSource: audioSource, weightsArray: weightsArray, sums: &sums, counts: &counts)
             }
         }
         return zip(sums, counts).map { sum, count in sum.map { $0 / Float(max(count, 1)) } }
+    }
+
+    private func embedBatch(
+        _ batch: ArraySlice<(span: Int, samples: Range<Int>)>,
+        audioSource: AudioSampleSource,
+        weightsArray: MLMultiArray,
+        sums: inout [[Float]],
+        counts: inout [Int]
+    ) throws {
+        let audioArrays = try batch.map { piece -> MLMultiArray in
+            var span = [Float](repeating: 0, count: piece.samples.count)
+            try span.withUnsafeMutableBufferPointer { pointer in
+                guard let baseAddress = pointer.baseAddress else {
+                    throw OfflineDiarizationError.processingFailed("embedSpan: failed to access span buffer")
+                }
+                try audioSource.copySamples(
+                    into: baseAddress, offset: piece.samples.lowerBound, count: piece.samples.count)
+            }
+            let window = Self.tiledWindow(span, length: config.samplesPerWindow)
+            return try window.withUnsafeBufferPointer { pointer -> MLMultiArray in
+                guard let baseAddress = pointer.baseAddress else {
+                    throw OfflineDiarizationError.processingFailed("embedSpan: failed to access span buffer")
+                }
+                return try prepareFbankInput(chunkPointer: baseAddress, length: window.count)
+            }
+        }
+        let fbankFeatures = try runFbankBatch(audioArrays: audioArrays)
+        let embeddings = try runEmbeddingBatch(fbankFeatures: fbankFeatures, weightsArray: weightsArray)
+        for (piece, embedding) in zip(batch, embeddings) {
+            sums[piece.span] = sums[piece.span].isEmpty ? embedding : zip(sums[piece.span], embedding).map(+)
+            counts[piece.span] += 1
+        }
     }
 
     /// Repeats `span` end to end until it fills `length` samples.

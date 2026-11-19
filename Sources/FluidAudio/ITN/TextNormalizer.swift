@@ -16,6 +16,8 @@ import NaturalLanguage
 /// - `normalize(_:)` — single expression normalization
 /// - `normalizeSentence(_:)` — sentence-mode with sliding window span matching
 /// - `normalizeSentence(_:maxSpanTokens:)` — sentence-mode with custom span size
+/// - `normalizeSentence(_:maxSpanTokens:smallNumbersAsWords:)` — sentence-mode
+///   that keeps everyday small numbers as words, as NeMo does
 ///
 /// Uses Apple NaturalLanguage framework to avoid false positives on ambiguous words
 /// (e.g., "period" as a noun vs. punctuation).
@@ -138,6 +140,38 @@ public final class TextNormalizer: Sendable {
         #if canImport(CNemoTextProcessing)
         let (masked, restore) = maskAmbiguousWords(in: input)
         guard let resultPtr = nemo_normalize_sentence_with_options(masked, 0, maxSpanTokens, 0) else {
+            return input
+        }
+        defer { nemo_free_string(resultPtr) }
+        return restoreMaskedWords(String(cString: resultPtr), restore)
+        #else
+        return input
+        #endif
+    }
+
+    /// Normalize a full sentence, optionally keeping everyday small numbers as words.
+    ///
+    /// With `smallNumbersAsWords`, a lone "zero" to "twelve" stays a word
+    /// ("no one knows" rather than "no 1 knows"), and "three to five" is read as
+    /// a time only when a.m. or p.m. follows ("quarter to five" still is), as
+    /// NeMo does. Numbers with a unit or currency or more number words
+    /// ("five dollars", "one two three") still convert (text-processing-rs #109).
+    ///
+    /// - Parameters:
+    ///   - input: Full sentence from ASR
+    ///   - maxSpanTokens: Maximum consecutive tokens per normalizable span;
+    ///     `0` uses the library default (16)
+    ///   - smallNumbersAsWords: Keep lone small numbers and "M to H" ranges as words
+    /// - Returns: Sentence with spoken-form spans replaced
+    public func normalizeSentence(
+        _ input: String, maxSpanTokens: UInt32 = 0, smallNumbersAsWords: Bool
+    ) -> String {
+        #if canImport(CNemoTextProcessing)
+        let (masked, restore) = maskAmbiguousWords(in: input)
+        guard
+            let resultPtr = nemo_normalize_sentence_lang_with_options(
+                masked, "en", 0, maxSpanTokens, 0, smallNumbersAsWords ? 1 : 0)
+        else {
             return input
         }
         defer { nemo_free_string(resultPtr) }

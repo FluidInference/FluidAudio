@@ -1078,7 +1078,7 @@ public struct PocketTtsSynthesizer {
         }
 
         // First try: split at clause boundaries
-        let clauseParts = clauseParts(of: text)
+        let clauseParts = keepingDecimalEndsWithNext(clauseParts(of: text), fits: fits)
 
         // Group clause parts into chunks that fit, joined as they were in the text
         var result: [String] = []
@@ -1195,6 +1195,31 @@ public struct PocketTtsSynthesizer {
 
         flush()
         return parts
+    }
+
+    /// Join a clause part that ends on a decimal number to the part after it
+    /// when the two fit in one chunk, as pocket-tts does, so a chunk doesn't end
+    /// on one. The first chunk of a split sentence gets a period in place of its
+    /// trailing comma, and the model takes the decimal point of
+    /// "a fee of $822.95." for the sentence end, stopping before the decimals.
+    static func keepingDecimalEndsWithNext(
+        _ parts: [(text: String, spaced: Bool)],
+        fits: (String) -> Bool
+    ) -> [(text: String, spaced: Bool)] {
+        var result: [(text: String, spaced: Bool)] = []
+        for part in parts {
+            if let last = result.last,
+                last.text.range(of: #"\d[.,]\d+\W*$"#, options: .regularExpression) != nil
+            {
+                let joined = last.text + (part.spaced ? " " : "") + part.text
+                if fits(joined) {
+                    result[result.count - 1].text = joined
+                    continue
+                }
+            }
+            result.append(part)
+        }
+        return result
     }
 
     /// Split text at word boundaries to fit within the token limit.

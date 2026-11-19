@@ -58,13 +58,13 @@ public struct VocabularyRescorer: Sendable {
         public let shortTermCbwTaperExponent: Float
 
         /// Minimum string similarity for a single-word spotter-anchored rescue
-        /// (#702, opt-in). `0.0` disables (default), preserving the
-        /// acoustic-only rescue; a positive value (e.g. 0.30) suppresses
-        /// near-zero-similarity over-fires at some recall cost.
+        /// (#702). Default `0.30` (#1151), which stops near-zero-similarity
+        /// over-fires at some recall cost; `0.0` disables the floor, restoring
+        /// the acoustic-only rescue.
         public let spotterRescueMinSimilarity: Float
 
         /// Minimum string similarity for a multi-word spotter-anchored rescue.
-        /// `0.0` disables (default). Recommended opt-in: 0.50.
+        /// Default `0.50` (#1151); `0.0` disables.
         public let spotterRescueMultiWordMinSimilarity: Float
 
         /// Whether the spotter-anchored acoustic rescue pass runs at all (#724).
@@ -423,7 +423,9 @@ public struct VocabularyRescorer: Sendable {
         public let startTime: Double
         public let endTime: Double
         let tokenRange: Range<Int>?
-        /// Lowest TDT token confidence in the word; nil when the timings carry none.
+        /// Lowest TDT token confidence over the word's letters and digits; nil when the timings carry none or
+        /// the word is punctuation alone. A punctuation token doesn't count: TDT is often unsure of a
+        /// sentence-final `.` or a `,` after a word it heard at full confidence (#1151).
         var minConfidence: Float? = nil
     }
 
@@ -480,7 +482,10 @@ public struct VocabularyRescorer: Sendable {
             }
             wordEnd = timing.endTime
             wordTokenEnd = tokenIndex + 1
-            wordMinConfidence = min(wordMinConfidence, timing.confidence)
+            // A closure: `contains(where: CharacterSet.alphanumerics.contains)` is miscompiled by Swift 6.4 `-O`.
+            if token.unicodeScalars.contains(where: { CharacterSet.alphanumerics.contains($0) }) {
+                wordMinConfidence = min(wordMinConfidence, timing.confidence)
+            }
         }
 
         // Save final word

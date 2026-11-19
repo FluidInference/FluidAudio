@@ -253,6 +253,44 @@ final class PocketTtsCutPlacementTests: XCTestCase {
         XCTAssertTrue(result[1].hasPrefix("a mix of ozone"), "cut not at the dash: \(result)")
     }
 
+    // MARK: - Decimal numbers at a cut
+
+    func testClonedVoiceDoesNotCutAfterADecimalNumber() throws {
+        // On main the first chunk ends "a service fee of $822.95," and is
+        // synthesized as "... a service fee of $822.95."
+        let tokenizer = try makeEnglishTokenizer()
+        let text =
+            "The contractor sent the invoice on Monday morning after the job was finished, and it lists a "
+            + "service fee of $822.95, a charge for the parts that arrived late, and a fee for hauling away "
+            + "the old equipment."
+        XCTAssertEqual(
+            try chunks(text, tokenizer: tokenizer, voiceCachePosition: 251),
+            [
+                "The contractor sent the invoice on Monday morning after the job was finished,",
+                "and it lists a service fee of $822.95, a charge for the parts that arrived late, and a fee for "
+                    + "hauling away the old equipment.",
+            ])
+    }
+
+    func testClauseEndingOnADecimalNumberIsKeptWithTheNext() {
+        func kept(_ text: String) -> [String] {
+            PocketTtsSynthesizer.keepingDecimalEndsWithNext(
+                PocketTtsSynthesizer.clauseParts(of: text), fits: { _ in true }
+            ).map(\.text)
+        }
+        XCTAssertEqual(kept("a fee of $822.95, then more"), ["a fee of $822.95, then more"])
+        XCTAssertEqual(kept("pi is 3.14; e is 2.72, roughly"), ["pi is 3.14; e is 2.72, roughly"])
+        XCTAssertEqual(kept("un total de 822,95 \u{20AC}, puis rien"), ["un total de 822,95 \u{20AC}, puis rien"])
+        XCTAssertEqual(kept("version 3, then more"), ["version 3,", "then more"])
+        XCTAssertEqual(kept("it ends at 3.14,"), ["it ends at 3.14,"])
+    }
+
+    func testClauseEndingOnADecimalNumberIsCutWhenTheTwoDoNotFit() {
+        let parts = PocketTtsSynthesizer.keepingDecimalEndsWithNext(
+            PocketTtsSynthesizer.clauseParts(of: "a fee of $822.95, then more"), fits: { _ in false })
+        XCTAssertEqual(parts.map(\.text), ["a fee of $822.95,", "then more"])
+    }
+
     // MARK: - Periods inside a word
 
     func testPeriodBeforeALetterDoesNotEndASentence() {

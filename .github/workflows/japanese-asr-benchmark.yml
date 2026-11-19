@@ -128,8 +128,12 @@ jobs:
             echo "decoder=$DECODER" >> $GITHUB_OUTPUT
           fi
 
+      # A pull request from a fork gets a read-only token, so the comment can't be
+      # posted there; its results are in the uploaded artifact and the log.
       - name: Comment PR with Results
-        if: github.event_name == 'pull_request' && always()
+        if: >-
+          always() && github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@v7
         with:
           script: |
@@ -168,7 +172,7 @@ jobs:
             </details>
             `;
 
-            github.rest.issues.createComment({
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,

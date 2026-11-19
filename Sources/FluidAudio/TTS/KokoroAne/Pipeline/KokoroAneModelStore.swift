@@ -189,17 +189,26 @@ public actor KokoroAneModelStore {
     public nonisolated let directory: URL?
     private let computeUnits: KokoroAneComputeUnits
     private let variant: KokoroAneVariant
+    private let vocoderPrecision: KokoroAneVocoderPrecision
 
     public init(
         directory: URL? = nil,
         computeUnits: KokoroAneComputeUnits = .default,
         variant: KokoroAneVariant = .english,
-        version: KokoroAneVersion = .legacy
+        version: KokoroAneVersion = .legacy,
+        vocoderPrecision: KokoroAneVocoderPrecision = .float16
     ) {
         self.version = version
         self.directory = directory
         self.computeUnits = computeUnits
         self.variant = variant
+        self.vocoderPrecision = vocoderPrecision
+    }
+
+    /// Bundle a legacy stage loads from: the opt-in fp32 Vocoder replaces the
+    /// default one (#1135); every other stage uses ``KokoroAneStage/bundleName``.
+    static func bundleName(for stage: KokoroAneStage, vocoderPrecision: KokoroAneVocoderPrecision) -> String {
+        stage == .vocoder && vocoderPrecision == .float32 ? ModelNames.KokoroAne.vocoderFloat32 : stage.bundleName
     }
 
     /// Download (if missing), load all 7 mlmodelcs, parse vocab + default voice.
@@ -223,6 +232,9 @@ public actor KokoroAneModelStore {
                 throw KokoroAneError.inputProcessingFailed("ANE-v3 requires macOS 15 / iOS 18 or newer")
             }
             try KokoroAneV3Assets.validateVariant(variant)
+            guard vocoderPrecision == .float16 else {
+                throw KokoroAneError.inputProcessingFailed("ANE-v3 does not support the fp32 vocoder yet (#1135)")
+            }
             guard [.default, .aneTailGpu, .aneTailCpu].contains(computeUnits) else {
                 throw KokoroAneError.inputProcessingFailed(
                     "ANE-v3 supports the default, aneTailGpu or aneTailCpu routing only")
@@ -247,16 +259,18 @@ public actor KokoroAneModelStore {
         }
 
         let repoDir = try await KokoroAneResourceDownloader.ensureModels(
-            variant: variant, directory: directory)
+            variant: variant, directory: directory,
+            additionalModelNames: vocoderPrecision == .float32 ? [ModelNames.KokoroAne.vocoderFloat32] : [])
 
         logger.info("Loading 7 KokoroAne CoreML models from \(repoDir.path)...")
         let loadStart = Date()
 
         var pendingModels: [KokoroAneStage: MLModel] = [:]
         for stage in KokoroAneStage.allCases {
-            let url = repoDir.appendingPathComponent(stage.bundleName)
+            let bundleName = Self.bundleName(for: stage, vocoderPrecision: vocoderPrecision)
+            let url = repoDir.appendingPathComponent(bundleName)
             guard FileManager.default.fileExists(atPath: url.path) else {
-                throw KokoroAneError.modelNotLoaded(stage.bundleName)
+                throw KokoroAneError.modelNotLoaded(bundleName)
             }
             let cfg = MLModelConfiguration()
             cfg.computeUnits = computeUnits.units(for: stage)

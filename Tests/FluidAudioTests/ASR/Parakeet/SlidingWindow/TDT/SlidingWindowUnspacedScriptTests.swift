@@ -126,6 +126,117 @@ final class SlidingWindowUnspacedScriptTests: XCTestCase {
         XCTAssertFalse(AsrManager.isUnspacedJitterCopy(keptTokens: [], keptTimestamps: [], token: 3, timestamp: 104))
     }
 
+    // #1139, real-time runs of FLEURS ja_jp 0005+0006+0008 (tdtJa token ids, global frames). The
+    // previous window ends "己中心的" + tail "で欧兵で。" from で@145; the re-decode emits from 140.
+    private let seamPieces = ["己", "中", "心", "的", "で", "欧", "兵", "で", "。"]
+    private let seamTokens = [1796, 51, 307, 768, 9, 1888, 1208, 9, 1]
+    private let seamTimestamps = [135, 137, 140, 143, 145, 149, 152, 155, 157]
+
+    private func reconciledText(currentPieces: [String], currentTokens: [Int], currentTimestamps: [Int]) -> String {
+        let tailStart = AsrManager.unspacedTailStart(timestamps: seamTimestamps, stableTokenFloor: 0)!
+        let seam = AsrManager.reconcileUnspacedSeam(
+            previousTimestamps: seamTimestamps, tailStart: tailStart, currentTimestamps: currentTimestamps)
+        let keptCount = seamTokens.count - seam.droppedPrevious
+        let copies = AsrManager.unspacedKeptCopyCount(
+            previousTokens: seamTokens, previousPieces: seamPieces, previousTimestamps: seamTimestamps,
+            keptCount: keptCount, currentTokens: Array(currentTokens.dropFirst(seam.droppedCurrent)),
+            currentPieces: Array(currentPieces.dropFirst(seam.droppedCurrent)),
+            currentTimestamps: Array(currentTimestamps.dropFirst(seam.droppedCurrent)))
+        return (seamPieces.prefix(keptCount) + currentPieces.dropFirst(seam.droppedCurrent + copies)).joined()
+    }
+
+    /// The re-decode re-emits kept 心 (same id and frame) and then 的な over kept 的: both go,
+    /// "己中心的不横柄で", never "己中心的心的な不横柄で".
+    func testARedecodeThatReHearsTheKeptTokensDropsThem() {
+        XCTAssertEqual(
+            reconciledText(
+                currentPieces: ["心", "的な", "不", "横", "柄", "で", "失", "礼"],
+                currentTokens: [307, 510, 325, 861, 1748, 9, 805, 1281],
+                currentTimestamps: [140, 144, 148, 151, 154, 157, 160, 163]),
+            "己中心的不横柄で失礼")
+    }
+
+    /// When the tail starts one token later (kept "己中心的で"), 的な starts inside the kept 的,
+    /// not the kept で: "己中心的で不横柄で", never "己中心的で的な不横柄で".
+    func testARedecodeSegmentedAnotherWayDropsItsCopyOfAnEarlierKeptToken() {
+        let copies = AsrManager.unspacedKeptCopyCount(
+            previousTokens: seamTokens, previousPieces: seamPieces, previousTimestamps: seamTimestamps,
+            keptCount: 5, currentTokens: [510, 325, 861], currentPieces: ["的な", "不", "横"],
+            currentTimestamps: [144, 148, 151])
+        XCTAssertEqual(copies, 1)
+    }
+
+    /// A merged 的な is often emitted where the kept 的's successor starts. Offline with 1.28 s of
+    /// leading silence: kept 心@144 的@147, retired だ@149; the re-decode gives 心@144 的な@149.
+    /// With 1.16 s: kept 的@145 で@147, retired 欧@151; the re-decode gives 的な@147.
+    func testAMergedTokenAtTheSuccessorsFrameIsACopy() {
+        XCTAssertEqual(
+            AsrManager.unspacedKeptCopyCount(
+                previousTokens: [1796, 51, 307, 768, 43, 867], previousPieces: ["己", "中", "心", "的", "だ", "大きな"],
+                previousTimestamps: [139, 141, 144, 147, 149, 152], keptCount: 4,
+                currentTokens: [307, 510, 861], currentPieces: ["心", "的な", "横"],
+                currentTimestamps: [144, 149, 153]),
+            2, "己中心的横, never 己中心的心的な横")
+        XCTAssertEqual(
+            AsrManager.unspacedKeptCopyCount(
+                previousTokens: [1796, 51, 307, 768, 9, 1888], previousPieces: ["己", "中", "心", "的", "で", "欧"],
+                previousTimestamps: [137, 140, 142, 145, 147, 151], keptCount: 5,
+                currentTokens: [510, 861, 1748], currentPieces: ["的な", "横", "柄"],
+                currentTimestamps: [147, 153, 157]),
+            1, "己中心的で横柄, never 己中心的で的な横柄")
+    }
+
+    /// The re-decode starts after the kept tokens: nothing goes, "己中心的で不横柄で".
+    func testARedecodeAfterTheKeptTokensKeepsEverything() {
+        XCTAssertEqual(
+            reconciledText(
+                currentPieces: ["で", "不", "横", "柄", "で", "失", "礼"],
+                currentTokens: [9, 325, 861, 1748, 9, 805, 1281],
+                currentTimestamps: [146, 148, 151, 154, 157, 160, 163]),
+            "己中心的で不横柄で失礼")
+    }
+
+    /// A token that begins like the last kept token but is closer to the retired one after it is
+    /// that one's early re-emission: `でき` stays after kept `で` ("東京でできた").
+    func testAnEarlyReemissionOfTheRetiredTokenStays() {
+        XCTAssertEqual(
+            AsrManager.unspacedKeptCopyCount(
+                previousTokens: [1, 2, 3, 4], previousPieces: ["東", "京", "で", "でき"],
+                previousTimestamps: [137, 140, 143, 146], keptCount: 3, currentTokens: [4, 5],
+                currentPieces: ["でき", "た"], currentTimestamps: [145, 148]),
+            0)
+    }
+
+    /// Each kept token is matched once: the re-decode's copy of kept こ goes, and the こ after it
+    /// is the second one of "ここ".
+    func testAKeptTokenIsCopiedOnce() {
+        XCTAssertEqual(
+            AsrManager.unspacedKeptCopyCount(
+                previousTokens: [1, 2, 2], previousPieces: ["で", "こ", "こ"], previousTimestamps: [96, 100, 103],
+                keptCount: 2, currentTokens: [2, 2, 3], currentPieces: ["こ", "こ", "に"],
+                currentTimestamps: [100, 103, 106]),
+            1)
+    }
+
+    /// The single-token copies the jitter rule already covered still go, and an equal character
+    /// past the last kept token still stays ("多いといわれ").
+    func testTheKeptCopyCountCoversTheJitterCopies() {
+        // ほ@97 ぼ@99 全@104 | 員@106 …: the re-decode's 全@103 goes.
+        XCTAssertEqual(
+            AsrManager.unspacedKeptCopyCount(
+                previousTokens: [1, 2, 3, 4, 5], previousPieces: ["ほ", "ぼ", "全", "員", "が"],
+                previousTimestamps: [97, 99, 104, 106, 108], keptCount: 3, currentTokens: [3, 4],
+                currentPieces: ["全", "員"], currentTimestamps: [103, 105]),
+            1)
+        // 多@969 い@971 と@972 | い@974 われ: the い stays.
+        XCTAssertEqual(
+            AsrManager.unspacedKeptCopyCount(
+                previousTokens: [1, 2, 3, 2, 6], previousPieces: ["多", "い", "と", "い", "われ"],
+                previousTimestamps: [969, 971, 972, 974, 976], keptCount: 3, currentTokens: [2, 6],
+                currentPieces: ["い", "われ"], currentTimestamps: [974, 976]),
+            0)
+    }
+
     /// Only the tail can still be retired, so the tokens ahead of it are stable.
     func testJapaneseTokensAheadOfTheTailAreStable() {
         XCTAssertEqual(

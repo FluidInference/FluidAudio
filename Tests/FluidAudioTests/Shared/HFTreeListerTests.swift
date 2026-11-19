@@ -277,6 +277,57 @@ final class HFTreeListerTests: XCTestCase {
                 atPath: repoPath.appendingPathComponent("\(model)/coremldata.bin").path))
     }
 
+    /// A repo download replaces a cached file whose size is not the published one and
+    /// keeps one that matches (issue #1147: an older download left a `weight.bin` 9 MB
+    /// longer than published, and nothing ever fetched it again).
+    func testDownloadRepoReplacesACachedFileOfTheWrongSize() async throws {
+        let workDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("size-repair-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: workDir) }
+        LinkedTreeStubURLProtocol.reset()
+
+        let model = ModelNames.VAD.sileroVadFile
+        let root = try ModelRegistry.apiModels(Repo.vad.remotePath, "tree/main").absoluteString
+        let modelDir = try ModelRegistry.apiModels(Repo.vad.remotePath, "tree/main/\(model)")
+            .absoluteString
+        LinkedTreeStubURLProtocol.addJSONPage(
+            url: root,
+            items: [
+                ["path": model, "type": "directory"],
+                ["path": "config.json", "type": "file", "size": 10],
+                ["path": "tokenizer.json", "type": "file", "size": 10],
+            ])
+        LinkedTreeStubURLProtocol.addJSONPage(
+            url: modelDir,
+            items: [["path": "\(model)/coremldata.bin", "type": "file", "size": 10]])
+        LinkedTreeStubURLProtocol.fileBody = Data(String(repeating: "x", count: 10).utf8)
+
+        let repoPath = workDir.appendingPathComponent(Repo.vad.folderName)
+        let oversized = repoPath.appendingPathComponent("\(model)/coremldata.bin")
+        let matching = repoPath.appendingPathComponent("config.json")
+        try FileManager.default.createDirectory(
+            at: oversized.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(String(repeating: "y", count: 19).utf8).write(to: oversized)
+        try Data(String(repeating: "z", count: 10).utf8).write(to: matching)
+        // A link counts by its target, so a link to a file of the published size stays.
+        let linkTarget = workDir.appendingPathComponent("blobs/tokenizer")
+        try FileManager.default.createDirectory(
+            at: linkTarget.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(String(repeating: "q", count: 10).utf8).write(to: linkTarget)
+        let link = repoPath.appendingPathComponent("tokenizer.json")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: linkTarget)
+
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [LinkedTreeStubURLProtocol.self]
+        try await ModelHub.download(.vad, to: workDir, configuration: config)
+
+        XCTAssertEqual(try Data(contentsOf: oversized), Data(String(repeating: "x", count: 10).utf8))
+        XCTAssertEqual(try Data(contentsOf: matching), Data(String(repeating: "z", count: 10).utf8))
+        XCTAssertEqual(
+            try FileManager.default.destinationOfSymbolicLink(atPath: link.path), linkTarget.path)
+        XCTAssertEqual(try Data(contentsOf: linkTarget), Data(String(repeating: "q", count: 10).utf8))
+    }
+
     // MARK: - Typed errors
 
     func testRateLimitedPageThrowsTypedError() async throws {

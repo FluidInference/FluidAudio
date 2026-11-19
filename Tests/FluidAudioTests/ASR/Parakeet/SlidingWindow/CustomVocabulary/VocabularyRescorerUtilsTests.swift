@@ -148,10 +148,20 @@ final class VocabularyRescorerUtilsTests: XCTestCase {
         XCTAssertEqual(config.adaptiveCbw(baseCbw: 4.5, tokenCount: 5), 4.5, accuracy: 0.01)
     }
 
-    func testSpotterRescueFloorsDisabledByDefault() {
-        let config = VocabularyRescorer.Config.default
-        XCTAssertEqual(config.spotterRescueMinSimilarity, 0.0, accuracy: 0.0001)
-        XCTAssertEqual(config.spotterRescueMultiWordMinSimilarity, 0.0, accuracy: 0.0001)
+    func testSpotterRescueFloorsAreOnByDefault() {
+        // Without them the rescue replaced unrelated speech with a term (#1151). Clear the env overrides so the
+        // assertion reflects the code default (a freshly constructed Config reads the env at init).
+        let names = ["FLUID_SPOTTER_MIN_SIM", "FLUID_SPOTTER_MIN_SIM_MULTI"]
+        let saved = names.map { ProcessInfo.processInfo.environment[$0] }
+        names.forEach { unsetenv($0) }
+        defer {
+            for (name, value) in zip(names, saved) {
+                if let value { setenv(name, value, 1) }
+            }
+        }
+        let config = VocabularyRescorer.Config()
+        XCTAssertEqual(config.spotterRescueMinSimilarity, 0.30, accuracy: 0.0001)
+        XCTAssertEqual(config.spotterRescueMultiWordMinSimilarity, 0.50, accuracy: 0.0001)
     }
 
     func testSpotterRescueEnabledByDefault() {

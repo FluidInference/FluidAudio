@@ -73,7 +73,7 @@ extension StreamingNemotronMultilingualAsrManager {
         melFeatures: Int,
         preEncodeCache: Int,
         melExtractor: NemotronMelExtractor,
-        encoder: MLModel
+        encoder: NemotronMultilingualEncoder
     ) async throws -> (
         encoded: MLMultiArray,
         encoderProj: MLMultiArray?,

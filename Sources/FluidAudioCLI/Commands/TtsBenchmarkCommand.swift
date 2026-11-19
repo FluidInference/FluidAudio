@@ -351,7 +351,7 @@ public enum TtsBenchmarkCommand {
                 let versionRaw = paradeeVersionArg?.lowercased() ?? ""
                 let version =
                     ParadeeVersion(rawValue: versionRaw.hasPrefix("v") ? String(versionRaw.dropFirst()) : versionRaw)
-                    ?? .v12
+                    ?? .v13
                 let voiceName = voice ?? ParadeeVoice.afHeart.rawValue
                 guard let paradeeVoice = ParadeeVoice(rawValue: voiceName), version.voices.contains(paradeeVoice)
                 else {
@@ -880,7 +880,7 @@ public enum TtsBenchmarkCommand {
             version: version, variant: variant,
             computeUnits: appliedPreset == .allAne ? .cpuAndNeuralEngine : .cpuOnly)
         let coldStart = Date()
-        try await manager.initialize()
+        try await manager.initialize(voices: [voice])
         let coldStartS = Date().timeIntervalSince(coldStart)
         logger.info(String(format: "Cold start (initialize): %.2fs", coldStartS))
 
@@ -901,7 +901,7 @@ public enum TtsBenchmarkCommand {
             audioDir: audioDir,
             asrChoice: asrChoice,
             normalizeWavs: false,
-            extraSummary: ["language": "en", "seed": 0]
+            extraSummary: ["language": voice.language.rawValue, "seed": 0]
         ) { text in
             let t0 = Date()
             let samples = try await manager.synthesize(text: text, voice: voice)
@@ -1568,9 +1568,10 @@ public enum TtsBenchmarkCommand {
                                         see Documentation/TTS/MinimaxCorpus.md)
               --corpus-path <path>      Custom corpus file (overrides --corpus)
               --voice <name>            Voice id (KokoroAne/PocketTTS/Paradee;
-                                        Paradee v1.2: af_heart, bf_isabella,
-                                        am_puck, bm_fable)
-              --paradee-version <v>     Paradee release: 1.2 (default) or 1.0
+                                        Paradee v1.3: af_heart, bf_isabella,
+                                        am_puck, bm_fable, hf_alpha, hm_omega,
+                                        ff_siwis, em_alex)
+              --paradee-version <v>     Paradee release: 1.3 (default), 1.2 or 1.0
               --language <code>         PocketTTS lang pack code
               --compute-units <preset>  default | all-ane | cpu-and-gpu | cpu-only | ane-tail-gpu
                                         (kokoro-ane on M5/macOS 26.5 needs ane-tail-gpu; see #667)

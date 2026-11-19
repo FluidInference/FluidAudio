@@ -139,6 +139,19 @@ and stitches the windows at the longest common token run inside the overlap.
 The seam is cut after the matched run on both sides, so neither window's copy
 of the overlap audio is emitted twice.
 
+Japanese and Chinese take a different path. There the sliding window lost a
+quarter of long read speech (#1140): a window that starts a few seconds into an
+utterance makes the model skip ahead to a later sentence and end early, and
+windows holding several sentences drop some (upstream PyTorch does the same on
+those windows). For these languages `transcribeLong` cuts the audio into
+non-overlapping chunks of at most 20 s, each ending at the quietest 100 ms of
+the 10 s before that limit, and joins the chunk texts. On FLEURS read speech
+joined into 2–3 minute files (4 files per language, with and without 0.5 s
+gaps), character error rate went from 20.0% / 15.8% to 3.8% / 7.9% for
+Japanese and from 26.9% / 15.5% to 11.9% / 12.2% for Chinese. The same cut
+did not help German or Spanish, whose long sentences get split, so the other
+languages keep the sliding window.
+
 `TranscriptionResult` also exposes `encoderSeconds`, `decoderSeconds`, and
 `totalSeconds` for per-stage profiling.
 

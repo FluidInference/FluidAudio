@@ -44,6 +44,11 @@ print("ITN version: \(normalizer.version ?? "unknown")")
 // Normalize spoken-form text
 let result = normalizer.normalize("two hundred dollars")
 // Returns "$200"
+
+// Sentence mode: keep everyday small numbers as words, as NeMo does
+normalizer.normalizeSentence("no one knows")                             // "no 1 knows"
+normalizer.normalizeSentence("no one knows", smallNumbersAsWords: true)  // "no one knows"
+normalizer.normalizeSentence("ages three to five", smallNumbersAsWords: true)  // unchanged, not "04:57"
 ```
 
 ### TN (Written to Spoken)

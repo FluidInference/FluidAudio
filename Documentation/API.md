@@ -228,6 +228,8 @@ Real-time streaming ASR with End-of-Utterance detection using Parakeet EOU model
   - Finalize processing and return accumulated transcript
 - `reset() async`
   - Reset all state for next utterance
+- `rearm(keepTranscript:) async throws`
+  - Rebuild the encoder caches and decoder state after a raw `<EOU>`, keep the audio since the debounce anchor and replay it through the fresh state (see "End-of-utterance contract")
 - `setEouCallback(_:)`
   - Set callback invoked when End-of-Utterance is detected
 - `appendAudio(_:) throws`
@@ -258,6 +260,28 @@ let transcript = try await manager.finish()
 // Reset for next utterance
 await manager.reset()
 ```
+
+**End-of-utterance contract:**
+
+The decoder stops at a raw `<EOU>` token and does not decode past it. NeMo's reference voice agent resets the audio
+buffer, encoder caches and decoder hypothesis on every raw `<EOU>`; this manager does not do that for you, so speech
+spoken after a raw `<EOU>` and before the debounce confirms the end (`eouDebounceMs`, 1280 ms by default) decodes
+nothing. The confirmed-end flag (`eouDetected`) is also set once and stays set, so the EOU callback fires at most once
+per manager state. After a confirmed end, do one of:
+
+- `reset()` to start a new utterance. The transcript and the buffered audio are dropped.
+- `rearm(keepTranscript: true)` to continue. The encoder caches and decoder state are rebuilt, the `eouDetected`
+  latch and the debounce anchor are cleared, and the audio shifted out since the anchor is replayed through the
+  fresh state, so the words after the raw `<EOU>` are decoded and the next utterance can confirm. Pass `false` to
+  also clear the transcript.
+
+```swift
+await manager.setEouCallback { _ in
+    Task { try await manager.rearm(keepTranscript: true) }
+}
+```
+
+`rearm` called while a chunk is being decoded (as above) takes effect as soon as that chunk has been consumed.
 
 **Performance:**
 - Real-time factor: ~5x RTF (160ms), ~12x RTF (320ms) on Apple Silicon
