@@ -277,11 +277,11 @@ public actor StreamingNemotronAsrManager {
         try? fileManager.removeItem(at: cacheDir.appendingPathComponent(subdirectory).deletingLastPathComponent())
     }
 
-    /// `encoder/encoder_int8_v2.mlmodelc` (#1170) when `directory` has it, else
-    /// `encoder/encoder_int8.mlmodelc`.
+    /// `encoder/encoder_int8_v2.mlmodelc` (#1170) when `directory` has a
+    /// complete copy, else `encoder/encoder_int8.mlmodelc`.
     static func compiledEncoderName(in directory: URL) -> String {
         let encoderV2 = ModelNames.NemotronStreaming.encoderV2File
-        return FileManager.default.fileExists(atPath: directory.appendingPathComponent(encoderV2).path)
+        return ModelCache.isCacheComplete(at: directory, requiredFiles: [encoderV2])
             ? encoderV2 : ModelNames.NemotronStreaming.encoderInt8File
     }
 

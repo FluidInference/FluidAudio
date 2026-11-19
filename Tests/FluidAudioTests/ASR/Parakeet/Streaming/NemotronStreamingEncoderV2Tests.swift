@@ -64,10 +64,20 @@ final class NemotronStreamingEncoderV2Tests: XCTestCase {
         }
     }
 
-    func testLoaderPrefersEncoderV2WhenTheDirectoryHasIt() throws {
+    private func makeCompiledBundle(_ name: String) throws {
+        let bundle = workDir.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+        try Data("c".utf8).write(to: bundle.appendingPathComponent("coremldata.bin"))
+        try Data("{ }".utf8).write(to: bundle.appendingPathComponent("model.mil"))
+    }
+
+    func testLoaderPrefersEncoderV2OnlyWhenItIsComplete() throws {
         XCTAssertEqual(Manager.compiledEncoderName(in: workDir), Names.encoderInt8File)
+        // An incomplete copy (no coremldata.bin) is not loaded.
         try FileManager.default.createDirectory(
             at: workDir.appendingPathComponent(Names.encoderV2File), withIntermediateDirectories: true)
+        XCTAssertEqual(Manager.compiledEncoderName(in: workDir), Names.encoderInt8File)
+        try makeCompiledBundle(Names.encoderV2File)
         XCTAssertEqual(Manager.compiledEncoderName(in: workDir), Names.encoderV2File)
     }
 
@@ -110,10 +120,11 @@ final class NemotronStreamingEncoderV2Tests: XCTestCase {
             XCTFail("Without a cached encoder the failed download must throw")
         } catch {}
 
-        let int8 = workDir.appendingPathComponent(Names.encoderInt8File)
-        try FileManager.default.createDirectory(at: int8, withIntermediateDirectories: true)
-        try Data("c".utf8).write(to: int8.appendingPathComponent("coremldata.bin"))
-        try Data("{ }".utf8).write(to: int8.appendingPathComponent("model.mil"))
+        try makeCompiledBundle(Names.encoderInt8File)
+        // An interrupted v2 copy next to it must not win over the complete int8.
+        try FileManager.default.createDirectory(
+            at: workDir.appendingPathComponent(Names.encoderV2File).appendingPathComponent("weights"),
+            withIntermediateDirectories: true)
         try await Manager.ensureEncoderV2(
             chunkSize: .ms1120, in: workDir, progressHandler: nil, configuration: stubConfiguration)
         XCTAssertEqual(Manager.compiledEncoderName(in: workDir), Names.encoderInt8File)
