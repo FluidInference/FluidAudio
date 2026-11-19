@@ -217,6 +217,8 @@ enum TranscribeCommand {
         var modelDir: String?
         var localModelDir: String?
         var customVocabPath: String?
+        /// `--files-from <path>`: one audio path per line, `#` comments and blanks skipped.
+        var filesFromPath: String?
         var parakeetVariant: StreamingModelVariant?
         var language: Language?
         var encoderPrecision: ParakeetEncoderPrecision = .int8
@@ -356,6 +358,11 @@ enum TranscribeCommand {
             case "--model-dir":
                 if i + 1 < args.count {
                     parsed.modelDir = args[i + 1]
+                    i += 1
+                }
+            case "--files-from":
+                if i + 1 < args.count {
+                    parsed.filesFromPath = args[i + 1]
                     i += 1
                 }
             case "--custom-vocab":
@@ -519,6 +526,11 @@ enum TranscribeCommand {
             exit(1)
         }
 
+        // One model load, many files. Transcribing a folder used to mean one process per file, and the
+        // model load — a few hundred milliseconds against a voice note of one or two seconds — was most
+        // of the work. `--files-from` keeps the manager alive across the list.
+        let audioFiles = try! loadFileList(primary: audioFile, from: parsed.filesFromPath)
+
         if parsed.unified {
             logger.info("Using Parakeet Unified (batch) with token timings\n")
             await runUnified(audioFile: audioFile, args: parsed)
@@ -530,7 +542,7 @@ enum TranscribeCommand {
             await runStreaming(audioFile: audioFile, args: parsed)
         } else {
             logger.info("Using batch mode with direct processing\n")
-            await runBatch(audioFile: audioFile, args: parsed)
+            await runBatch(audioFiles: audioFiles, args: parsed)
         }
     }
 
@@ -641,8 +653,23 @@ enum TranscribeCommand {
             encoderComputeUnits: args.encoderComputeUnits)
     }
 
+    /// `--files-from` list plus the positional file, in that order, de-duplicated by absolute path.
+    private static func loadFileList(primary: String, from manifest: String?) -> [String] {
+        var files = [primary]
+        if let manifest {
+            let text = (try? String(contentsOfFile: manifest, encoding: .utf8)) ?? ""
+            for raw in text.split(separator: "\n") {
+                let line = raw.trimmingCharacters(in: .whitespaces)
+                if line.isEmpty || line.hasPrefix("#") { continue }
+                files.append(line)
+            }
+        }
+        var seen = Set<String>()
+        return files.filter { seen.insert(URL(fileURLWithPath: $0).standardizedFileURL.path).inserted }
+    }
+
     private static func runBatch(
-        audioFile: String, args: ParsedArgs
+        audioFiles: [String], args: ParsedArgs
     ) async {
         do {
             let models = try await loadModels(args)
@@ -662,6 +689,31 @@ enum TranscribeCommand {
 
             logger.info("ASR Manager initialized successfully")
 
+            for (offset, audioFile) in audioFiles.enumerated() {
+                if audioFiles.count > 1 {
+                    logger.info("[\(offset + 1)/\(audioFiles.count)] \(audioFile)")
+                }
+                await transcribeOne(
+                    audioFile: audioFile, models: models, asrManager: asrManager, args: args,
+                    of: audioFiles.count)
+            }
+
+            await asrManager.cleanup()
+
+        } catch {
+            logger.error("Batch transcription failed: \(error)")
+        }
+    }
+
+    /// One file, with the manager already loaded. Split out so a list costs one model load rather than N.
+    private static func transcribeOne(
+        audioFile: String, models: AsrModels, asrManager: AsrManager, args: ParsedArgs, of total: Int
+    ) async {
+        do {
+            // Assigning the already-loaded models back onto the manager is a handful of references, not
+            // a reload: the CoreML models stay in memory. Without it the second file fails
+            // `notInitialized`, because the manager drops its references after a transcription.
+            try await asrManager.loadModels(models)
             let audioFileURL = URL(fileURLWithPath: audioFile)
             logger.info("Transcribing file: \(audioFileURL) ...")
             var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
@@ -760,6 +812,18 @@ enum TranscribeCommand {
             print(result.text)
 
             if let outputJsonPath = args.outputJsonPath {
+                // A list names a directory; each result takes its input's name.
+                let jsonTarget =
+                    total > 1
+                    ? URL(fileURLWithPath: outputJsonPath, isDirectory: true)
+                        .appendingPathComponent(audioFileURL.deletingPathExtension().lastPathComponent)
+                        .appendingPathExtension("json").path
+                    : outputJsonPath
+                if total > 1 {
+                    try FileManager.default.createDirectory(
+                        at: URL(fileURLWithPath: outputJsonPath, isDirectory: true),
+                        withIntermediateDirectories: true)
+                }
                 let wordTimings = WordTimingMerger.mergeTokensIntoWords(result.tokenTimings ?? [])
                 let modelVersionLabel: String
                 switch args.modelVersion {
@@ -786,8 +850,8 @@ enum TranscribeCommand {
                     wordTimings: wordTimings,
                     timingsConfirmed: nil
                 )
-                try writeJsonOutput(output, to: outputJsonPath)
-                logger.info("💾 JSON results saved to: \(outputJsonPath)")
+                try writeJsonOutput(output, to: jsonTarget)
+                logger.info("💾 JSON results saved to: \(jsonTarget)")
             }
 
             if args.wordTimestamps {
@@ -1236,7 +1300,8 @@ enum TranscribeCommand {
                 --metadata                     Show confidence, start time, and end time
                 --word-timestamps              Show word-level timestamps in results
                 --encoder-compute-units <u>    Encoder placement: ane (default; phonon25: gpu), gpu, cpu, all
-                --output-json <file>           Save full transcription to JSON
+                --output-json <path>           Save full transcription to JSON; a directory when
+                                               --files-from has more than one entry
                 --model-version <name>         v2, v3, redux, ultra, phonon2, phonon25, bark3, bark3-clean, tdt-ctc-110m, tdt-ja, unified, nemotron-unified (default: v3)
                 --unified-language <code>      nemotron-unified language prompt: auto (default), en, de, fr, es, it, pl, ...
                 --unified-precision <p>        unified encoder precision: int8 or fp16 (nemotron-unified default fp16)
@@ -1246,6 +1311,9 @@ enum TranscribeCommand {
                                                int8-v2 = int8-linear rebuild, avoids #760)
                 --language <code>              Script hint (e.g., en, de, fr, es): keeps v3 to the language's
                                                script; Latin languages decode alike, except fr (#1063)
+                --files-from <file>            Transcribe every path in <file>, one per line
+                                               ('#' comments). One model load for the whole list,
+                                               which is most of the cost for short voice notes.
                 --custom-vocab <file>          Apply vocabulary boosting in batch mode
                 --no-mel-context               Disable 80ms mel-context prepend for long-form batch ASR
                                                (default: disabled on v3 and tdt-ja, enabled otherwise)
