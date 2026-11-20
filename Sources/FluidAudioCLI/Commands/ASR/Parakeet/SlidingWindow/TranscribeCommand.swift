@@ -219,6 +219,8 @@ enum TranscribeCommand {
         var customVocabPath: String?
         /// `--files-from <path>`: one audio path per line, `#` comments and blanks skipped.
         var filesFromPath: String?
+        /// `--concurrency <n>`: transcribe this many files at once, sharing one set of models.
+        var concurrency: Int = 1
         var parakeetVariant: StreamingModelVariant?
         var language: Language?
         var encoderPrecision: ParakeetEncoderPrecision = .int8
@@ -358,6 +360,11 @@ enum TranscribeCommand {
             case "--model-dir":
                 if i + 1 < args.count {
                     parsed.modelDir = args[i + 1]
+                    i += 1
+                }
+            case "--concurrency":
+                if i + 1 < args.count, let n = Int(args[i + 1]), n > 0 {
+                    parsed.concurrency = min(n, 32)
                     i += 1
                 }
             case "--files-from":
@@ -684,36 +691,77 @@ enum TranscribeCommand {
                     ?? ASRConfig.default.seamGapRepairMinGapSeconds,
                 seamTimingRealignment: args.seamTimingRealignment
             )
-            let asrManager = AsrManager(config: asrConfig)
-            try await asrManager.loadModels(models)
+            // One `ASREncoder` load, N managers. The models are the expensive, shared part; a manager is a
+            // decoder state and a few references, so a handful of them costs nothing and lets the files
+            // in a list be transcribed at the same time.
+            let workers = max(1, min(args.concurrency, audioFiles.count))
+            var managers: [AsrManager] = []
+            for _ in 0..<workers {
+                let manager = AsrManager(config: asrConfig)
+                try await manager.loadModels(models)
+                managers.append(manager)
+            }
+            logger.info("ASR Manager initialized successfully (\(workers) concurrent)")
+            let box = AsrModelsBox(models: models)
 
-            logger.info("ASR Manager initialized successfully")
-
-            for (offset, audioFile) in audioFiles.enumerated() {
-                if audioFiles.count > 1 {
-                    logger.info("[\(offset + 1)/\(audioFiles.count)] \(audioFile)")
+            if workers == 1 {
+                for (offset, audioFile) in audioFiles.enumerated() {
+                    if audioFiles.count > 1 {
+                        logger.info("[\(offset + 1)/\(audioFiles.count)] \(audioFile)")
+                    }
+                    await transcribeOne(
+                        audioFile: audioFile, box: box, asrManager: managers[0], args: args,
+                        of: audioFiles.count)
                 }
-                await transcribeOne(
-                    audioFile: audioFile, models: models, asrManager: asrManager, args: args,
-                    of: audioFiles.count)
+            } else {
+                // One task per manager, each with a fixed slice: no hand-off, no shared queue, so a
+                // manager is never used by two tasks at once. Files are dealt round-robin so the slices
+                // carry a similar mix of lengths — a slice of only long notes would set the wall time.
+                var slices = Array(repeating: [String](), count: workers)
+                for (offset, file) in audioFiles.enumerated() {
+                    slices[offset % workers].append(file)
+                }
+                await withTaskGroup(of: Void.self) { group in
+                    for (slot, slice) in slices.enumerated() where !slice.isEmpty {
+                        let manager = managers[slot]
+                        group.addTask {
+                            for file in slice {
+                                await transcribeOne(
+                                    audioFile: file, box: box, asrManager: manager, args: args,
+                                    of: audioFiles.count)
+                            }
+                        }
+                    }
+                    await group.waitForAll()
+                }
             }
 
-            await asrManager.cleanup()
+            for manager in managers {
+                await manager.cleanup()
+            }
 
         } catch {
             logger.error("Batch transcription failed: \(error)")
         }
     }
 
+    /// The loaded CoreML bundle, carried across task boundaries.
+    ///
+    /// `AsrModels` holds CoreML model handles that are read-only once loaded, so sharing them is safe even
+    /// though the type does not say so; this box is the promise, made once, in one place.
+    private struct AsrModelsBox: @unchecked Sendable {
+        let models: AsrModels
+    }
+
     /// One file, with the manager already loaded. Split out so a list costs one model load rather than N.
     private static func transcribeOne(
-        audioFile: String, models: AsrModels, asrManager: AsrManager, args: ParsedArgs, of total: Int
+        audioFile: String, box: AsrModelsBox, asrManager: AsrManager, args: ParsedArgs, of total: Int
     ) async {
         do {
             // Assigning the already-loaded models back onto the manager is a handful of references, not
             // a reload: the CoreML models stay in memory. Without it the second file fails
             // `notInitialized`, because the manager drops its references after a transcription.
-            try await asrManager.loadModels(models)
+            try await asrManager.loadModels(box.models)
             let audioFileURL = URL(fileURLWithPath: audioFile)
             logger.info("Transcribing file: \(audioFileURL) ...")
             var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
@@ -1311,6 +1359,8 @@ enum TranscribeCommand {
                                                int8-v2 = int8-linear rebuild, avoids #760)
                 --language <code>              Script hint (e.g., en, de, fr, es): keeps v3 to the language's
                                                script; Latin languages decode alike, except fr (#1063)
+                --concurrency <n>              Transcribe n files at once over one set of models
+                                               (default 1). Only meaningful with --files-from.
                 --files-from <file>            Transcribe every path in <file>, one per line
                                                ('#' comments). One model load for the whole list,
                                                which is most of the cost for short voice notes.
