@@ -540,7 +540,9 @@ enum TranscribeCommand {
         do {
             audioFiles = try loadFileList(primary: audioFile, from: parsed.filesFromPath)
         } catch {
-            fputs("ERROR: cannot read --files-from \(parsed.filesFromPath ?? ""): \(error.localizedDescription)\n", stderr)
+            fputs(
+                "ERROR: cannot read --files-from \(parsed.filesFromPath ?? ""): \(error.localizedDescription)\n", stderr
+            )
             exit(1)
         }
 
@@ -701,12 +703,14 @@ enum TranscribeCommand {
             // Same stem, different file: keep both by disambiguating with the extension, then a counter.
             if !seen.insert(target.lowercased()).inserted {
                 let ext = URL(fileURLWithPath: file).pathExtension
-                target = URL(fileURLWithPath: base, isDirectory: true)
+                target =
+                    URL(fileURLWithPath: base, isDirectory: true)
                     .appendingPathComponent("\(name)-\(ext.isEmpty ? "audio" : ext)")
                     .appendingPathExtension("json").path
                 var n = 2
                 while !seen.insert(target.lowercased()).inserted {
-                    target = URL(fileURLWithPath: base, isDirectory: true)
+                    target =
+                        URL(fileURLWithPath: base, isDirectory: true)
                         .appendingPathComponent("\(name)-\(ext)-\(n)").appendingPathExtension("json").path
                     n += 1
                 }
@@ -914,7 +918,8 @@ enum TranscribeCommand {
                 // two inputs with one stem cannot overwrite each other.
                 let jsonTarget =
                     total > 1
-                    ? (jsonTarget ?? URL(fileURLWithPath: outputJsonPath, isDirectory: true)
+                    ? (jsonTarget
+                        ?? URL(fileURLWithPath: outputJsonPath, isDirectory: true)
                         .appendingPathComponent(audioFileURL.deletingPathExtension().lastPathComponent)
                         .appendingPathExtension("json").path)
                     : outputJsonPath

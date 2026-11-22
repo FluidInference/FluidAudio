@@ -1,0 +1,4 @@
+module CNemoTextProcessing {
+    header "nemo_text_processing.h"
+    export *
+}
