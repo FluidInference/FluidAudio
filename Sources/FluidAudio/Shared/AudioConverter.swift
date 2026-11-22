@@ -10,7 +10,8 @@ import os
 /// Implementation notes:
 /// - Uses `AVAudioConverter` for all sample-rate, sample-format, and channel-count conversions.
 /// - Avoids any manual resampling; only raw sample extraction occurs after conversion.
-/// - Creates a new converter for each operation (stateless).
+/// - Reuses the last `AVAudioConverter` while the formats match and resets it before every operation, so each
+///   call stays stateless and matches a freshly created converter bit for bit.
 /// - Applies one `ResamplerQuality` to every conversion, so for mono and stereo
 ///   input a file gets the same samples however a host reads it (#1112).
 ///   Buffers with more than two channels go through `linearResample` instead.
@@ -37,6 +38,9 @@ final public class AudioConverter: Sendable {
     private let targetFormat: AVAudioFormat
     private let resamplerQuality: ResamplerQuality
     private let debug: Bool
+    /// Building a mastering-quality converter costs about as much as converting a short buffer.
+    /// A converter is checked out for each call, so concurrent callers never share one.
+    private let cachedConverter = OSAllocatedUnfairLock<AVAudioConverter?>(uncheckedState: nil)
 
     /// Public initializer so external modules (e.g. CLI) can construct the converter
     /// - Parameters:
@@ -456,10 +460,8 @@ final public class AudioConverter: Sendable {
             return try linearResample(buffer, to: format)
         }
 
-        guard let converter = AVAudioConverter(from: inputFormat, to: format) else {
-            throw AudioConverterError.failedToCreateConverter
-        }
-        configure(converter)
+        let converter = try checkOutConverter(from: inputFormat, to: format)
+        defer { checkIn(converter) }
 
         // One fixed-size output buffer, drained until end of stream. Sizing it
         // to the whole estimated output put it under the same UInt32 byte cap
@@ -511,6 +513,26 @@ final public class AudioConverter: Sendable {
         }
 
         return aggregated
+    }
+
+    private func checkOutConverter(from input: AVAudioFormat, to output: AVAudioFormat) throws -> AVAudioConverter {
+        let cached = cachedConverter.withLockUnchecked { slot -> AVAudioConverter? in
+            defer { slot = nil }
+            return slot
+        }
+        if let cached, cached.inputFormat == input, cached.outputFormat == output {
+            cached.reset()
+            return cached
+        }
+        guard let converter = AVAudioConverter(from: input, to: output) else {
+            throw AudioConverterError.failedToCreateConverter
+        }
+        configure(converter)
+        return converter
+    }
+
+    private func checkIn(_ converter: AVAudioConverter) {
+        cachedConverter.withLockUnchecked { $0 = converter }
     }
 
     private func configure(_ converter: AVAudioConverter) {
