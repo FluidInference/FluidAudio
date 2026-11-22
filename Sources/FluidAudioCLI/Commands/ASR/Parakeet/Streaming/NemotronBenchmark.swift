@@ -133,16 +133,12 @@ public class NemotronBenchmark {
             logger.info("Checking LibriSpeech \(config.subset)...")
             try await downloadLibriSpeech(subset: config.subset)
 
-            // 2. Download Nemotron models if needed
-            let modelDir = try await getOrDownloadModels()
-
-            // 3. Load models
+            // 2. Load Nemotron models (downloaded on first use)
             logger.info("Loading Nemotron models...")
-            let manager = StreamingNemotronAsrManager()
-            try await manager.loadModels(from: modelDir)
+            let manager = try await loadManager()
             logger.info("Models loaded successfully")
 
-            // 4. Get audio files
+            // 3. Get audio files
             let datasetPath = getLibriSpeechDirectory().appendingPathComponent(config.subset)
             let audioFiles = try collectLibriSpeechFiles(from: datasetPath)
 
@@ -152,7 +148,7 @@ public class NemotronBenchmark {
             logger.info("Processing \(filesToProcess.count) files from LibriSpeech \(config.subset)")
             logger.info("")
 
-            // 5. Run benchmark
+            // 4. Run benchmark
             var totalErrors = 0
             var totalWords = 0
             var totalAudioDuration: Double = 0
@@ -185,7 +181,7 @@ public class NemotronBenchmark {
                 await manager.reset()
             }
 
-            // 6. Print summary
+            // 5. Print summary
             // Validate that benchmark actually processed data
             guard totalWords > 0 else {
                 throw ASRError.processingFailed("Benchmark failed: no words transcribed (totalWords=0)")
@@ -375,32 +371,18 @@ public class NemotronBenchmark {
         logger.info("LibriSpeech \(subset) downloaded successfully")
     }
 
-    private func getOrDownloadModels() async throws -> URL {
+    private func loadManager() async throws -> StreamingNemotronAsrManager {
+        let manager = StreamingNemotronAsrManager(requestedChunkSize: config.chunkSize)
         if let modelDir = config.modelDir {
-            return modelDir
+            try await manager.loadModels(from: modelDir)
+            return manager
         }
-
-        let repo = config.chunkSize.repo
-
-        // Check default cache location
-        // Note: ModelHub.download appends repo.folderName internally, so we use the parent dir
+        // Downloads into ~/.cache/fluidaudio/models/<repo folder> if needed,
+        // including the tier's encoder_int8_v2.mlmodelc (#1170)
         let modelsBaseDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".cache/fluidaudio/models")
-        let cacheDir = modelsBaseDir.appendingPathComponent(repo.folderName)
-
-        // Check for int8 encoder (the only format loaded by StreamingNemotronAsrManager)
-        let encoderInt8Path = cacheDir.appendingPathComponent("encoder/encoder_int8.mlmodelc")
-
-        if FileManager.default.fileExists(atPath: encoderInt8Path.path) {
-            logger.info("Using cached Nemotron models at \(cacheDir.path)")
-            return cacheDir
-        }
-
-        // Download models (ModelHub.download appends folderName internally)
-        logger.info("Downloading Nemotron \(config.chunkSize.rawValue)ms models from HuggingFace...")
-        try await ModelHub.download(repo, to: modelsBaseDir)
-
-        return cacheDir
+        try await manager.loadModels(to: modelsBaseDir)
+        return manager
     }
 
     private func collectLibriSpeechFiles(from directory: URL) throws -> [LibriSpeechFile] {
