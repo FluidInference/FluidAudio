@@ -536,7 +536,13 @@ enum TranscribeCommand {
         // One model load, many files. Transcribing a folder used to mean one process per file, and the
         // model load — a few hundred milliseconds against a voice note of one or two seconds — was most
         // of the work. `--files-from` keeps the manager alive across the list.
-        let audioFiles = try! loadFileList(primary: audioFile, from: parsed.filesFromPath)
+        let audioFiles: [String]
+        do {
+            audioFiles = try loadFileList(primary: audioFile, from: parsed.filesFromPath)
+        } catch {
+            fputs("ERROR: cannot read --files-from \(parsed.filesFromPath ?? ""): \(error.localizedDescription)\n", stderr)
+            exit(1)
+        }
 
         if parsed.unified {
             logger.info("Using Parakeet Unified (batch) with token timings\n")
@@ -661,18 +667,53 @@ enum TranscribeCommand {
     }
 
     /// `--files-from` list plus the positional file, in that order, de-duplicated by absolute path.
-    private static func loadFileList(primary: String, from manifest: String?) -> [String] {
+    ///
+    /// Throws when a manifest was asked for and cannot be read: a batch that quietly falls back to the
+    /// single positional file looks like a successful run that transcribed one file.
+    private static func loadFileList(primary: String, from manifest: String?) throws -> [String] {
         var files = [primary]
         if let manifest {
-            let text = (try? String(contentsOfFile: manifest, encoding: .utf8)) ?? ""
-            for raw in text.split(separator: "\n") {
-                let line = raw.trimmingCharacters(in: .whitespaces)
+            let text = try String(contentsOfFile: manifest, encoding: .utf8)
+            // `split(separator: "\n")` would treat CRLF as one character and return a single entry:
+            // a manifest written on Windows would then name one absurd path. `isNewline` handles both.
+            for raw in text.split(whereSeparator: \.isNewline) {
+                let line = raw.trimmingCharacters(in: .whitespaces.union(.init(charactersIn: "\u{feff}")))
                 if line.isEmpty || line.hasPrefix("#") { continue }
                 files.append(line)
             }
         }
         var seen = Set<String>()
         return files.filter { seen.insert(URL(fileURLWithPath: $0).standardizedFileURL.path).inserted }
+    }
+
+    /// Where each result is written, decided up front so a collision is an error and not a silent overwrite.
+    ///
+    /// Two inputs with the same stem (`alice/meeting.wav`, `bob/meeting.wav`, or `meeting.wav` beside
+    /// `meeting.mp3`) would otherwise write one file and keep whichever finished last.
+    private static func outputTargets(for files: [String], base: String?, count: Int) throws -> [String]? {
+        guard let base, count > 1 else { return nil }
+        var seen = Set<String>()
+        var targets: [String] = []
+        for file in files {
+            let name = URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent
+            var target = URL(fileURLWithPath: base, isDirectory: true)
+                .appendingPathComponent(name).appendingPathExtension("json").path
+            // Same stem, different file: keep both by disambiguating with the extension, then a counter.
+            if !seen.insert(target.lowercased()).inserted {
+                let ext = URL(fileURLWithPath: file).pathExtension
+                target = URL(fileURLWithPath: base, isDirectory: true)
+                    .appendingPathComponent("\(name)-\(ext.isEmpty ? "audio" : ext)")
+                    .appendingPathExtension("json").path
+                var n = 2
+                while !seen.insert(target.lowercased()).inserted {
+                    target = URL(fileURLWithPath: base, isDirectory: true)
+                        .appendingPathComponent("\(name)-\(ext)-\(n)").appendingPathExtension("json").path
+                    n += 1
+                }
+            }
+            targets.append(target)
+        }
+        return targets
     }
 
     private static func runBatch(
@@ -703,6 +744,14 @@ enum TranscribeCommand {
             }
             logger.info("ASR Manager initialized successfully (\(workers) concurrent)")
             let box = AsrModelsBox(models: models)
+            // Decided before any work: a collision found halfway through a batch is a batch already half
+            // overwritten.
+            let targets = try outputTargets(for: audioFiles, base: args.outputJsonPath, count: audioFiles.count)
+            if let targets, audioFiles.count > 1, let base = args.outputJsonPath {
+                try? FileManager.default.createDirectory(
+                    at: URL(fileURLWithPath: base, isDirectory: true), withIntermediateDirectories: true)
+                for target in targets { logger.info("→ \(target)") }
+            }
 
             if workers == 1 {
                 for (offset, audioFile) in audioFiles.enumerated() {
@@ -711,24 +760,24 @@ enum TranscribeCommand {
                     }
                     await transcribeOne(
                         audioFile: audioFile, box: box, asrManager: managers[0], args: args,
-                        of: audioFiles.count)
+                        of: audioFiles.count, jsonTarget: targets?[offset])
                 }
             } else {
                 // One task per manager, each with a fixed slice: no hand-off, no shared queue, so a
                 // manager is never used by two tasks at once. Files are dealt round-robin so the slices
                 // carry a similar mix of lengths — a slice of only long notes would set the wall time.
-                var slices = Array(repeating: [String](), count: workers)
+                var slices = Array(repeating: [(Int, String)](), count: workers)
                 for (offset, file) in audioFiles.enumerated() {
-                    slices[offset % workers].append(file)
+                    slices[offset % workers].append((offset, file))
                 }
                 await withTaskGroup(of: Void.self) { group in
                     for (slot, slice) in slices.enumerated() where !slice.isEmpty {
                         let manager = managers[slot]
                         group.addTask {
-                            for file in slice {
+                            for (offset, file) in slice {
                                 await transcribeOne(
                                     audioFile: file, box: box, asrManager: manager, args: args,
-                                    of: audioFiles.count)
+                                    of: audioFiles.count, jsonTarget: targets?[offset])
                             }
                         }
                     }
@@ -755,7 +804,8 @@ enum TranscribeCommand {
 
     /// One file, with the manager already loaded. Split out so a list costs one model load rather than N.
     private static func transcribeOne(
-        audioFile: String, box: AsrModelsBox, asrManager: AsrManager, args: ParsedArgs, of total: Int
+        audioFile: String, box: AsrModelsBox, asrManager: AsrManager, args: ParsedArgs, of total: Int,
+        jsonTarget: String? = nil
     ) async {
         do {
             // Assigning the already-loaded models back onto the manager is a handful of references, not
@@ -860,12 +910,13 @@ enum TranscribeCommand {
             print(result.text)
 
             if let outputJsonPath = args.outputJsonPath {
-                // A list names a directory; each result takes its input's name.
+                // A list names a directory; each result takes its input's name, decided up front so
+                // two inputs with one stem cannot overwrite each other.
                 let jsonTarget =
                     total > 1
-                    ? URL(fileURLWithPath: outputJsonPath, isDirectory: true)
+                    ? (jsonTarget ?? URL(fileURLWithPath: outputJsonPath, isDirectory: true)
                         .appendingPathComponent(audioFileURL.deletingPathExtension().lastPathComponent)
-                        .appendingPathExtension("json").path
+                        .appendingPathExtension("json").path)
                     : outputJsonPath
                 if total > 1 {
                     try FileManager.default.createDirectory(
