@@ -8,7 +8,8 @@ import XCTest
 final class CtcPaddedAudioBulkCopyTests: XCTestCase {
 
     /// The previous loop, kept here as the reference.
-    private func perElement(_ samples: [Float], maxSamples: Int, dataType: MLMultiArrayDataType) throws -> MLMultiArray {
+    private func perElement(_ samples: [Float], maxSamples: Int, dataType: MLMultiArrayDataType) throws -> MLMultiArray
+    {
         let array = try MLMultiArray(shape: [NSNumber(value: maxSamples)], dataType: dataType)
         array.reset(to: 0)
         for i in 0..<min(samples.count, maxSamples) {
@@ -21,7 +22,9 @@ final class CtcPaddedAudioBulkCopyTests: XCTestCase {
         array.withUnsafeBytes { Array($0) }
     }
 
-    private func assertSameBits(_ samples: [Float], dataType: MLMultiArrayDataType, file: StaticString = #filePath, line: UInt = #line) throws {
+    private func assertSameBits(
+        _ samples: [Float], dataType: MLMultiArrayDataType, file: StaticString = #filePath, line: UInt = #line
+    ) throws {
         let maxSamples = samples.count + 5
         let expected = try perElement(samples, maxSamples: maxSamples, dataType: dataType)
         for rank in [1, 2] {
@@ -33,7 +36,9 @@ final class CtcPaddedAudioBulkCopyTests: XCTestCase {
             XCTAssertEqual(a.count, e.count, file: file, line: line)
             if let first = zip(a, e).enumerated().first(where: { $0.element.0 != $0.element.1 }) {
                 let element = first.offset / (dataType == .float16 ? 2 : 4)
-                XCTFail("rank \(rank): element \(element) (\(samples[min(element, samples.count - 1)])) differs", file: file, line: line)
+                XCTFail(
+                    "rank \(rank): element \(element) (\(samples[min(element, samples.count - 1)])) differs",
+                    file: file, line: line)
             }
         }
     }
