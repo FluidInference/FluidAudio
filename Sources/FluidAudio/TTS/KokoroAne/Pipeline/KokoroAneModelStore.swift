@@ -235,10 +235,9 @@ public actor KokoroAneModelStore {
             guard vocoderPrecision == .float16 else {
                 throw KokoroAneError.inputProcessingFailed("ANE-v3 does not support the fp32 vocoder yet (#1135)")
             }
-            guard [.default, .aneTailGpu, .aneTailCpu].contains(computeUnits) else {
-                throw KokoroAneError.inputProcessingFailed(
-                    "ANE-v3 supports the default, aneTailGpu or aneTailCpu routing only")
-            }
+            // Any routing: the base stages follow it per stage, so an app can move one
+            // off a failing compute path (PostAlbert #1155, Alignment #1172). The static
+            // Albert and decoder buckets always run on the ANE.
             let root = try await KokoroAneV3Assets.ensure(
                 variant: variant, directory: directory,
                 fastVocoder: KokoroAneV3Pipeline.usesFastVocoder(computeUnits))
