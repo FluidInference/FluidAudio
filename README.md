@@ -70,7 +70,7 @@ Want to convert your own model? Check [möbius](https://github.com/FluidInferenc
 
 ## Showcase
 
-Apps listed before 2026 and open-source apps with more than 1,000 GitHub stars. Make a PR if you want to add your app: add it at the end of the collapsed list, in chronological order.
+Make a PR if you want to add your app, please keep it in chronological order.
 
 | App | GitHub | Description |
 | --- | :---: | --- |
@@ -88,7 +88,7 @@ Apps listed before 2026 and open-source apps with more than 1,000 GitHub stars. 
 | **[Muesli](https://github.com/pHequals7/muesli)** | ✓ | Native macOS dictation and meeting transcription with ~0.13s latency. Captures microphone and system audio with automatic speaker diarization. Uses Parakeet TDT ASR. |
 
 <details>
-<summary>38 more apps</summary>
+<summary>More apps</summary>
 
 | App | GitHub | Description |
 | --- | :---: | --- |
