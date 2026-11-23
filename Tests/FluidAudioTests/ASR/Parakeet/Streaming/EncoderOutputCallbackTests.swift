@@ -75,8 +75,8 @@ final class EncoderOutputCallbackTests: XCTestCase {
     }
 
     func testNemotronCallbackFramesTileStreamAndRestartAfterReset() async throws {
-        let dir = try cachedModelDirectory(
-            NemotronChunkSize.ms2240.repo.folderName, requiredFile: "encoder/\(NemotronEncoder.fileName)")
+        // `encoder/` holds encoder_int8_v2 (#1170) or, from an earlier release, encoder_int8.
+        let dir = try cachedModelDirectory(NemotronChunkSize.ms2240.repo.folderName, requiredFile: "encoder")
         let clips = try [0, 2].map(loadClip)
         let manager = StreamingNemotronAsrManager()
         try await manager.loadModels(from: dir)
