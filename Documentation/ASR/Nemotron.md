@@ -80,17 +80,40 @@ try await ModelHub.download(repo, to: modelsBaseDir)
 FluidAudio can automatically download models from HuggingFace:
 
 ```swift
-let chunkSize: NemotronChunkSize = .ms560
+let manager = StreamingNemotronAsrManager(requestedChunkSize: .ms560)
 let modelsBaseDir = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent(".cache/fluidaudio/models")
 
-// Download if not cached
-try await ModelHub.download(chunkSize.repo, to: modelsBaseDir)
-
-// Load from cache
-let modelDir = modelsBaseDir.appendingPathComponent(chunkSize.repo.folderName)
-try await manager.loadModels(modelDir: modelDir)
+// Downloads the tier and its encoder_int8_v2 (see below) if not cached, then loads
+try await manager.loadModels(to: modelsBaseDir)
 ```
+
+`ModelHub.download(chunkSize.repo, to:)` fetches only the tier folder, so a
+directory filled that way has `encoder/encoder_int8.mlmodelc` and no v2 encoder.
+
+### Encoder v2 (M2 Neural Engine)
+
+On an M2 Pro (macOS 27.2) the Neural Engine compiler rejects the original
+1120 ms encoder, and Core ML silently runs the whole encoder on the CPU: 0 of
+1,667 ops on the ANE and a 5-minute first load (#1170). The cause is the one
+behind the multilingual model's #1141, and all three tiers have it: in each
+Conformer layer the conv-cache update is a slice of a concat
+(`concat(cache, x)[..., T:T+8]`). `encoder_int8_v2.mlmodelc` is the same
+encoder with each of those slices rewritten as slices of the concat's inputs,
+the rewrite that made the multilingual encoders compile on the M2 Pro.
+Weights, inputs and outputs are unchanged, and on an M5 Pro its outputs are
+byte-identical to the original's, on the CPU and on the ANE. The 560 ms tier
+costs about 0.5 ms more per step there (one extra concat per layer); 1120 and
+2240 ms are unchanged.
+
+`loadModels(to:)` downloads it in place of the tier folder's
+`encoder_int8.mlmodelc`, and `loadModels(from:)` loads it whenever
+`encoder/encoder_int8_v2.mlmodelc` exists. It lives in `encoder-v2/<tier>ms/`
+on Hugging Face, outside the tier folders that releases up to 0.15.5 download
+whole. A cache from an earlier release downloads it once (~565 MB); while
+offline, the cached `encoder_int8.mlmodelc` keeps loading. For a directory you
+manage yourself, copy `encoder-v2/<tier>ms/encoder_int8_v2.mlmodelc` into its
+`encoder/` folder.
 
 ## Architecture
 
@@ -144,7 +167,8 @@ Each chunk-size variant contains:
 ```
 nemotron-streaming/{chunk_size}/
 ├── encoder/
-│   └── encoder_int8.mlmodelc    # ~564MB (int8 quantized)
+│   └── encoder_int8_v2.mlmodelc # ~564MB (int8 quantized; encoder_int8.mlmodelc
+│                                #   in caches from earlier releases)
 ├── preprocessor.mlmodelc        # ~1MB
 ├── decoder.mlmodelc             # ~28MB
 ├── joint.mlmodelc               # ~7MB
