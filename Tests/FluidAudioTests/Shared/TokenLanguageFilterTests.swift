@@ -530,4 +530,88 @@ final class TokenLanguageFilterTests: XCTestCase {
         XCTAssertTrue(TokenLanguageFilter.matches("ӿ", script: .cyrillic))  // U+04FF
         XCTAssertTrue(TokenLanguageFilter.matches("Ӏ", script: .cyrillic))  // U+04C0
     }
+
+    // MARK: - Czech / Slovak Excluded Letters
+
+    func testCzechRejectsSlovakOnlyLetters() {
+        for token in ["\u{2581}väčšina", "ľudí", "ô", "ĺ", "ŕ", "Ä", "Ľudia", "Ô", "Ĺ", "Ŕ"] {
+            XCTAssertFalse(TokenLanguageFilter.matches(token, language: .czech), token)
+        }
+        // Shared Czech/Slovak letters and plain ASCII still pass.
+        for token in ["\u{2581}většina", "lidí", "čšžýáíéúťďň", "Kůň", "\u{2581}", "123"] {
+            XCTAssertTrue(TokenLanguageFilter.matches(token, language: .czech), token)
+        }
+    }
+
+    func testSlovakRejectsCzechOnlyLetters() {
+        for token in ["\u{2581}při", "ů", "mě", "Ř", "Ů", "Ě"] {
+            XCTAssertFalse(TokenLanguageFilter.matches(token, language: .slovak), token)
+        }
+        for token in ["\u{2581}väčšina", "ľudí", "kôň", "čšžýáíéúťďň", "\u{2581}"] {
+            XCTAssertTrue(TokenLanguageFilter.matches(token, language: .slovak), token)
+        }
+    }
+
+    func testExcludedLettersMatchDecomposedForms() {
+        // "r" + combining caron and "l" + combining caron are canonically
+        // equivalent to ř / ľ, so a non-NFC vocab export is still caught.
+        XCTAssertFalse(TokenLanguageFilter.matches("pr\u{030C}i", language: .slovak))
+        XCTAssertFalse(TokenLanguageFilter.matches("l\u{030C}udi", language: .czech))
+    }
+
+    func testExcludedLettersOnlyForCzechAndSlovak() {
+        for language in Language.allCases where language != .czech && language != .slovak {
+            XCTAssertTrue(language.excludedLetters.isEmpty, language.rawValue)
+        }
+        // German keeps its ä, Polish its ó etc.: other languages behave exactly
+        // like the script check.
+        XCTAssertTrue(TokenLanguageFilter.matches("Mädchen", language: .german))
+        XCTAssertTrue(TokenLanguageFilter.matches("Mädchen", language: .slovak))
+        XCTAssertFalse(TokenLanguageFilter.matches("Mädchen", language: .czech))
+        // Script check still applies.
+        XCTAssertFalse(TokenLanguageFilter.matches("привет", language: .czech))
+    }
+
+    func testFilterTopKForCzechSkipsSlovakToken() {
+        // Joint's top-1 is the Slovak spelling; the best Czech-compatible
+        // candidate (index 2, logit 0.7) must win over a lower Latin one.
+        let topKIds = [10, 11, 12, 13]
+        let topKLogits: [Float] = [0.9, 0.2, 0.7, 0.8]
+        let vocabulary = [
+            10: "\u{2581}väč",  // Slovak-only ä
+            11: "\u{2581}vě",  // Czech
+            12: "\u{2581}vět",  // Czech, best allowed
+            13: "\u{2581}ľu",  // Slovak-only ľ (higher logit, still rejected)
+        ]
+        let result = TokenLanguageFilter.filterTopK(
+            topKIds: topKIds, topKLogits: topKLogits, vocabulary: vocabulary, language: .czech)
+        XCTAssertEqual(result?.tokenId, 12)
+
+        // Slovak keeps the Slovak tokens and rejects nothing here but Czech ě.
+        let slovak = TokenLanguageFilter.filterTopK(
+            topKIds: topKIds, topKLogits: topKLogits, vocabulary: vocabulary, language: .slovak)
+        XCTAssertEqual(slovak?.tokenId, 10)
+    }
+
+    func testFilterTopKForSlovakReturnsNilWhenEveryCandidateIsCzech() {
+        let result = TokenLanguageFilter.filterTopK(
+            topKIds: [1, 2],
+            topKLogits: [0.5, 0.4],
+            vocabulary: [1: "ř", 2: "\u{2581}mů"],
+            language: .slovak)
+        XCTAssertNil(result)
+    }
+
+    func testFilterTopKByLanguageMatchesScriptOverloadForOtherLanguages() {
+        let topKIds = [1, 2, 3]
+        let topKLogits: [Float] = [0.9, 0.5, 0.1]
+        let vocabulary = [1: "привет", 2: "Mädchen", 3: "hi"]
+        let byScript = TokenLanguageFilter.filterTopK(
+            topKIds: topKIds, topKLogits: topKLogits, vocabulary: vocabulary, preferredScript: .latin)
+        let byLanguage = TokenLanguageFilter.filterTopK(
+            topKIds: topKIds, topKLogits: topKLogits, vocabulary: vocabulary, language: .polish)
+        XCTAssertEqual(byScript?.tokenId, 2)
+        XCTAssertEqual(byLanguage?.tokenId, byScript?.tokenId)
+        XCTAssertEqual(byLanguage?.probability ?? -1, byScript?.probability ?? 0, accuracy: 1e-6)
+    }
 }
