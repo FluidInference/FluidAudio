@@ -492,7 +492,7 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         XCTAssertEqual(interior.emitTokensAfterFrame, 104 - 62 - AsrManager.redecodeEmissionJitterFrames)
     }
 
-    func testRedecodePlan_InactiveWithoutPreviousTokensOrTimestamps() {
+    func testRedecodePlan_DistinguishesFirstWindowFromEmptyFinalRedecode() {
         let legacy = AsrManager.redecodePlan(
             redecode: false,
             previousTokens: [1, 2],
@@ -509,14 +509,27 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
             globalFrameOffset: 0
         )
         XCTAssertNil(noTimestamps.initialTimeIndexOverride, "Batch callers (no timestamps) keep legacy navigation")
+        XCTAssertNil(noTimestamps.emitTokensAfterFrame)
 
         let firstWindow = AsrManager.redecodePlan(
+            redecode: false,
+            previousTokens: [],
+            previousTokenTimestamps: [],
+            globalFrameOffset: 0
+        )
+        XCTAssertNil(firstWindow.initialTimeIndexOverride, "A first window keeps normal navigation")
+        XCTAssertNil(firstWindow.emitTokensAfterFrame)
+
+        let emptyFinalWindow = AsrManager.redecodePlan(
             redecode: true,
             previousTokens: [],
             previousTokenTimestamps: [],
             globalFrameOffset: 0
         )
-        XCTAssertNil(firstWindow.initialTimeIndexOverride, "Single-window streams have nothing to re-decode")
+        XCTAssertEqual(
+            emptyFinalWindow.initialTimeIndexOverride, 0,
+            "An EOF re-decode must reset navigation advanced by token-empty windows")
+        XCTAssertNil(emptyFinalWindow.emitTokensAfterFrame, "No emitted prefix needs suppression")
     }
 
     /// Clip 03 at chunk 9 (#897): the re-decode after the seam reads `and the

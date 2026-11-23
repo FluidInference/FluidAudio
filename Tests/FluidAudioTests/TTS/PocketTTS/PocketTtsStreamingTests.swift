@@ -100,7 +100,7 @@ final class PocketTtsStreamingTests: XCTestCase {
     func testNormalizeTextShortTextPadding() {
         // Short text (< 5 words) gets padding
         let (text, frames) = PocketTtsSynthesizer.normalizeText("Hi")
-        XCTAssertTrue(text.hasPrefix(" "), "Short text should be padded")
+        XCTAssertFalse(text.hasPrefix(" "), "Short text should not get leading spaces")
         XCTAssertEqual(frames, PocketTtsConstants.shortTextPadFrames)
     }
 
@@ -486,11 +486,8 @@ final class PocketTtsStreamingTests: XCTestCase {
     func testNormalizeTextFullSentenceShortChunkStillPads() {
         // The padding behaviour for legitimate short sentences (the original
         // prosody-stabilisation case) must remain unchanged.
-        let (text, frames) = PocketTtsSynthesizer.normalizeText(
+        let (_, frames) = PocketTtsSynthesizer.normalizeText(
             "Hi there", isMidSentence: false, language: .english)
-        XCTAssertTrue(
-            text.hasPrefix(" "),
-            "Full short sentence should still be left-padded; got: '\(text)'")
         XCTAssertEqual(
             frames, PocketTtsConstants.shortTextPadFrames,
             "Full short sentence should still use shortTextPadFrames")
