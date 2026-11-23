@@ -143,6 +143,106 @@ final class VocabularyRescoringSurfacingTests: XCTestCase {
             0.1, accuracy: 1e-6)
     }
 
+    // MARK: - Replacement position
+
+    /// "codecs" occurs twice and only the second is replaced, after a two-word
+    /// replacement earlier in the same pass has shortened the text. The
+    /// decision still points at the second occurrence's words and tokens, so a
+    /// caller can map it onto timings without matching text.
+    func testReplacementRangesLocateTheReplacedOccurrence() {
+        let pieces = ["▁open", "▁ai", "▁uses", "▁code", "cs", "▁and", "▁code", "cs"]
+        let timings = pieces.enumerated().map { index, token in
+            TokenTiming(
+                token: token, tokenId: index, startTime: Double(index), endTime: Double(index + 1), confidence: 1)
+        }
+        let wordTimings = VocabularyRescorer.buildWordTimings(from: timings)
+        var words = wordTimings.map { (word: $0.word, startTime: $0.startTime, endTime: $0.endTime) }
+        var replacedIndices = Set<Int>()
+        var replacements: [Decision] = []
+
+        for (phrase, term, indices) in [("open ai", "OpenAI", [0, 1]), ("codecs", "Codex", [5])] {
+            VocabularyRescorer.applyReplacement(
+                result: Self.passingResult(replacement: term),
+                candidate: Self.candidate(phrase: phrase, term: term, indices: indices, in: wordTimings),
+                modifiedWords: &words,
+                replacedIndices: &replacedIndices,
+                replacements: &replacements
+            )
+        }
+
+        XCTAssertEqual(words.map(\.word).filter { !$0.isEmpty }, ["OpenAI", "uses", "codecs", "and", "Codex"])
+        XCTAssertEqual(replacements.map(\.wordRange), [0..<2, 5..<6])
+        XCTAssertEqual(replacements.map(\.tokenRange), [0..<2, 6..<8])
+
+        let codex = replacements[1]
+        XCTAssertEqual(buildWordTimings(from: timings)[codex.wordRange!].map(\.word), ["codecs"])
+        XCTAssertEqual(timings[codex.tokenRange!].first?.startTime, 6)
+    }
+
+    func testWordRangeIsNilForANonContiguousSpan() {
+        XCTAssertEqual(VocabularyRescorer.wordRange(for: [3, 4, 5]), 3..<6)
+        XCTAssertNil(VocabularyRescorer.wordRange(for: [3, 5]))
+        XCTAssertNil(VocabularyRescorer.wordRange(for: [4, 3]))
+        XCTAssertNil(VocabularyRescorer.wordRange(for: []))
+    }
+
+    func testReplacementRangesSurviveCodableRoundTrip() throws {
+        var decision = applied
+        decision.wordRange = 4..<5
+        decision.tokenRange = 6..<8
+
+        let decoded = try JSONDecoder().decode(Decision.self, from: JSONEncoder().encode(decision))
+
+        XCTAssertEqual(decoded.wordRange, 4..<5)
+        XCTAssertEqual(decoded.tokenRange, 6..<8)
+    }
+
+    /// Payloads encoded before the ranges existed still decode, without them.
+    func testDecisionEncodedWithoutRangesDecodes() throws {
+        let json = """
+            {"originalWord":"codecs","originalScore":0.21,"replacementWord":"Codex","replacementScore":0.88,\
+            "shouldReplace":true,"reason":"ctc-score"}
+            """
+
+        let decoded = try JSONDecoder().decode(Decision.self, from: Data(json.utf8))
+
+        XCTAssertEqual(decoded.replacementWord, "Codex")
+        XCTAssertNil(decoded.wordRange)
+        XCTAssertNil(decoded.tokenRange)
+    }
+
+    private static func candidate(
+        phrase: String, term: String, indices: [Int], in wordTimings: [VocabularyRescorer.WordTiming]
+    ) -> VocabularyRescorer.CTCMatchCandidate {
+        VocabularyRescorer.CTCMatchCandidate(
+            origin: .wordCentric,
+            originalPhrase: phrase,
+            vocabTerm: term,
+            matchedAlias: nil,
+            vocabTokens: [1, 2],
+            similarity: 0.8,
+            spanLength: indices.count,
+            spanIndices: indices,
+            tokenRange: VocabularyRescorer.tokenRange(for: indices, in: wordTimings),
+            spanStartTime: wordTimings[indices[0]].startTime,
+            spanEndTime: wordTimings[indices[indices.count - 1]].endTime
+        )
+    }
+
+    private static func passingResult(replacement: String) -> VocabularyRescorer.CTCMatchResult {
+        VocabularyRescorer.CTCMatchResult(
+            shouldReplace: true,
+            comparisonWasPerformed: true,
+            originalScore: -5,
+            boostedVocabScore: -1,
+            rawVocabularyCTCScore: -2,
+            rawOriginalCTCScore: -5,
+            effectiveBoost: 1,
+            replacement: replacement,
+            reason: "vocabulary > original"
+        )
+    }
+
     // MARK: - StreamingUnifiedAsrManager drain
 
     /// Without boosting configured nothing is ever accumulated, so the drain is
