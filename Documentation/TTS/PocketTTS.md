@@ -274,7 +274,7 @@ A sentence that does not fit is cut, and each cut restarts prosody, so cuts go w
    aside. A bracket inside a word (`f(x)`) is not an aside.
 2. Word boundaries, as a fallback: the fewest parts that fit, balanced so no part is left as a short tail.
 
-`normalizeText()` also capitalizes, adds terminal punctuation, and pads short text with leading spaces for better prosody.
+`normalizeText()` also capitalizes and adds terminal punctuation.
 
 ## EOS Detection
 

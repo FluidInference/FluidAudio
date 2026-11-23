@@ -83,18 +83,24 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Paraspeech](https://paraspeech.com)** | — | AI powered voice to text. Fully offline. No subscriptions. |
 | **[BoltAI](https://boltai.com/)** | — | Write content 10x faster using parakeet models |
 | **[Speakmac](https://speakmac.app)** | — | Private dictation for Mac: hold a key, speak, and the text is typed into any app, fully on device. Uses Parakeet TDT Ultra with CTC custom-vocabulary boosting for names and jargon, and Parakeet EOU for live preview while you speak. |
+| **[Hex](https://github.com/anomalyco/hex)** | ✓ | macOS app that lets you press-and-hold a hotkey to record your voice, transcribe it, and paste into any application. Uses Parakeet ASR. |
+| **[OpenOats](https://github.com/yazinsai/OpenOats)** | ✓ | Open-source meeting note-taker that transcribes conversations in real time and surfaces relevant notes from your knowledge base. Uses FluidAudio for local transcription. |
+| **[Muesli](https://github.com/pHequals7/muesli)** | ✓ | Native macOS dictation and meeting transcription with ~0.13s latency. Captures microphone and system audio with automatic speaker diarization. Uses Parakeet TDT ASR. |
+
+<details>
+<summary>More apps</summary>
+
+| App | GitHub | Description |
+| --- | :---: | --- |
 | **[Dictate Anywhere](https://github.com/hoomanaskari/mac-dictate-anywhere)** | ✓ | Native macOS dictation app with global Fn key activation. Dictate into any app with 25 language support. Uses Parakeet ASR. |
 | **[hongbomiao.com](https://github.com/hongbo-miao/hongbomiao.com)** | ✓ | A personal R&D lab that facilitates knowledge sharing. Uses Parakeet ASR. |
-| **[Hex](https://github.com/anomalyco/hex)** | ✓ | macOS app that lets you press-and-hold a hotkey to record your voice, transcribe it, and paste into any application. Uses Parakeet ASR. |
 | **[Super Voice Assistant](https://github.com/ykdojo/super-voice-assistant)** | ✓ | Open-source macOS voice assistant with local transcription. Uses Parakeet ASR. |
 | **[VoiceTypr](https://github.com/moinulmoin/voicetypr)** | ✓ | Open-source voice-to-text dictation for macOS and Windows. Uses Parakeet ASR. |
 | **[Summit AI Notes](https://summitnotes.app/)** | — | Local meeting transcription and summarization with speaker identification. Supports 100+ languages. |
 | **[Snaply](https://snaply.ai)** | — | Free, Fast, 100% local AI dictation for Mac. |
-| **[OpenOats](https://github.com/yazinsai/OpenOats)** | ✓ | Open-source meeting note-taker that transcribes conversations in real time and surfaces relevant notes from your knowledge base. Uses FluidAudio for local transcription. |
 | **[Enconvo](https://enconvo.com)** | — | AI Agent Launcher for macOS with voice input, live captions, and text-to-speech. Uses Parakeet ASR for local speech recognition. |
 | **[Meeting Transcriber](https://github.com/pasrom/meeting-transcriber)** | ✓ | macOS menu bar app that auto-detects, records, and transcribes meetings (Teams, Zoom, Webex) with dual-track speaker diarization. Uses Parakeet ASR and speaker diarization. |
 | **[Hitoku Draft](https://hitoku.me/draft)** | [✓](https://github.com/Saladino93/hitokudraft) | A local, private, voice writing assistant on your macOS menu bar. Uses Parakeet ASR. |
-| **[Muesli](https://github.com/pHequals7/muesli)** | ✓ | Native macOS dictation and meeting transcription with ~0.13s latency. Captures microphone and system audio with automatic speaker diarization. Uses Parakeet TDT ASR. |
 | **[NanoVoice](https://apps.apple.com/kz/app/nanovoice-ai-voice-keyboard/id6760539688)** | — | Free iOS voice keyboard for fast, private dictation in any app. Uses Parakeet ASR. |
 | **[MiniWhisper](https://github.com/andyhtran/MiniWhisper)** | ✓ | Open-source macOS menu bar for quick local voice-to-text with minimal setup. Pick a shortcut, start talking. Uses Parakeet ASR. |
 | **[Talat](https://talat.app)** | — | Privacy-focused AI meeting notes app. Records and transcribes meetings locally on your Mac with speaker identification and LLM-powered summaries. Featured in [TechCrunch](https://techcrunch.com/2026/03/24/talats-ai-meeting-notes-stay-on-your-machine-not-in-the-cloud/). Uses Parakeet ASR. |
@@ -110,7 +116,6 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Dettivo](https://dettivo.com)** | — | Local-first Mac app for private dictation, transcripts, and meeting workflows in one place, with developer tooling across CLI, MCP, REST, and app automation. Uses FluidAudio Parakeet TDT ASR and offline speaker diarization. |
 | **[Local Narrator](https://www.localnarrator.app/)** | — | Privacy-first iOS audiobook reader that reads EPUB and PDF books aloud with on-device text-to-speech. Uses FluidAudio Kokoro TTS for local English and Spanish narration. |
 | **[Hedy](https://hedy.ai)** | — | Privacy-first AI meeting coach for iOS, macOS, Android, and Windows. Real-time, fully on-device transcription with speaker diarization and AI-powered conversation insights. Uses Parakeet and Nemotron streaming ASR and speaker diarization on the Apple Neural Engine. |
-| **[Parakey](https://github.com/rcourtman/parakey)** | ✓ | Open-source (MIT) menu-bar push-to-talk dictation for macOS — hold a key, speak, release; the transcript pastes at the cursor in about 100 ms. Uses Parakeet TDT v3 ASR on the Apple Neural Engine via FluidAudio. |
 | **[TypeWhisper](https://www.typewhisper.com/)** | — | Speech-to-text and AI text processing for macOS. Uses FluidAudio's Parakeet ASR for local transcription. |
 | **[evoglyph](https://evoglyph.com)** | — | Lightweight, privacy-first macOS menu-bar dictation — press a hotkey, speak, and cleaned-up text is injected at your cursor. Fully local: Parakeet TDT ASR with CTC vocabulary boosting and Silero VAD via FluidAudio on the Apple Neural Engine, plus on-device LLM cleanup. Audio never leaves the Mac. |
 | **[echo99](https://www.echo99.app)** | — | Private call recorder for macOS. Menu-bar app that records the mic and system audio as separate tracks and transcribes them entirely on-device. |
@@ -125,6 +130,8 @@ Make a PR if you want to add your app, please keep it in chronological order.
 | **[Orca One](https://orcaone.com/)** | — | Private Mac dictation and meeting transcription with on-device processing. Uses FluidAudio's Parakeet ASR and Silero VAD. |
 | **[Banter](https://github.com/arvindvenkataramani/banter)** | ✓ | Open-source (Apache-2.0), self-hosted voice interface for OpenClaw, adaptable to other agent harnesses. Runs in the browser on desktop or phone. Its two Swift servers put FluidAudio behind OpenAI-compatible HTTP and streaming WebSocket APIs: Parakeet TDT v3, Parakeet Unified and Nemotron streaming ASR, and Pocket TTS, Kokoro and LuxTTS for speech, all on Apple Silicon. |
 | **[Wisp](https://smw.ai/projects/wisp)** | — | FREE, ultrafast English dictation for Mac that puts cleaned-up text in your app in 200-300ms after you stop talking. 3-10× faster than Wispr Flow, Superwhisper, MacWhisper, or OpenAI's GPT Transcribe, and nothing leaves your Mac. Uses Parakeet Unified ASR. |
+
+</details>
 
 More apps built with FluidAudio are listed in [Documentation/Showcase.md](Documentation/Showcase.md).
 
