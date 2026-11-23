@@ -217,6 +217,10 @@ enum TranscribeCommand {
         var modelDir: String?
         var localModelDir: String?
         var customVocabPath: String?
+        /// `--files-from <path>`: one audio path per line, `#` comments and blanks skipped.
+        var filesFromPath: String?
+        /// `--concurrency <n>`: transcribe this many files at once, sharing one set of models.
+        var concurrency: Int = 1
         var parakeetVariant: StreamingModelVariant?
         var language: Language?
         var encoderPrecision: ParakeetEncoderPrecision = .int8
@@ -356,6 +360,16 @@ enum TranscribeCommand {
             case "--model-dir":
                 if i + 1 < args.count {
                     parsed.modelDir = args[i + 1]
+                    i += 1
+                }
+            case "--concurrency":
+                if i + 1 < args.count, let n = Int(args[i + 1]), n > 0 {
+                    parsed.concurrency = min(n, 32)
+                    i += 1
+                }
+            case "--files-from":
+                if i + 1 < args.count {
+                    parsed.filesFromPath = args[i + 1]
                     i += 1
                 }
             case "--custom-vocab":
@@ -519,6 +533,19 @@ enum TranscribeCommand {
             exit(1)
         }
 
+        // One model load, many files. Transcribing a folder used to mean one process per file, and the
+        // model load — a few hundred milliseconds against a voice note of one or two seconds — was most
+        // of the work. `--files-from` keeps the manager alive across the list.
+        let audioFiles: [String]
+        do {
+            audioFiles = try loadFileList(primary: audioFile, from: parsed.filesFromPath)
+        } catch {
+            fputs(
+                "ERROR: cannot read --files-from \(parsed.filesFromPath ?? ""): \(error.localizedDescription)\n", stderr
+            )
+            exit(1)
+        }
+
         if parsed.unified {
             logger.info("Using Parakeet Unified (batch) with token timings\n")
             await runUnified(audioFile: audioFile, args: parsed)
@@ -530,7 +557,7 @@ enum TranscribeCommand {
             await runStreaming(audioFile: audioFile, args: parsed)
         } else {
             logger.info("Using batch mode with direct processing\n")
-            await runBatch(audioFile: audioFile, args: parsed)
+            await runBatch(audioFiles: audioFiles, args: parsed)
         }
     }
 
@@ -641,8 +668,60 @@ enum TranscribeCommand {
             encoderComputeUnits: args.encoderComputeUnits)
     }
 
+    /// `--files-from` list plus the positional file, in that order, de-duplicated by absolute path.
+    ///
+    /// Throws when a manifest was asked for and cannot be read: a batch that quietly falls back to the
+    /// single positional file looks like a successful run that transcribed one file.
+    private static func loadFileList(primary: String, from manifest: String?) throws -> [String] {
+        var files = [primary]
+        if let manifest {
+            let text = try String(contentsOfFile: manifest, encoding: .utf8)
+            // `split(separator: "\n")` would treat CRLF as one character and return a single entry:
+            // a manifest written on Windows would then name one absurd path. `isNewline` handles both.
+            for raw in text.split(whereSeparator: \.isNewline) {
+                let line = raw.trimmingCharacters(in: .whitespaces.union(.init(charactersIn: "\u{feff}")))
+                if line.isEmpty || line.hasPrefix("#") { continue }
+                files.append(line)
+            }
+        }
+        var seen = Set<String>()
+        return files.filter { seen.insert(URL(fileURLWithPath: $0).standardizedFileURL.path).inserted }
+    }
+
+    /// Where each result is written, decided up front so a collision is an error and not a silent overwrite.
+    ///
+    /// Two inputs with the same stem (`alice/meeting.wav`, `bob/meeting.wav`, or `meeting.wav` beside
+    /// `meeting.mp3`) would otherwise write one file and keep whichever finished last.
+    private static func outputTargets(for files: [String], base: String?, count: Int) throws -> [String]? {
+        guard let base, count > 1 else { return nil }
+        var seen = Set<String>()
+        var targets: [String] = []
+        for file in files {
+            let name = URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent
+            var target = URL(fileURLWithPath: base, isDirectory: true)
+                .appendingPathComponent(name).appendingPathExtension("json").path
+            // Same stem, different file: keep both by disambiguating with the extension, then a counter.
+            if !seen.insert(target.lowercased()).inserted {
+                let ext = URL(fileURLWithPath: file).pathExtension
+                target =
+                    URL(fileURLWithPath: base, isDirectory: true)
+                    .appendingPathComponent("\(name)-\(ext.isEmpty ? "audio" : ext)")
+                    .appendingPathExtension("json").path
+                var n = 2
+                while !seen.insert(target.lowercased()).inserted {
+                    target =
+                        URL(fileURLWithPath: base, isDirectory: true)
+                        .appendingPathComponent("\(name)-\(ext)-\(n)").appendingPathExtension("json").path
+                    n += 1
+                }
+            }
+            targets.append(target)
+        }
+        return targets
+    }
+
     private static func runBatch(
-        audioFile: String, args: ParsedArgs
+        audioFiles: [String], args: ParsedArgs
     ) async {
         do {
             let models = try await loadModels(args)
@@ -657,11 +736,86 @@ enum TranscribeCommand {
                     ?? ASRConfig.default.seamGapRepairMinGapSeconds,
                 seamTimingRealignment: args.seamTimingRealignment
             )
-            let asrManager = AsrManager(config: asrConfig)
-            try await asrManager.loadModels(models)
+            // One `ASREncoder` load, N managers. The models are the expensive, shared part; a manager is a
+            // decoder state and a few references, so a handful of them costs nothing and lets the files
+            // in a list be transcribed at the same time.
+            let workers = max(1, min(args.concurrency, audioFiles.count))
+            var managers: [AsrManager] = []
+            for _ in 0..<workers {
+                let manager = AsrManager(config: asrConfig)
+                try await manager.loadModels(models)
+                managers.append(manager)
+            }
+            logger.info("ASR Manager initialized successfully (\(workers) concurrent)")
+            let box = AsrModelsBox(models: models)
+            // Decided before any work: a collision found halfway through a batch is a batch already half
+            // overwritten.
+            let targets = try outputTargets(for: audioFiles, base: args.outputJsonPath, count: audioFiles.count)
+            if let targets, audioFiles.count > 1, let base = args.outputJsonPath {
+                try? FileManager.default.createDirectory(
+                    at: URL(fileURLWithPath: base, isDirectory: true), withIntermediateDirectories: true)
+                for target in targets { logger.info("→ \(target)") }
+            }
 
-            logger.info("ASR Manager initialized successfully")
+            if workers == 1 {
+                for (offset, audioFile) in audioFiles.enumerated() {
+                    if audioFiles.count > 1 {
+                        logger.info("[\(offset + 1)/\(audioFiles.count)] \(audioFile)")
+                    }
+                    await transcribeOne(
+                        audioFile: audioFile, box: box, asrManager: managers[0], args: args,
+                        of: audioFiles.count, jsonTarget: targets?[offset])
+                }
+            } else {
+                // One task per manager, each with a fixed slice: no hand-off, no shared queue, so a
+                // manager is never used by two tasks at once. Files are dealt round-robin so the slices
+                // carry a similar mix of lengths — a slice of only long notes would set the wall time.
+                var slices = Array(repeating: [(Int, String)](), count: workers)
+                for (offset, file) in audioFiles.enumerated() {
+                    slices[offset % workers].append((offset, file))
+                }
+                await withTaskGroup(of: Void.self) { group in
+                    for (slot, slice) in slices.enumerated() where !slice.isEmpty {
+                        let manager = managers[slot]
+                        group.addTask {
+                            for (offset, file) in slice {
+                                await transcribeOne(
+                                    audioFile: file, box: box, asrManager: manager, args: args,
+                                    of: audioFiles.count, jsonTarget: targets?[offset])
+                            }
+                        }
+                    }
+                    await group.waitForAll()
+                }
+            }
 
+            for manager in managers {
+                await manager.cleanup()
+            }
+
+        } catch {
+            logger.error("Batch transcription failed: \(error)")
+        }
+    }
+
+    /// The loaded CoreML bundle, carried across task boundaries.
+    ///
+    /// `AsrModels` holds CoreML model handles that are read-only once loaded, so sharing them is safe even
+    /// though the type does not say so; this box is the promise, made once, in one place.
+    private struct AsrModelsBox: @unchecked Sendable {
+        let models: AsrModels
+    }
+
+    /// One file, with the manager already loaded. Split out so a list costs one model load rather than N.
+    private static func transcribeOne(
+        audioFile: String, box: AsrModelsBox, asrManager: AsrManager, args: ParsedArgs, of total: Int,
+        jsonTarget: String? = nil
+    ) async {
+        do {
+            // Assigning the already-loaded models back onto the manager is a handful of references, not
+            // a reload: the CoreML models stay in memory. Without it the second file fails
+            // `notInitialized`, because the manager drops its references after a transcription.
+            try await asrManager.loadModels(box.models)
             let audioFileURL = URL(fileURLWithPath: audioFile)
             logger.info("Transcribing file: \(audioFileURL) ...")
             var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
@@ -760,6 +914,20 @@ enum TranscribeCommand {
             print(result.text)
 
             if let outputJsonPath = args.outputJsonPath {
+                // A list names a directory; each result takes its input's name, decided up front so
+                // two inputs with one stem cannot overwrite each other.
+                let jsonTarget =
+                    total > 1
+                    ? (jsonTarget
+                        ?? URL(fileURLWithPath: outputJsonPath, isDirectory: true)
+                        .appendingPathComponent(audioFileURL.deletingPathExtension().lastPathComponent)
+                        .appendingPathExtension("json").path)
+                    : outputJsonPath
+                if total > 1 {
+                    try FileManager.default.createDirectory(
+                        at: URL(fileURLWithPath: outputJsonPath, isDirectory: true),
+                        withIntermediateDirectories: true)
+                }
                 let wordTimings = WordTimingMerger.mergeTokensIntoWords(result.tokenTimings ?? [])
                 let modelVersionLabel: String
                 switch args.modelVersion {
@@ -786,8 +954,8 @@ enum TranscribeCommand {
                     wordTimings: wordTimings,
                     timingsConfirmed: nil
                 )
-                try writeJsonOutput(output, to: outputJsonPath)
-                logger.info("💾 JSON results saved to: \(outputJsonPath)")
+                try writeJsonOutput(output, to: jsonTarget)
+                logger.info("💾 JSON results saved to: \(jsonTarget)")
             }
 
             if args.wordTimestamps {
@@ -1236,7 +1404,8 @@ enum TranscribeCommand {
                 --metadata                     Show confidence, start time, and end time
                 --word-timestamps              Show word-level timestamps in results
                 --encoder-compute-units <u>    Encoder placement: ane (default; phonon25: gpu), gpu, cpu, all
-                --output-json <file>           Save full transcription to JSON
+                --output-json <path>           Save full transcription to JSON; a directory when
+                                               --files-from has more than one entry
                 --model-version <name>         v2, v3, redux, ultra, phonon2, phonon25, bark3, bark3-clean, tdt-ctc-110m, tdt-ja, unified, nemotron-unified (default: v3)
                 --unified-language <code>      nemotron-unified language prompt: auto (default), en, de, fr, es, it, pl, ...
                 --unified-precision <p>        unified encoder precision: int8 or fp16 (nemotron-unified default fp16)
@@ -1246,6 +1415,11 @@ enum TranscribeCommand {
                                                int8-v2 = int8-linear rebuild, avoids #760)
                 --language <code>              Script hint (e.g., en, de, fr, es): keeps v3 to the language's
                                                script; Latin languages decode alike, except fr (#1063)
+                --concurrency <n>              Transcribe n files at once over one set of models
+                                               (default 1). Only meaningful with --files-from.
+                --files-from <file>            Transcribe every path in <file>, one per line
+                                               ('#' comments). One model load for the whole list,
+                                               which is most of the cost for short voice notes.
                 --custom-vocab <file>          Apply vocabulary boosting in batch mode
                 --no-mel-context               Disable 80ms mel-context prepend for long-form batch ASR
                                                (default: disabled on v3 and tdt-ja, enabled otherwise)
