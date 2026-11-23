@@ -125,11 +125,26 @@ swift run -c release fluidaudiocli tts "こんにちは、世界。" \
   --backend kokoro-ane --kokoro-version v3 --variant ja --output ja.wav
 ```
 
+V3 takes any `KokoroAneComputeUnits` except Prosody on the GPU (`.cpuAndGPU` or
+`.all`), which it rejects because that RNN aborts the process in MPSGraph (see
+[Benchmarks](Benchmarks.md)). Its base stages follow the routing per stage; the
+static Albert and decoder buckets always run on the ANE, and the fast vocoder runs
+only when `tail` is `.cpuAndGPU`. That lets an app move a single
+stage off a failing compute path, for example PostAlbert (#1155) or Alignment (#1172):
+
+```swift
+var units = KokoroAneComputeUnits.default
+units.postAlbert = .cpuOnly
+units.alignment = .cpuOnly
+let manager = KokoroAneManager(computeUnits: units, version: .v3)
+```
+
 The bounded real-model integration test is opt-in with
 `FLUIDAUDIO_RUN_KOKORO_V3=1 swift test --filter KokoroAneV3Tests`.
 Set `KOKORO_V3_TEST_CACHE` to override its model cache root. It runs the OS
 default routing; set `KOKORO_V3_TEST_UNITS=aneTailGpu` or `aneTailCpu` to run
-the other one (the GPU route aborts on some macOS 27.0.1 Macs, #1103). It covers
+the other one (the GPU route aborts on some macOS 27.0.1 Macs, #1103), or `cpuStages`
+for the OS default with PostAlbert and Alignment on the CPU. It covers
 both fast decoder sizes (GPU routing), dynamic/long-input fallback, alternate voices, reload,
 English, Mandarin and Japanese text, and explicit phoneme input. Local Apple Silicon
 checks are development evidence. The dedicated workflow builds for iOS devices

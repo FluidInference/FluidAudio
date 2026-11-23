@@ -31,16 +31,30 @@ final class KokoroAneV3Tests: XCTestCase {
         XCTAssertThrowsError(try KokoroAneV3Assets.decodeEnglishVoice(Data("{}".utf8)))
     }
 
-    func testRejectsUnsupportedRoutingBeforeDownloading() async throws {
-        let store = KokoroAneModelStore(computeUnits: .cpuOnly, version: .v3)
-        do {
-            try await store.loadIfNeeded()
-            XCTFail("Custom compute policy was silently ignored")
-        } catch {
-            XCTAssertTrue(error.localizedDescription.contains("routing"))
+    // #1155, #1172: v3 takes a custom routing, and the fast vocoder follows its tail.
+    func testCustomRoutingKeepsFastVocoderTiedToTheTail() {
+        var cpuStages = KokoroAneComputeUnits.aneTailGpu
+        cpuStages.postAlbert = .cpuOnly
+        cpuStages.alignment = .cpuOnly
+        XCTAssertTrue(KokoroAneV3Pipeline.usesFastVocoder(cpuStages))
+        XCTAssertFalse(KokoroAneV3Pipeline.usesFastVocoder(.cpuOnly))
+    }
+
+    func testRejectsGpuProsodyBeforeDownloading() async throws {
+        // Prosody's RNN aborts the process on the GPU (`GPURNNOps.mm: JIT not supported`).
+        var allProsody = KokoroAneComputeUnits.default
+        allProsody.prosody = .all
+        for units in [KokoroAneComputeUnits.cpuAndGpu, allProsody] {
+            let store = KokoroAneModelStore(computeUnits: units, version: .v3)
+            do {
+                try await store.loadIfNeeded()
+                XCTFail("GPU Prosody routing was not rejected")
+            } catch {
+                XCTAssertTrue(error.localizedDescription.contains("Prosody"))
+            }
+            let loaded = await store.isLoaded
+            XCTAssertFalse(loaded)
         }
-        let loaded = await store.isLoaded
-        XCTAssertFalse(loaded)
     }
 
     func testRejectsFp32VocoderBeforeDownloading() async throws {
@@ -283,13 +297,22 @@ final class KokoroAneV3Tests: XCTestCase {
 
     /// The real-model test runs the OS default routing. Set
     /// `KOKORO_V3_TEST_UNITS=aneTailGpu` or `aneTailCpu` to run the other one;
-    /// the GPU route aborts on some macOS 27.0.1 Macs (#1103).
+    /// the GPU route aborts on some macOS 27.0.1 Macs (#1103). `cpuStages` runs
+    /// the OS default with PostAlbert and Alignment on the CPU (#1155, #1172).
     private static var routing: KokoroAneComputeUnits {
         switch ProcessInfo.processInfo.environment["KOKORO_V3_TEST_UNITS"] {
         case "aneTailGpu": return .aneTailGpu
         case "aneTailCpu": return .aneTailCpu
+        case "cpuStages": return cpuStages
         default: return .default
         }
+    }
+
+    private static var cpuStages: KokoroAneComputeUnits {
+        var units = KokoroAneComputeUnits.default
+        units.postAlbert = .cpuOnly
+        units.alignment = .cpuOnly
+        return units
     }
 
     /// `fast`: the request fits a decoder bucket. The fast vocoder runs only
