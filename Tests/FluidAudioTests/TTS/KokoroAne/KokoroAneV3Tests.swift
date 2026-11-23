@@ -40,6 +40,23 @@ final class KokoroAneV3Tests: XCTestCase {
         XCTAssertFalse(KokoroAneV3Pipeline.usesFastVocoder(.cpuOnly))
     }
 
+    func testRejectsGpuProsodyBeforeDownloading() async throws {
+        // Prosody's RNN aborts the process on the GPU (`GPURNNOps.mm: JIT not supported`).
+        var allProsody = KokoroAneComputeUnits.default
+        allProsody.prosody = .all
+        for units in [KokoroAneComputeUnits.cpuAndGpu, allProsody] {
+            let store = KokoroAneModelStore(computeUnits: units, version: .v3)
+            do {
+                try await store.loadIfNeeded()
+                XCTFail("GPU Prosody routing was not rejected")
+            } catch {
+                XCTAssertTrue(error.localizedDescription.contains("Prosody"))
+            }
+            let loaded = await store.isLoaded
+            XCTAssertFalse(loaded)
+        }
+    }
+
     func testRejectsFp32VocoderBeforeDownloading() async throws {
         // The fp32 Vocoder is legacy-only for now (#1135); v3 must not ignore it silently.
         let store = KokoroAneModelStore(version: .v3, vocoderPrecision: .float32)

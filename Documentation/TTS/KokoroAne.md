@@ -125,9 +125,11 @@ swift run -c release fluidaudiocli tts "こんにちは、世界。" \
   --backend kokoro-ane --kokoro-version v3 --variant ja --output ja.wav
 ```
 
-V3 takes any `KokoroAneComputeUnits`. Its base stages follow the routing per
-stage; the static Albert and decoder buckets always run on the ANE, and the fast
-vocoder runs only when `tail` is `.cpuAndGPU`. That lets an app move a single
+V3 takes any `KokoroAneComputeUnits` except Prosody on the GPU (`.cpuAndGPU` or
+`.all`), which it rejects because that RNN aborts the process in MPSGraph (see
+[Benchmarks](Benchmarks.md)). Its base stages follow the routing per stage; the
+static Albert and decoder buckets always run on the ANE, and the fast vocoder runs
+only when `tail` is `.cpuAndGPU`. That lets an app move a single
 stage off a failing compute path, for example PostAlbert (#1155) or Alignment (#1172):
 
 ```swift
