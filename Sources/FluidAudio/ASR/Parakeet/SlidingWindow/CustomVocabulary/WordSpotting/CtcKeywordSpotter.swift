@@ -120,6 +120,9 @@ public struct CtcKeywordSpotter: Sendable {
 
         let frameDuration = ctcResult.frameDuration
         let totalFrames = ctcResult.totalFrames
+        // The log-probs run one lag frame past the audio (`trailingLagFrames`); keep
+        // detection times inside it.
+        let audioDuration = TimeInterval(ctcResult.audioSamplesUsed) / TimeInterval(sampleRate)
 
         var results: [KeywordDetection] = []
 
@@ -154,8 +157,8 @@ public struct CtcKeywordSpotter: Sendable {
             )
 
             for (score, start, end) in multipleDetections {
-                let startTime = TimeInterval(start) * frameDuration
-                let endTime = TimeInterval(end) * frameDuration
+                let startTime = min(TimeInterval(start) * frameDuration, audioDuration)
+                let endTime = min(TimeInterval(end) * frameDuration, audioDuration)
 
                 let detection = KeywordDetection(
                     term: term,
