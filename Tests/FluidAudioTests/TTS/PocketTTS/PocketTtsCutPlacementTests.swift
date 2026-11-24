@@ -126,6 +126,31 @@ final class PocketTtsCutPlacementTests: XCTestCase {
             ["\"Stop!\"", "She ran.", "He said 'go.'", "Then (quietly.)", "\"Is it over?\"", "\"Yes.\""])
     }
 
+    // MARK: - Opening quotes and brackets
+
+    func testFirstLetterAfterOpeningQuotesAndBracketsIsCapitalized() {
+        // Expected values from upstream `prepare_text_prompt` (pocket-tts main), after the smart-quote pass.
+        let cases: [(String, String)] = [
+            ("\"hello,\" she said, \"we should go.\"", "\"Hello,\" she said, \"we should go.\""),
+            ("(quietly) he closed the door.", "(Quietly) he closed the door."),
+            ("\u{201C}where are you going?\u{201D} she asked.", "\"Where are you going?\" she asked."),
+            ("[laughs] that was funny.", "[Laughs] that was funny."),
+            ("'tis the season.", "'Tis the season."),
+            ("\"\u{00E9}clair\" is a French word.", "\"\u{00C9}clair\" is a French word."),
+            ("\u{00AB}bonjour\u{00BB}, dit-il.", "\u{00AB}Bonjour\u{00BB}, dit-il."),
+            ("\"42\" was the answer.", "\"42\" was the answer."),
+        ]
+        for (input, expected) in cases {
+            XCTAssertEqual(PocketTtsSynthesizer.normalizeText(input).text, expected, "input: \(input)")
+        }
+    }
+
+    func testMidSentenceChunkAfterAnOpeningQuoteKeepsItsCase() {
+        XCTAssertEqual(
+            PocketTtsSynthesizer.normalizeText("\"and then\" she left", isMidSentence: true).text,
+            "\"and then\" she left")
+    }
+
     func testSentenceEndingBeforeAClosingQuoteGetsNoExtraPeriod() {
         XCTAssertEqual(
             PocketTtsSynthesizer.normalizeText("he told them all, \"Stop right there!\"").text,
