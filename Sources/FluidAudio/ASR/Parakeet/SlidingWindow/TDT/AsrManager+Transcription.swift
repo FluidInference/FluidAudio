@@ -66,9 +66,9 @@ extension AsrManager {
     /// tokens for audio the previous windows already emitted are suppressed at
     /// the source, leaving dedup only the jitter margin. `transcribeChunk` pairs
     /// the frame-0 entry with a *fresh* decoder state — see the note there.
-    /// `redecode == false` (the first window) keeps legacy navigation. A final
-    /// re-decode with no emitted tokens starts fresh without a suppression cutoff;
-    /// prior blank windows may already have advanced the carried decoder state.
+    /// `redecode == false` keeps legacy navigation. A re-decode with no emitted
+    /// tokens starts fresh without a suppression cutoff; prior blank windows may
+    /// already have advanced the carried decoder state (#1183).
     /// Existing output without timestamps retains the legacy fallback.
     nonisolated internal static func redecodePlan(
         redecode: Bool,
@@ -78,8 +78,8 @@ extension AsrManager {
         lastWordStartFrame: Int? = nil
     ) -> (initialTimeIndexOverride: Int?, emitTokensAfterFrame: Int?) {
         guard redecode else { return (nil, nil) }
-        // A token-empty window can still advance decoder navigation. At EOF,
-        // re-decode retained audio from a fresh state even when no text emitted.
+        // A token-empty window can still advance decoder navigation: re-decode
+        // retained audio from a fresh state even when no text emitted.
         // There is no emitted prefix to suppress in that case.
         guard !previousTokens.isEmpty else { return (0, nil) }
         guard let previousTimestamps = previousTokenTimestamps else { return (nil, nil) }
@@ -471,7 +471,10 @@ extension AsrManager {
     ///    previous copy (it carries the sentence-final punctuation a re-decode
     ///    at the audio end omits), drop the re-emission and — when the kept copy
     ///    ends with punctuation — the re-decode's punctuation behind it. A same
-    ///    word starting later is a genuine repetition and stays.
+    ///    word starting later is a genuine repetition and stays. A kept copy
+    ///    whose punctuation the re-decode contradicts by running on into the
+    ///    next word without a pause (`como yo.` + `yo pienso`) retires instead:
+    ///    the window edge closed the sentence, not the speaker (#1183).
     ///    Previous text a strict prefix of it (`an`→`analyzing`,
     ///    `every`→`everything`): a fragment, retire. A different word that
     ///    overlaps the previous word's span and was started by the re-decode
@@ -613,10 +616,33 @@ extension AsrManager {
         let firstWordFrame = firstWordIndex.map { currentTimestamps[$0] }
 
         let overlapsPrevious = firstWordFrame.map { $0 <= previousLastFrame + jitterFrames } ?? false
+        let suppressedCopies =
+            suppressedPieces.count == suppressedTimestamps.count
+            ? words(in: suppressedPieces, timestamps: suppressedTimestamps, upTo: suppressedPieces.count)
+                .filter { $0.core == previousWord }.map { abs($0.frame - lastWordStartFrame) } : []
+        let previousWordSuppressed = suppressedCopies.contains { $0 <= frameTolerance }
+        let previousEndsWithPunctuation = previousPieces.last.map { isPunctuationPiece($0) } ?? false
+        // The re-decode reads the same word and runs on into the next one without
+        // a pause: the punctuation behind the previous copy was the window edge
+        // closing a sentence the audio had not finished (`como yo.` + `pienso`).
+        // A suppressed copy at least as near the previous word as this one makes
+        // the visible copy a second word (`go.` + `go again`), which stays.
+        let runsOnPastPreviousWord =
+            firstWordIndex.map { index in
+                let end = wordExtent(in: currentPieces, from: index)
+                let distance = abs(currentTimestamps[index] - lastWordStartFrame)
+                return distance <= frameTolerance && !suppressedCopies.contains { $0 <= distance }
+                    && end < currentTokens.count && startsWordPiece(in: currentPieces, at: end)
+                    && !isPunctuation(end)
+                    && currentTimestamps[end] - currentTimestamps[end - 1] <= jitterFrames
+            } ?? false
         let retire: Bool
-        if !extendsBeyondPrevious || currentWord.isEmpty || previousWord.isEmpty {
+        if currentWord.isEmpty || previousWord.isEmpty {
             retire = false
         } else if currentWord == previousWord {
+            // The word that follows is itself the reach past the previous window.
+            retire = previousEndsWithPunctuation && runsOnPastPreviousWord
+        } else if !extendsBeyondPrevious {
             retire = false
         } else if currentWord.hasPrefix(previousWord), overlapsPrevious {
             // A fragment's replacement starts where the fragment started. A
@@ -656,10 +682,6 @@ extension AsrManager {
         // decoder already re-emitted the previous word *before* the cutoff (it
         // is in the suppressed list at that word's frame), the visible copy is
         // a second word and stays.
-        let previousWordSuppressed =
-            suppressedPieces.count == suppressedTimestamps.count
-            && words(in: suppressedPieces, timestamps: suppressedTimestamps, upTo: suppressedPieces.count)
-                .contains { $0.core == previousWord && abs($0.frame - lastWordStartFrame) <= frameTolerance }
         var droppedCurrent = consumed
         if retireStart == nil, currentWord == previousWord, !previousWordSuppressed, let firstIndex = firstWordIndex,
             abs(currentTimestamps[firstIndex] - lastWordStartFrame) <= frameTolerance
@@ -670,7 +692,6 @@ extension AsrManager {
             // If the previous copy has none, the re-decoded punctuation is the
             // only one and stays.
             // Never a boundary-marked piece that begins the next word (`▁'` `cause`).
-            let previousEndsWithPunctuation = previousPieces.last.map { isPunctuationPiece($0) } ?? false
             while previousEndsWithPunctuation, end < currentTokens.count, isPunctuation(end),
                 !startsWordPiece(in: currentPieces, at: end)
             {
@@ -776,11 +797,12 @@ extension AsrManager {
         // `air environment`). The 2 s left context plus the previous right
         // context give the fresh state 4 s to re-establish itself before the
         // cutoff. The previous window's last word is re-decoded in full and
-        // reconciled afterwards (#897).
-        let redecodeWindow = isLastChunk || !previousTokens.isEmpty
+        // reconciled afterwards (#897). A window that follows only token-empty
+        // ones is no exception: they advanced the carried state all the same,
+        // and the first window to emit text is not always the last one (#1183).
         let marksWordStarts = Self.marksWordStarts(modelVersion)
         let trailingWordStart: Int?
-        if redecodeWindow, let previousTimestamps = previousTokenTimestamps,
+        if let previousTimestamps = previousTokenTimestamps,
             previousTimestamps.count == previousTokens.count
         {
             trailingWordStart =
@@ -796,7 +818,7 @@ extension AsrManager {
             trailingWordStart = nil
         }
         let redecodePlan = Self.redecodePlan(
-            redecode: redecodeWindow,
+            redecode: true,
             previousTokens: previousTokens,
             previousTokenTimestamps: previousTokenTimestamps,
             globalFrameOffset: globalFrameOffset,

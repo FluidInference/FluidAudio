@@ -1032,7 +1032,9 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         )
         XCTAssertEqual(different.droppedPrevious, 4, "`Savior.` retires for the re-decoded `Saviour`")
         XCTAssertEqual(different.droppedCurrent, 4, "head and re-emitted `had been the` go; `Saviour` stays")
-        // Same spelling: the whole re-emitted word goes, never `S` alone.
+        // Same spelling, and the re-decode runs on into `of all`: the kept copy's
+        // period was the window edge, so it retires for the whole re-emitted
+        // word, never `S` alone.
         let same = AsrManager.reconcileFinalWindowSeam(
             previousTokens: [1, 2, 3, 4, 5, 6, 7, 7883],
             previousTimestamps: previousTs,
@@ -1042,8 +1044,44 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
             currentPieces: ["ist", " had", " been", " the", " S", "avi", "or", " of", " all"],
             previousPieces: previousPieces
         )
-        XCTAssertEqual(same.droppedPrevious, 0)
-        XCTAssertEqual(same.droppedCurrent, 7)
+        XCTAssertEqual(same.droppedPrevious, 4)
+        XCTAssertEqual(same.droppedCurrent, 4)
+    }
+
+    /// A window edge can close a sentence the audio has not finished: `como
+    /// yo.`, then the re-decode reads `yo pienso.` (#1183). The kept copy's
+    /// period contradicts the re-decode, so `yo.` retires for it. The earlier
+    /// `yo` of `como yo quiero`, suppressed 10 frames back, is not evidence of
+    /// a repetition; a suppressed copy on the previous word's own frame is.
+    func testReconcileFinalWindowSeam_EdgePunctuationRetiresWhenRedecodeRunsOn() {
+        let previousPieces = [" como", " yo", " qu", "ier", "o", " y", " como", " yo", "."]
+        let runOn = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4, 5, 6, 1, 2, 7883],
+            previousTimestamps: [13, 16, 20, 20, 21, 23, 24, 26, 28],
+            trailingWordStart: 7,
+            // The re-decode ends inside the jitter margin of the previous last frame.
+            currentTokens: [5, 6, 1, 2, 8, 9, 7883],
+            currentTimestamps: [22, 24, 26, 28, 30, 31, 32],
+            currentPieces: ["o", " y", " como", " yo", " pien", "so", "."],
+            previousPieces: previousPieces,
+            suppressedPieces: [" yo", " qu"],
+            suppressedTimestamps: [16, 20]
+        )
+        XCTAssertEqual(runOn.droppedPrevious, 2, "`yo.` retires")
+        XCTAssertEqual(runOn.droppedCurrent, 3, "the head and re-emitted `y como` go; `yo pienso.` stays")
+        let repetition = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 7883],  // ▁let's ▁go .
+            previousTimestamps: [96, 100, 100],
+            trailingWordStart: 1,
+            currentTokens: [2, 31],  // ▁go ▁again
+            currentTimestamps: [106, 109],
+            currentPieces: [" go", " again"],
+            previousPieces: [" let's", " go", "."],
+            suppressedPieces: [" go"],
+            suppressedTimestamps: [100]
+        )
+        XCTAssertEqual(repetition.droppedPrevious, 0, "`go.` was re-emitted (suppressed); `go again` is new")
+        XCTAssertEqual(repetition.droppedCurrent, 0)
     }
 
     /// A fast repetition inside the duplicate tolerance (`go` at 100, `go
