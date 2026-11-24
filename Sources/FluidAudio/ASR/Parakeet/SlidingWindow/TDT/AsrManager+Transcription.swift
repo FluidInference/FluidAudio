@@ -57,8 +57,8 @@ extension AsrManager {
     /// suppression cutoff backs off this much and dedup strips what remains.
     internal static let redecodeEmissionJitterFrames = 5
 
-    /// Decoder-entry plan for a streaming window that follows accumulated
-    /// tokens (issue #855 for the final window, #897 for every other one).
+    /// Decoder-entry plan for a streaming window (issue #855 for the final
+    /// window, #897 for every other one, #1183 for one with no tokens before it).
     ///
     /// Returns `initialTimeIndexOverride: 0` so the decoder re-decodes the window
     /// from frame 0 (a mid-window entry with the carried state can blank out the
@@ -488,7 +488,8 @@ extension AsrManager {
     ///    from it on instead of only the last word (#1113).
     /// 3. Retiring additionally requires the re-decode to reach past the
     ///    previous window's last frame; an empty or early-ending final window
-    ///    keeps the previous word.
+    ///    keeps the previous word. The run-on rule of step 2 is the exception:
+    ///    the word it requires behind the re-read one is that reach.
     /// 4. The re-decode's head is then stripped of seam artifacts: punctuation
     ///    at or before the previous last word's frame, and tokens — punctuation
     ///    included — that duplicate a kept previous token within
@@ -902,7 +903,7 @@ extension AsrManager {
                 currentPieces: currentTokens.map { vocabulary[$0] ?? "" },
                 previousPieces: previousTokens.map { vocabulary[$0] ?? "" },
                 suppressedPieces: hypothesis.suppressedTokens.map { vocabulary[$0] ?? "" },
-                suppressedTimestamps: hypothesis.suppressedTimestamps,
+                suppressedTimestamps: hypothesis.suppressedTimestamps.map { $0 + globalFrameOffset },
                 stableTokenFloor: stableTokenFloor
             )
             droppedPrevious = seam.droppedPrevious

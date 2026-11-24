@@ -1078,10 +1078,44 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
             currentPieces: [" go", " again"],
             previousPieces: [" let's", " go", "."],
             suppressedPieces: [" go"],
-            suppressedTimestamps: [100]
+            suppressedTimestamps: [94]
         )
         XCTAssertEqual(repetition.droppedPrevious, 0, "`go.` was re-emitted (suppressed); `go again` is new")
         XCTAssertEqual(repetition.droppedCurrent, 0)
+    }
+
+    /// The run-on rule needs all of its evidence. `yo.` stays when the
+    /// re-decode keeps its own punctuation behind the word, when a pause
+    /// separates the word from the next one, and when the kept copy carries
+    /// no punctuation to contradict.
+    func testReconcileFinalWindowSeam_EdgePunctuationStaysWithoutRunOnEvidence() {
+        func droppedPrevious(
+            previousPieces: [String] = [" como", " yo", "."], currentPieces: [String], currentTimestamps: [Int]
+        ) -> Int {
+            AsrManager.reconcileFinalWindowSeam(
+                previousTokens: Array([1, 2, 7883].prefix(previousPieces.count)),
+                previousTimestamps: Array([24, 26, 28].prefix(previousPieces.count)),
+                trailingWordStart: 1,
+                currentTokens: Array([2, 7883, 8, 9].suffix(currentPieces.count)),
+                currentTimestamps: currentTimestamps,
+                currentPieces: currentPieces,
+                previousPieces: previousPieces
+            ).droppedPrevious
+        }
+        XCTAssertEqual(
+            droppedPrevious(currentPieces: [" yo", ".", " pien", "so"], currentTimestamps: [28, 29, 31, 32]), 0,
+            "the re-decode closes the sentence too")
+        XCTAssertEqual(
+            droppedPrevious(currentPieces: [" yo", " pien", "so"], currentTimestamps: [28, 34, 35]), 0,
+            "a pause follows the word")
+        XCTAssertEqual(
+            droppedPrevious(
+                previousPieces: [" como", " yo"], currentPieces: [" yo", " pien", "so"],
+                currentTimestamps: [28, 30, 31]), 0,
+            "no punctuation to retire")
+        XCTAssertEqual(
+            droppedPrevious(currentPieces: [" yo", " pien", "so"], currentTimestamps: [28, 30, 31]), 2,
+            "the same input with a period and no pause retires")
     }
 
     /// A fast repetition inside the duplicate tolerance (`go` at 100, `go
