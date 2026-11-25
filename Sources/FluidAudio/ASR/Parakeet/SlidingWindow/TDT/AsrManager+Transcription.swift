@@ -617,22 +617,28 @@ extension AsrManager {
         let firstWordFrame = firstWordIndex.map { currentTimestamps[$0] }
 
         let overlapsPrevious = firstWordFrame.map { $0 <= previousLastFrame + jitterFrames } ?? false
-        let suppressedCopies =
+        // A suppressed word with the previous word's spelling is that word's own
+        // re-reading unless an earlier kept word with the same spelling is nearer
+        // to it (`como yo quiero y como yo.`: a suppressed `yo` on the first
+        // `yo`'s frame says nothing about the last one).
+        let suppressedWords =
             suppressedPieces.count == suppressedTimestamps.count
-            ? words(in: suppressedPieces, timestamps: suppressedTimestamps, upTo: suppressedPieces.count)
-                .filter { $0.core == previousWord }.map { abs($0.frame - lastWordStartFrame) } : []
-        let previousWordSuppressed = suppressedCopies.contains { $0 <= frameTolerance }
+            ? words(in: suppressedPieces, timestamps: suppressedTimestamps, upTo: suppressedPieces.count) : []
+        let previousWordSuppressed = suppressedWords.contains { copy in
+            let distance = abs(copy.frame - lastWordStartFrame)
+            return copy.core == previousWord && distance <= frameTolerance
+                && !previousWords.contains { $0.core == previousWord && abs($0.frame - copy.frame) < distance }
+        }
         let previousEndsWithPunctuation = previousPieces.last.map { isPunctuationPiece($0) } ?? false
         // The re-decode reads the same word and runs on into the next one without
         // a pause: the punctuation behind the previous copy was the window edge
         // closing a sentence the audio had not finished (`como yo.` + `pienso`).
-        // A suppressed copy at least as near the previous word as this one makes
-        // the visible copy a second word (`go.` + `go again`), which stays.
+        // A suppressed re-reading of the previous word makes the visible copy a
+        // second word (`go.` + `go again`), which stays.
         let runsOnPastPreviousWord =
             firstWordIndex.map { index in
                 let end = wordExtent(in: currentPieces, from: index)
-                let distance = abs(currentTimestamps[index] - lastWordStartFrame)
-                return distance <= frameTolerance && !suppressedCopies.contains { $0 <= distance }
+                return abs(currentTimestamps[index] - lastWordStartFrame) <= frameTolerance && !previousWordSuppressed
                     && end < currentTokens.count && startsWordPiece(in: currentPieces, at: end)
                     && !isPunctuation(end)
                     && currentTimestamps[end] - currentTimestamps[end - 1] <= jitterFrames

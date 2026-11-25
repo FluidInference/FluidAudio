@@ -1084,6 +1084,41 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         XCTAssertEqual(repetition.droppedCurrent, 0)
     }
 
+    /// Which word a suppressed copy re-reads is decided by the kept words, not
+    /// by which re-emission lands nearer: a suppressed copy of the last word
+    /// that drifted further than the visible repetition still protects it, and
+    /// a suppressed copy of an earlier occurrence protects nothing. Frames are
+    /// those of a later window (non-zero offset).
+    func testReconcileFinalWindowSeam_SuppressedCopyIsMatchedToItsOwnOccurrence() {
+        let drifted = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 7883],  // ▁let's ▁go .
+            previousTimestamps: [296, 300, 300],
+            trailingWordStart: 1,
+            currentTokens: [2, 31],  // ▁go ▁again
+            currentTimestamps: [306, 309],
+            currentPieces: [" go", " again"],
+            previousPieces: [" let's", " go", "."],
+            suppressedPieces: [" go"],
+            suppressedTimestamps: [293]
+        )
+        XCTAssertEqual(drifted.droppedPrevious, 0, "`go.` was re-read 7 frames early; `go again` is a second word")
+        XCTAssertEqual(drifted.droppedCurrent, 0)
+        let earlier = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4, 2],  // ▁we ▁go ▁where ▁you ▁go
+            previousTimestamps: [236, 239, 241, 244, 247],
+            trailingWordStart: 4,
+            currentTokens: [2, 31],  // ▁go ▁home
+            currentTimestamps: [253, 262],
+            currentPieces: [" go", " home"],
+            previousPieces: [" we", " go", " where", " you", " go"],
+            suppressedPieces: [" go", " where", " you"],
+            suppressedTimestamps: [239, 241, 244]
+        )
+        XCTAssertEqual(earlier.droppedPrevious, 0)
+        XCTAssertEqual(
+            earlier.droppedCurrent, 1, "the suppressed `go` is the first one; the visible `go` is the drifted copy")
+    }
+
     /// The run-on rule needs all of its evidence. `yo.` stays when the
     /// re-decode keeps its own punctuation behind the word, when a pause
     /// separates the word from the next one, and when the kept copy carries
