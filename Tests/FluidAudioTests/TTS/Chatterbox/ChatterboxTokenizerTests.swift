@@ -49,6 +49,35 @@ final class ChatterboxTokenizerTests: XCTestCase {
         XCTAssertFalse(ids.dropFirst().contains(0), "accented char fell to [UNK]")
     }
 
+    // MARK: - Final sigma (fixture vocab, non-skipping)
+
+    /// Upstream lowercases with Python's `str.lower()`, which turns a capital
+    /// sigma that ends a word into `ς`; Swift's `lowercased()` always gives `σ`.
+    /// In `ΣΑΣ.ΛΑΟΣ` the second `Σ` stays `σ`: Python skips the case-ignorable
+    /// `.`, so a cased letter follows it (`NSString.lowercased` gives `ς`).
+    func testCapitalSigmaLowercasesLikePython() throws {
+        let json = """
+            {
+              "model": {
+                "vocab": {"[UNK]": 0, "α": 10, "δ": 11, "λ": 13, "ο": 14, "σ": 15, "ς": 16, ".": 17},
+                "merges": []
+              },
+              "added_tokens": [
+                {"content": "[el]", "id": 100},
+                {"content": "[SPACE]", "id": 101}
+              ]
+            }
+            """
+        let url = tmpDir.appendingPathComponent("tokenizer.json")
+        try json.data(using: .utf8)!.write(to: url)
+        let tokenizer = try ChatterboxTokenizer(tokenizerJsonURL: url)
+
+        XCTAssertEqual(tokenizer.encode("ΟΔΟΣ", languageId: "el"), [100, 14, 11, 14, 16])
+        XCTAssertEqual(
+            tokenizer.encode("ΣΑΣ ΛΑΟΣ.", languageId: "el"), [100, 15, 10, 16, 101, 13, 10, 14, 16, 17])
+        XCTAssertEqual(tokenizer.encode("ΣΑΣ.ΛΑΟΣ", languageId: "el"), [100, 15, 10, 15, 17, 13, 10, 14, 16])
+    }
+
     // MARK: - puncNorm
 
     func testPuncNormCollapsesAllWhitespace() {
@@ -148,6 +177,14 @@ final class ChatterboxTokenizerTests: XCTestCase {
             [
                 708, 17, 31, 9, 2, 32, 26, 22, 40, 2, 29, 14, 83, 2, 258, 268, 2, 8, 2, 95, 7,
                 2, 36, 14, 60, 7, 2, 2, 258, 269, 7, 2, 2, 5, 31, 202, 70, 6, 3,
+            ]
+        ),
+        (
+            // Final sigma: ΚΑΛΩΣ ends in ς (1039), ΣΤΗΝ starts with σ (1040).
+            "el", "ΚΑΛΩΣ ΗΡΘΑΤΕ ΣΤΗΝ ΑΘΗΝΑ.",
+            [
+                711, 1032, 1024, 1033, 1045, 1039, 2, 1026, 1038, 642, 1024, 1041, 1025, 2, 1040,
+                1041, 1026, 1034, 2, 1024, 642, 1026, 1034, 1024, 9,
             ]
         ),
     ]
