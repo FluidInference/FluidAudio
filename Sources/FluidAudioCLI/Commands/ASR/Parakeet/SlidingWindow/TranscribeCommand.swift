@@ -200,7 +200,7 @@ enum TranscribeCommand {
 
     // MARK: - Argument Parsing
 
-    private struct ParsedArgs {
+    struct ParsedArgs {
         var showMetadata = false
         var wordTimestamps = false
         var outputJsonPath: String?
@@ -253,6 +253,19 @@ enum TranscribeCommand {
         var vocabSpotterMinSimMulti: Float?
         // #724: disable the acoustic spotter-rescue pass (pre-#634 behavior).
         var vocabDisableSpotterRescue: Bool = false
+
+        func batchRescoreParameters(
+            for vocabulary: CustomVocabularyContext
+        ) -> (
+            cbw: Float, minSimilarity: Float, marginSeconds: Double
+        ) {
+            VocabularyBoostingSession.rescoreParameters(
+                .init(
+                    cbw: vocabCbw, minSimilarity: vocabMinSimilarity,
+                    marginSeconds: vocabMargin ?? ContextBiasingConstants.defaultMarginSeconds),
+                sizeConfig: ContextBiasingConstants.rescorerConfig(forVocabSize: vocabulary.terms.count),
+                vocabularyFloor: vocabulary.minSimilarity)
+        }
     }
 
     private static func parseArguments(_ args: [String]) -> ParsedArgs? {
@@ -860,7 +873,6 @@ enum TranscribeCommand {
                 if let tokenTimings = result.tokenTimings, !tokenTimings.isEmpty, !logProbs.isEmpty {
                     let ctcModelDir = CtcModels.defaultCacheDirectory(for: ctcModels.variant)
 
-                    let vocabConfig = ContextBiasingConstants.rescorerConfig(forVocabSize: customVocab.terms.count)
                     let rescorerConfig = makeRescorerConfig(args)
 
                     let rescorer = try await VocabularyRescorer.create(
@@ -870,13 +882,7 @@ enum TranscribeCommand {
                         ctcModelDirectory: ctcModelDir
                     )
 
-                    // Vocabulary-size-aware default, overridable via CLI.
-                    // Per-term minSimilarity overrides are applied inside the
-                    // rescorer regardless of this global value.
-                    let minSimilarity: Float = args.vocabMinSimilarity ?? vocabConfig.minSimilarity
-                    let cbw: Float = args.vocabCbw ?? vocabConfig.cbw
-                    let marginSeconds: Double = args.vocabMargin ?? ContextBiasingConstants.defaultMarginSeconds
-
+                    let (cbw, minSimilarity, marginSeconds) = args.batchRescoreParameters(for: customVocab)
                     let rescoreOutput = rescorer.ctcTokenRescore(
                         transcript: result.text,
                         tokenTimings: tokenTimings,
