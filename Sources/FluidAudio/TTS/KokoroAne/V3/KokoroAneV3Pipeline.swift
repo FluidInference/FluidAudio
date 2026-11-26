@@ -84,7 +84,8 @@ final class KokoroAneV3Pipeline {
         var loaded: [String: MLModel] = [:]
         // Base stages follow the caller's routing, so the OS 27 default
         // (`aneTailCpu`) keeps Noise and Tail off Metal like the legacy chain (#1103).
-        for stage in KokoroAneStage.allCases {
+        // Alignment runs natively (`KokoroAneV3Alignment`, #1172), so its graph is not loaded.
+        for stage in KokoroAneStage.allCases where stage != .alignment {
             let name = stage.rawValue.prefix(1).uppercased() + stage.rawValue.dropFirst()
             let suffix = [.noise, .prosody, .tail].contains(stage) ? "_v2" : ""
             loaded[name] = try open(
@@ -185,14 +186,11 @@ final class KokoroAneV3Pipeline {
             throw KokoroAneError.acousticFramesExceedCap(have: frames, cap: KokoroAneConstants.maxAcousticFrames)
         }
         guard frames >= 2 else { throw KokoroAneV3Error.invalidInput("Expected at least 2 acoustic frames") }
-        let alignment = try predict(
-            "Alignment",
-            [
-                "pred_dur": Arrays.int32Array(shape: [1, count], from: durations),
-                "d": Self.half(Self.array(post, "d")), "t_en": Self.half(Self.array(post, "t_en")),
-            ])
-        let asr = try Self.half(Self.array(alignment, "asr"))
-        let prosody = try predict("Prosody", ["en": Self.half(Self.array(alignment, "en")), "style_s": style])
+        let alignmentStart = time()
+        let (en, asr) = try KokoroAneV3Alignment.expand(
+            d: Self.half(Self.array(post, "d")), tEn: Self.half(Self.array(post, "t_en")), durations: durations)
+        timings["Alignment"] = time() - alignmentStart
+        let prosody = try predict("Prosody", ["en": en, "style_s": style])
         var f0 = try Self.array(prosody, "F0")
         var noise = try Self.array(prosody, "N")
         if !silentFrames.isEmpty {
