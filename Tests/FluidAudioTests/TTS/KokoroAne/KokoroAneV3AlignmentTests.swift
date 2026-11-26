@@ -38,6 +38,22 @@ final class KokoroAneV3AlignmentTests: XCTestCase {
         XCTAssertThrowsError(try KokoroAneV3Alignment.expand(d: single, tEn: tEn, durations: [1, 1]))
     }
 
+    func testAssetsNeitherFetchNorRequireTheAlignmentGraph() throws {
+        let json = """
+            {"schema_version": 1, "language": "en", "files": [],
+             "base": {"repo_id": "FluidInference/kokoro-82m-coreml", "revision": "r", "directory": "ANE",
+                      "models": ["KokoroAlbert", "KokoroPostAlbert", "KokoroAlignment", "KokoroProsody",
+                                 "KokoroNoise_v2", "KokoroVocoder", "KokoroTail"]}}
+            """
+        let manifest = try JSONDecoder().decode(KokoroAneV3Assets.Manifest.self, from: Data(json.utf8))
+        XCTAssertEqual(
+            KokoroAneV3Assets.basePackagePrefixes(manifest),
+            [
+                "ANE/KokoroAlbert.mlpackage/", "ANE/KokoroPostAlbert.mlpackage/", "ANE/KokoroProsody_v2.mlmodelc/",
+                "ANE/KokoroNoise_v2.mlpackage/", "ANE/KokoroVocoder.mlpackage/", "ANE/KokoroTail_v2.mlmodelc/",
+            ])
+    }
+
     /// The native expansion gives the published `KokoroAlignment` graph's output bit for bit,
     /// including at its default shape of 48 tokens. The graph runs on `.cpuOnly` here: on
     /// `.cpuAndNeuralEngine` it traps in BNNS at 48 tokens (#1172).
@@ -46,14 +62,19 @@ final class KokoroAneV3AlignmentTests: XCTestCase {
             ProcessInfo.processInfo.environment["FLUIDAUDIO_RUN_KOKORO_V3"] == "1",
             "Explicitly enable the bounded real-model integration check")
         let directory = ProcessInfo.processInfo.environment["KOKORO_V3_TEST_CACHE"].map { URL(fileURLWithPath: $0) }
-        let root = try await KokoroAneV3Assets.ensure(variant: .english, directory: directory, fastVocoder: false)
+        let root = try KokoroAneV3Assets.cacheDirectory(variant: .english, directory: directory)
+        let source = root.appendingPathComponent("base/KokoroAlignment.mlpackage")
+        var compiled = root.appendingPathComponent("base/KokoroAlignment.mlmodelc")
+        // v3 no longer fetches the graph; a cache from before this change still holds it,
+        // compiled or as its source.
+        try XCTSkipUnless(
+            KokoroAneV3Assets.isCompiledBundle(at: compiled) || FileManager.default.fileExists(atPath: source.path),
+            "No KokoroAlignment graph in the v3 cache to compare with")
+        if !KokoroAneV3Assets.isCompiledBundle(at: compiled) {
+            compiled = try await MLModel.compileModel(at: source)
+        }
         let configuration = MLModelConfiguration()
         configuration.computeUnits = .cpuOnly
-        // The pipeline no longer loads this graph, so compile its published source when needed.
-        var compiled = root.appendingPathComponent("base/KokoroAlignment.mlmodelc")
-        if !KokoroAneV3Assets.isCompiledBundle(at: compiled) {
-            compiled = try await MLModel.compileModel(at: root.appendingPathComponent("base/KokoroAlignment.mlpackage"))
-        }
         let graph = try MLModel(contentsOf: compiled, configuration: configuration)
         for tokens in [2, 3, 47, 48, 49, 120, 512] {
             // Durations of 1 to 3 frames, as PostAlbert predicts for most tokens, within the 2000-frame cap.
