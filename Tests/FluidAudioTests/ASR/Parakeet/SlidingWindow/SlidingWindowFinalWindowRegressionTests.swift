@@ -98,6 +98,16 @@ final class SlidingWindowFinalWindowRegressionTests: XCTestCase {
     ) async throws
         -> String
     {
+        try await streamTranscript(
+            samples: try loadSamples(url), models: models, chunkSeconds: chunkSeconds, config: config)
+    }
+
+    private func streamTranscript(
+        samples: [Float], models: AsrModels, chunkSeconds: TimeInterval? = nil,
+        config: SlidingWindowAsrConfig? = nil
+    ) async throws
+        -> String
+    {
         let manager =
             config.map { SlidingWindowAsrManager(config: $0) }
             ?? chunkSeconds.map { SlidingWindowAsrManager(config: SlidingWindowAsrConfig(chunkSeconds: $0)) }
@@ -105,7 +115,6 @@ final class SlidingWindowFinalWindowRegressionTests: XCTestCase {
         try await manager.loadModels(models)
         try await manager.startStreaming()
 
-        let samples = try loadSamples(url)
         let chunk = 16_000  // 1 s
         var position = 0
         while position < samples.count {
@@ -256,5 +265,34 @@ final class SlidingWindowFinalWindowRegressionTests: XCTestCase {
             text.contains("lo estoy interpretando como yo quiero"),
             "streaming transcript lost the utterance's start: \(text)")
         XCTAssertTrue(text.contains("como yo pienso"), "streaming transcript lost its tail: \(text)")
+    }
+
+    /// The first window to emit text can be an interior one (#1183): the blank
+    /// windows before it have moved the carried decoder state past the start of
+    /// the retained audio, exactly as before the final window above. Before, a
+    /// second of leading silence cost the sentence its first three words, and
+    /// the sentence spoken twice came back once.
+    func testInteriorFirstEmittingWindowKeepsTheUtterancesStart() async throws {
+        let models = try await loadModels()
+        let spanish = try loadSamples(try fixtureURL("dral-es-002-3.34-3s-16k-mono.wav"))
+        let english = try loadSamples(try fixtureURL("03-diff-explanation-16.9s.wav"))
+        let config = SlidingWindowAsrConfig(
+            chunkSeconds: 1, hypothesisChunkSeconds: 1, leftContextSeconds: 11, rightContextSeconds: 0.4,
+            minContextForConfirmation: 10, confirmationThreshold: 0.80)
+        let sentence = "lo estoy interpretando como yo quiero y como yo pienso"
+
+        let afterSilence = try await streamTranscript(
+            samples: [Float](repeating: 0, count: 16_000) + spanish + english, models: models, config: config
+        ).lowercased()
+        XCTAssertTrue(
+            afterSilence.contains(sentence), "streaming transcript lost the utterance's start: \(afterSilence)")
+        XCTAssertTrue(
+            afterSilence.contains("in that difference"), "streaming transcript lost its tail: \(afterSilence)")
+
+        let twice = try await streamTranscript(samples: spanish + spanish, models: models, config: config)
+            .lowercased()
+        XCTAssertEqual(
+            twice.components(separatedBy: sentence).count - 1, 2,
+            "the sentence spoken twice must come back twice: \(twice)")
     }
 }

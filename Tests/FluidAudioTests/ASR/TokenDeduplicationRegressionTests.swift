@@ -906,14 +906,15 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
 
     /// After keeping a punctuated previous word (`said` `.`), the trailing
     /// punctuation cleanup must stop at a boundary-marked apostrophe that begins
-    /// the next word (`▁'` `cause`): only the re-emitted `said` goes.
+    /// the next word (`▁'` `cause`): only the re-emitted `said` goes. A pause
+    /// separates `said` from `'cause`, so the run-on rule (#1183) keeps `said.`.
     func testReconcileFinalWindowSeam_PunctuationCleanupStopsAtNextWordStart() {
         let seam = AsrManager.reconcileFinalWindowSeam(
             previousTokens: [1, 2, 7883],  // ▁he ▁said .
             previousTimestamps: [96, 100, 103],
             trailingWordStart: 1,
             currentTokens: [2, 30, 31, 32],  // ▁said ▁' cause ▁more
-            currentTimestamps: [101, 104, 105, 112],
+            currentTimestamps: [101, 108, 109, 116],
             currentPieces: [" said", " '", "cause", " more"],
             previousPieces: [" he", " said", "."]
         )
@@ -1032,7 +1033,9 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         )
         XCTAssertEqual(different.droppedPrevious, 4, "`Savior.` retires for the re-decoded `Saviour`")
         XCTAssertEqual(different.droppedCurrent, 4, "head and re-emitted `had been the` go; `Saviour` stays")
-        // Same spelling: the whole re-emitted word goes, never `S` alone.
+        // Same spelling, and the re-decode runs on into `of all`: the kept copy's
+        // period was the window edge, so it retires for the whole re-emitted
+        // word, never `S` alone.
         let same = AsrManager.reconcileFinalWindowSeam(
             previousTokens: [1, 2, 3, 4, 5, 6, 7, 7883],
             previousTimestamps: previousTs,
@@ -1042,8 +1045,130 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
             currentPieces: ["ist", " had", " been", " the", " S", "avi", "or", " of", " all"],
             previousPieces: previousPieces
         )
-        XCTAssertEqual(same.droppedPrevious, 0)
-        XCTAssertEqual(same.droppedCurrent, 7)
+        XCTAssertEqual(same.droppedPrevious, 4)
+        XCTAssertEqual(same.droppedCurrent, 4)
+    }
+
+    /// A window edge can close a sentence the audio has not finished: `como
+    /// yo.`, then the re-decode reads `yo pienso.` (#1183). The kept copy's
+    /// period contradicts the re-decode, so `yo.` retires for it. The earlier
+    /// `yo` of `como yo quiero`, suppressed 10 frames back, is not evidence of
+    /// a repetition; a suppressed copy on the previous word's own frame is.
+    func testReconcileFinalWindowSeam_EdgePunctuationRetiresWhenRedecodeRunsOn() {
+        let previousPieces = [" como", " yo", " qu", "ier", "o", " y", " como", " yo", "."]
+        let runOn = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4, 5, 6, 1, 2, 7883],
+            previousTimestamps: [13, 16, 20, 20, 21, 23, 24, 26, 28],
+            trailingWordStart: 7,
+            // The re-decode ends inside the jitter margin of the previous last frame.
+            currentTokens: [5, 6, 1, 2, 8, 9, 7883],
+            currentTimestamps: [22, 24, 26, 28, 30, 31, 32],
+            currentPieces: ["o", " y", " como", " yo", " pien", "so", "."],
+            previousPieces: previousPieces,
+            suppressedPieces: [" yo", " qu"],
+            suppressedTimestamps: [16, 20]
+        )
+        XCTAssertEqual(runOn.droppedPrevious, 2, "`yo.` retires")
+        XCTAssertEqual(runOn.droppedCurrent, 3, "the head and re-emitted `y como` go; `yo pienso.` stays")
+        let repetition = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 7883],  // ▁let's ▁go .
+            previousTimestamps: [96, 100, 100],
+            trailingWordStart: 1,
+            currentTokens: [2, 31],  // ▁go ▁again
+            currentTimestamps: [106, 109],
+            currentPieces: [" go", " again"],
+            previousPieces: [" let's", " go", "."],
+            suppressedPieces: [" go"],
+            suppressedTimestamps: [94]
+        )
+        XCTAssertEqual(repetition.droppedPrevious, 0, "`go.` was re-emitted (suppressed); `go again` is new")
+        XCTAssertEqual(repetition.droppedCurrent, 0)
+    }
+
+    /// The run-on rule counts a word that begins with a boundary-marked
+    /// apostrophe (`▁'` `cause`) as the next word: `said.` + `said 'cause more`
+    /// with no pause retires `said.`, as `yo.` + `yo pienso` does.
+    func testReconcileFinalWindowSeam_EdgePunctuationRetiresBeforeAnApostropheLedWord() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 7883],  // ▁he ▁said .
+            previousTimestamps: [96, 100, 103],
+            trailingWordStart: 1,
+            currentTokens: [2, 30, 31, 32],  // ▁said ▁' cause ▁more
+            currentTimestamps: [101, 104, 105, 112],
+            currentPieces: [" said", " '", "cause", " more"],
+            previousPieces: [" he", " said", "."]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 2, "`said.` retires")
+        XCTAssertEqual(seam.droppedCurrent, 0, "`said 'cause more` stays")
+    }
+
+    /// Which word a suppressed copy re-reads is decided by the kept words, not
+    /// by which re-emission lands nearer: a suppressed copy of the last word
+    /// that drifted further than the visible repetition still protects it, and
+    /// a suppressed copy of an earlier occurrence protects nothing. Frames are
+    /// those of a later window (non-zero offset).
+    func testReconcileFinalWindowSeam_SuppressedCopyIsMatchedToItsOwnOccurrence() {
+        let drifted = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 7883],  // ▁let's ▁go .
+            previousTimestamps: [296, 300, 300],
+            trailingWordStart: 1,
+            currentTokens: [2, 31],  // ▁go ▁again
+            currentTimestamps: [306, 309],
+            currentPieces: [" go", " again"],
+            previousPieces: [" let's", " go", "."],
+            suppressedPieces: [" go"],
+            suppressedTimestamps: [293]
+        )
+        XCTAssertEqual(drifted.droppedPrevious, 0, "`go.` was re-read 7 frames early; `go again` is a second word")
+        XCTAssertEqual(drifted.droppedCurrent, 0)
+        let earlier = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 3, 4, 2],  // ▁we ▁go ▁where ▁you ▁go
+            previousTimestamps: [236, 239, 241, 244, 247],
+            trailingWordStart: 4,
+            currentTokens: [2, 31],  // ▁go ▁home
+            currentTimestamps: [253, 262],
+            currentPieces: [" go", " home"],
+            previousPieces: [" we", " go", " where", " you", " go"],
+            suppressedPieces: [" go", " where", " you"],
+            suppressedTimestamps: [239, 241, 244]
+        )
+        XCTAssertEqual(earlier.droppedPrevious, 0)
+        XCTAssertEqual(
+            earlier.droppedCurrent, 1, "the suppressed `go` is the first one; the visible `go` is the drifted copy")
+    }
+
+    /// The run-on rule needs all of its evidence. `yo.` stays when the
+    /// re-decode keeps its own punctuation behind the word, when a pause
+    /// separates the word from the next one, and when the kept copy carries
+    /// no punctuation to contradict.
+    func testReconcileFinalWindowSeam_EdgePunctuationStaysWithoutRunOnEvidence() {
+        func droppedPrevious(
+            previousPieces: [String] = [" como", " yo", "."], currentPieces: [String], currentTimestamps: [Int]
+        ) -> Int {
+            AsrManager.reconcileFinalWindowSeam(
+                previousTokens: Array([1, 2, 7883].prefix(previousPieces.count)),
+                previousTimestamps: Array([24, 26, 28].prefix(previousPieces.count)),
+                trailingWordStart: 1,
+                currentTokens: Array([2, 7883, 8, 9].suffix(currentPieces.count)),
+                currentTimestamps: currentTimestamps,
+                currentPieces: currentPieces,
+                previousPieces: previousPieces
+            ).droppedPrevious
+        }
+        XCTAssertEqual(
+            droppedPrevious(currentPieces: [" yo", ".", " pien", "so"], currentTimestamps: [28, 29, 31, 32]), 0,
+            "the re-decode closes the sentence too")
+        XCTAssertEqual(
+            droppedPrevious(currentPieces: [" yo", " pien", "so"], currentTimestamps: [28, 34, 35]), 0,
+            "a pause follows the word")
+        XCTAssertEqual(
+            droppedPrevious(
+                previousPieces: [" como", " yo"], currentPieces: [" yo", " pien", "so"],
+                currentTimestamps: [28, 30, 31]), 0,
+            "no punctuation to retire")
+        XCTAssertEqual(
+            droppedPrevious(currentPieces: [" yo", " pien", "so"], currentTimestamps: [28, 30, 31]), 2,
+            "the same input with a period and no pause retires")
     }
 
     /// A fast repetition inside the duplicate tolerance (`go` at 100, `go
