@@ -1,8 +1,47 @@
 import Foundation
 
-/// Recording-owned exact batch requests. No feature tensors or decoder state cross requests.
+/// Reuses decoded batch windows across repeated `transcribe` calls on one growing recording.
+///
+/// An app that re-transcribes a recording while it grows (live previews, then a final pass at Stop) can
+/// pass the same context to each `AsrManager.transcribe(_:decoderState:language:reuse:)` call. A window
+/// whose audio and decoding parameters are byte-identical to one decoded earlier with the same models
+/// returns that earlier result instead of running inference again. Window selection, merging and gap
+/// repair still run over the full recording on every call, and feature tensors, decoder state and
+/// vocabulary rescoring are never reused.
+///
+/// Create one context per recording and drop it when the recording ends. Only audio longer than one
+/// model window (about 15 s) is decoded in windows; shorter calls do not use the context. The context
+/// keeps at most `maximumEntries` windows, clamped to 1...32.
+public final class BatchWindowReuseContext: Sendable {
+    /// Window lookups since the context was created.
+    public struct Statistics: Sendable, Equatable {
+        /// Lookups answered from an earlier decode.
+        public let hits: Int
+        /// Lookups that ran inference.
+        public let misses: Int
+        /// Windows currently kept.
+        public let entries: Int
+        /// Bytes of audio kept for exact matching.
+        public let pcmBytes: Int
+    }
+
+    let cache: BatchWindowReuseCache
+
+    public init(maximumEntries: Int = 16) {
+        cache = BatchWindowReuseCache(maximumEntries: maximumEntries)
+    }
+
+    public func statistics() async -> Statistics {
+        await cache.statistics()
+    }
+}
+
+/// Exact batch windows decoded for one recording. No feature tensors or decoder state cross requests.
 internal actor BatchWindowReuseCache {
     internal struct Key: Hashable, Sendable {
+        /// The loaded encoder (`AsrManager.loadedEncoderIdentity`), so a context passed to another
+        /// model set never matches.
+        let model: ObjectIdentifier
         let pcm: Data
         let contextSamples: Int
         let chunkStart: Int
@@ -14,10 +53,11 @@ internal actor BatchWindowReuseCache {
         let initialTimeIndex: Int?
 
         init(
-            samples: [Float], contextSamples: Int, chunkStart: Int, isLastChunk: Bool,
+            model: ObjectIdentifier, samples: [Float], contextSamples: Int, chunkStart: Int, isLastChunk: Bool,
             flushPendingTokens: Bool?, maxModelSamples: Int, language: Language?,
             emitTokensAfterFrame: Int?, initialTimeIndex: Int?
         ) {
+            self.model = model
             self.pcm = samples.withUnsafeBytes { Data($0) }
             self.contextSamples = contextSamples
             self.chunkStart = chunkStart
@@ -40,14 +80,12 @@ internal actor BatchWindowReuseCache {
     private let maximumEntries: Int
     private var values: [Key: Value] = [:]
     private var recency: [Key] = []
-    private var active = true
     private var hits = 0
     private var misses = 0
 
     init(maximumEntries: Int) { self.maximumEntries = max(1, min(32, maximumEntries)) }
 
     func value(for key: Key) -> Value? {
-        guard active else { return nil }
         guard let value = values[key] else {
             misses += 1
             return nil
@@ -59,7 +97,6 @@ internal actor BatchWindowReuseCache {
     }
 
     func store(_ value: Value, for key: Key) {
-        guard active else { return }
         values[key] = value
         recency.removeAll { $0 == key }
         recency.append(key)
@@ -69,49 +106,7 @@ internal actor BatchWindowReuseCache {
         }
     }
 
-    func invalidate() {
-        active = false
-        values.removeAll()
-        recency.removeAll()
-    }
-
-    func statistics() -> (hits: Int, misses: Int, entries: Int, pcmBytes: Int) {
-        (hits, misses, values.count, values.keys.reduce(0) { $0 + $1.pcm.count })
-    }
-}
-
-extension AsrManager {
-    /// Begin an isolated experimental cache for one recording, before preview inference.
-    /// Only byte-identical stateless batch windows with matching inference parameters are reused.
-    /// Final window selection, merging and gap repair still run. Feature tensors, decoder state
-    /// and vocabulary rescoring are never reused. The cache is bounded to at most 32 entries.
-    /// Serialize recording lifecycle operations with transcription; finish or cancel outstanding
-    /// requests before beginning another recording or changing models.
-    public func beginBatchWindowReuseExperiment(maximumEntries: Int = 16) async {
-        await endBatchWindowReuseExperiment()
-        experimentalBatchWindowCache = BatchWindowReuseCache(maximumEntries: maximumEntries)
-    }
-
-    /// Detach recording-owned cached requests after completion or cancellation.
-    public func endBatchWindowReuseExperiment() async {
-        let cache = experimentalBatchWindowCache
-        experimentalBatchWindowCache = nil
-        await cache?.invalidate()
-    }
-
-    /// Return request-level reuse diagnostics; no feature or decoder state is exposed.
-    public func batchWindowReuseExperimentStatistics() async -> (hits: Int, misses: Int, entries: Int, pcmBytes: Int) {
-        guard let cache = experimentalBatchWindowCache else { return (0, 0, 0, 0) }
-        return await cache.statistics()
-    }
-
-    internal func detachBatchWindowReuseExperiment() {
-        let cache = experimentalBatchWindowCache
-        experimentalBatchWindowCache = nil
-        Task { await cache?.invalidate() }
-    }
-
-    internal func shareBatchWindowReuseExperiment(_ cache: BatchWindowReuseCache?) {
-        experimentalBatchWindowCache = cache
+    func statistics() -> BatchWindowReuseContext.Statistics {
+        .init(hits: hits, misses: misses, entries: values.count, pcmBytes: values.keys.reduce(0) { $0 + $1.pcm.count })
     }
 }

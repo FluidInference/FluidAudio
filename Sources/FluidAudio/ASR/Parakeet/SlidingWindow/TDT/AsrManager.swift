@@ -18,7 +18,6 @@ public actor AsrManager {
 
     /// The AsrModels instance if initialized with models
     internal var asrModels: AsrModels?
-    internal var experimentalBatchWindowCache: BatchWindowReuseCache?
 
     internal let progressEmitter = ProgressEmitter()
 
@@ -160,11 +159,15 @@ public actor AsrManager {
                 endSeconds: Double(endFrame) * frame, text: convertTokensToText(tokenIds)))
     }
 
-    internal func makeWorkerClone() async -> AsrManager? {
+    internal func makeWorkerClone() -> AsrManager? {
         guard let models = asrModels else { return nil }
-        let clone = AsrManager(config: config, models: models)
-        await clone.shareBatchWindowReuseExperiment(experimentalBatchWindowCache)
-        return clone
+        return AsrManager(config: config, models: models)
+    }
+
+    /// Identity of the loaded encoder, or of the preprocessor that also encodes in fused models
+    /// (110M), for keying reused batch windows (`BatchWindowReuseContext`).
+    internal var loadedEncoderIdentity: ObjectIdentifier? {
+        (encoderModel ?? preprocessorModel).map(ObjectIdentifier.init)
     }
 
     /// Returns the current transcription progress stream for offline long audio (>240,000 samples / ~15s).
@@ -192,7 +195,6 @@ public actor AsrManager {
     /// - Parameter models: Pre-loaded ASR models
     public func loadModels(_ models: AsrModels) async throws {
         logger.info("Loading AsrManager with provided models")
-        detachBatchWindowReuseExperiment()
 
         self.asrModels = models
         self.preprocessorModel = models.preprocessor
@@ -271,12 +273,10 @@ public actor AsrManager {
     }
 
     public func reset() {
-        detachBatchWindowReuseExperiment()
         Task { await sharedMLArrayCache.clear() }
     }
 
     public func cleanup() {
-        detachBatchWindowReuseExperiment()
         asrModels = nil
         preprocessorModel = nil
         encoderModel = nil
@@ -539,6 +539,9 @@ public actor AsrManager {
     ///   - language: Optional language hint for script-aware token filtering (v3 only).
     ///     When set, top-K tokens that don't match the language's script are skipped
     ///     in favor of matching candidates. Silently ignored for v2 / tdtCtc110m / tdtJa.
+    ///   - reuse: Optional context for repeated calls on one growing recording (previews, then a final
+    ///     pass). Windows byte-identical to ones decoded earlier through the same context are not decoded
+    ///     again; see ``BatchWindowReuseContext``. `nil` (the default) decodes every window.
     /// - Note: Progress stream is emitted only when `audioSamples.count > ASRConstants.maxModelSamples` (~15s).
     ///         Use `transcriptionProgressStream` before calling this method to observe progress.
     /// - Returns: An ASRResult containing the transcribed text and token timings
@@ -546,14 +549,16 @@ public actor AsrManager {
     public func transcribe(
         _ audioSamples: [Float],
         decoderState: inout TdtDecoderState,
-        language: Language? = nil
+        language: Language? = nil,
+        reuse: BatchWindowReuseContext? = nil
     ) async throws -> ASRResult {
         let shouldEmitProgress = audioSamples.count > ASRConstants.maxModelSamples
         if shouldEmitProgress {
             _ = await progressEmitter.ensureSession()
         }
         do {
-            let result = try await transcribeWithState(audioSamples, decoderState: &decoderState, language: language)
+            let result = try await transcribeWithState(
+                audioSamples, decoderState: &decoderState, language: language, reuse: reuse?.cache)
 
             if shouldEmitProgress {
                 await progressEmitter.finishSession()

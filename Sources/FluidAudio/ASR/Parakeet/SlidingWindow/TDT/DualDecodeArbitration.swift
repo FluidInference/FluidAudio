@@ -486,7 +486,8 @@ extension ChunkProcessor {
                 maxModelSamples: maxModelSamples,
                 language: language,
                 emitTokensAfterFrame: emitTokensAfterFrame,
-                initialTimeIndexOverride: emitTokensAfterFrame == nil ? nil : 0
+                initialTimeIndexOverride: emitTokensAfterFrame == nil ? nil : 0,
+                reuse: reuse
             )
 
         guard
