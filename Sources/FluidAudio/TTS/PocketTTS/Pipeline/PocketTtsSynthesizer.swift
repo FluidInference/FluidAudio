@@ -861,9 +861,12 @@ public struct PocketTtsSynthesizer {
                 language: language))
 
         if !isMidSentence {
-            // Capitalize first letter
-            if let first = result.first, first.isLetter {
-                result = first.uppercased() + result.dropFirst()
+            // Capitalize the first letter, after any opening quotes or brackets
+            // ("\"hello,\" she said" -> "\"Hello,\" she said"), as upstream's `_OPENERS` does.
+            if let start = result.firstIndex(where: { !openingPunctuation.contains($0) }),
+                result[start].isLetter
+            {
+                result.replaceSubrange(start...start, with: result[start].uppercased())
             }
 
             result = withTerminalPunctuation(result)
@@ -890,6 +893,10 @@ public struct PocketTtsSynthesizer {
     /// Closing quotes and brackets. Right after a sentence's terminal punctuation
     /// they belong to that sentence, as in `"Stop!"` or `(quietly.)`.
     static let closingPunctuation: Set<Character> = ["\"", "'", ")", "]", "\u{00BB}", "\u{201D}", "\u{2019}"]
+
+    /// Opening quotes and brackets (upstream's `_OPENERS`). The first letter after them is the one
+    /// that gets capitalized, as in `"Hello," she said`.
+    static let openingPunctuation: Set<Character> = ["\"", "'", "(", "[", "\u{00AB}", "\u{201C}", "\u{2018}"]
 
     /// End `text` with sentence-final punctuation, as Python's
     /// `_ensure_terminal_punctuation` does.
