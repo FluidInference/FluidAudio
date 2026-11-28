@@ -122,6 +122,27 @@ final class ChatterboxTokenizer: Sendable {
         return text
     }
 
+    /// Python `str.lower()`. Swift's `lowercased()` maps each scalar on its
+    /// own, so it misses the one context-dependent rule Python applies: a
+    /// capital sigma that ends a word becomes final sigma `ς`, not `σ`
+    /// (Unicode Final_Sigma: a cased letter before it and none after it,
+    /// skipping case-ignorable characters such as `.` and `'` both ways).
+    static func pythonLowercased(_ text: String) -> String {
+        let scalars = Array(text.unicodeScalars)
+        var lowered = String.UnicodeScalarView()
+        for (index, scalar) in scalars.enumerated() {
+            guard scalar == "\u{03A3}" else {
+                lowered.append(contentsOf: scalar.properties.lowercaseMapping.unicodeScalars)
+                continue
+            }
+            let before = scalars[..<index].last { !$0.properties.isCaseIgnorable }
+            let after = scalars[(index + 1)...].first { !$0.properties.isCaseIgnorable }
+            let isFinal = (before?.properties.isCased ?? false) && !(after?.properties.isCased ?? false)
+            lowered.append(isFinal ? "\u{03C2}" : "\u{03C3}")
+        }
+        return String(lowered)
+    }
+
     /// Python `str.isspace()`: White_Space plus the separators U+001C to U+001F.
     private static func isPythonSpace(_ scalar: Unicode.Scalar) -> Bool {
         scalar.properties.isWhitespace || (0x1C...0x1F).contains(scalar.value)
@@ -130,7 +151,7 @@ final class ChatterboxTokenizer: Sendable {
     /// text → token ids, mirroring `MTLTokenizer.encode` (without the
     /// zh/ja/he/ko/ru language-specific transforms).
     func encode(_ text: String, languageId: String) -> [Int] {
-        var txt = text.lowercased()
+        var txt = Self.pythonLowercased(text)
         txt = txt.decomposedStringWithCompatibilityMapping  // NFKD
         txt = "[\(languageId.lowercased())]" + txt
         txt = txt.replacingOccurrences(of: " ", with: "[SPACE]", options: .literal)
