@@ -475,9 +475,6 @@ extension ChunkProcessor {
         let emitTokensAfterFrame =
             layout.warmupSamples > 0 ? chunkStart / ASRConstants.samplesPerEncoderFrame : nil
 
-        var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
-        decoderState.reset()
-
         let (windowTokens, windowTimestamps, windowConfidences, windowDurations) =
             try await Self.transcribeChunk(
                 samples: chunkSamplesArray,
@@ -485,11 +482,12 @@ extension ChunkProcessor {
                 chunkStart: layout.chunkStartOffset,
                 isLastChunk: layout.isLastChunk,
                 using: manager,
-                decoderState: &decoderState,
+                decoderLayers: decoderLayers,
                 maxModelSamples: maxModelSamples,
                 language: language,
                 emitTokensAfterFrame: emitTokensAfterFrame,
-                initialTimeIndexOverride: emitTokensAfterFrame == nil ? nil : 0
+                initialTimeIndexOverride: emitTokensAfterFrame == nil ? nil : 0,
+                reuse: reuse
             )
 
         guard

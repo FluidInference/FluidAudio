@@ -3,7 +3,8 @@ import Foundation
 extension AsrManager {
 
     internal func transcribeWithState(
-        _ audioSamples: [Float], decoderState: inout TdtDecoderState, language: Language? = nil
+        _ audioSamples: [Float], decoderState: inout TdtDecoderState, language: Language? = nil,
+        reuse: BatchWindowReuseCache? = nil
     ) async throws -> ASRResult {
         guard isAvailable else { throw ASRError.notInitialized }
         let minimumRequiredSamples = ASRConstants.minimumRequiredSamples(forSampleRate: config.sampleRate)
@@ -38,7 +39,7 @@ extension AsrManager {
         }
 
         // ChunkProcessor handles stateless chunked transcription for long audio
-        let processor = ChunkProcessor(audioSamples: audioSamples)
+        let processor = ChunkProcessor(audioSamples: audioSamples, reuse: reuse)
         let result = try await processor.process(
             using: self,
             startTime: startTime,

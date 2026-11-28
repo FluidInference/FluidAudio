@@ -3,6 +3,8 @@ import Foundation
 struct ChunkProcessor {
     let sampleSource: AudioSampleSource
     let totalSamples: Int
+    /// The caller's recording-scoped window cache (`BatchWindowReuseContext`), if any.
+    let reuse: BatchWindowReuseCache?
 
     private let logger = AppLogger(category: "ChunkProcessor")
     typealias TokenWindow = (token: Int, timestamp: Int, confidence: Float, duration: Int)
@@ -773,14 +775,15 @@ struct ChunkProcessor {
     #endif
 
     /// Initialize with a streaming audio sample source for memory-efficient processing.
-    init(sampleSource: AudioSampleSource) {
+    init(sampleSource: AudioSampleSource, reuse: BatchWindowReuseCache? = nil) {
         self.sampleSource = sampleSource
         self.totalSamples = sampleSource.sampleCount
+        self.reuse = reuse
     }
 
     /// Convenience initializer for in-memory audio samples.
-    init(audioSamples: [Float]) {
-        self.init(sampleSource: ArrayAudioSampleSource(samples: audioSamples))
+    init(audioSamples: [Float], reuse: BatchWindowReuseCache? = nil) {
+        self.init(sampleSource: ArrayAudioSampleSource(samples: audioSamples), reuse: reuse)
     }
 
     func process(
@@ -798,6 +801,7 @@ struct ChunkProcessor {
         let melChunkContext = await manager.melChunkContext
         let modelVersion = await manager.modelVersion
         let dualDecodeArbitration = await manager.dualDecodeArbitration
+        let reuse = self.reuse
 
         // Dual-decode opt-in (only effective for v3 + no-mel; other paths
         // are not changed by the flag).
@@ -893,9 +897,6 @@ struct ChunkProcessor {
                 let worker = workers[workerIndex]
 
                 group.addTask {
-                    var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
-                    decoderState.reset()
-
                     let (windowTokens, windowTimestamps, windowConfidences, windowDurations) =
                         try await Self
                         .transcribeChunk(
@@ -910,11 +911,12 @@ struct ChunkProcessor {
                                     Self.hasQuietTail(chunkSamplesArray, rmsThreshold: $0)
                                 } ?? false),
                             using: worker,
-                            decoderState: &decoderState,
+                            decoderLayers: decoderLayers,
                             maxModelSamples: maxModelSamples,
                             language: language,
                             emitTokensAfterFrame: window.emitTokensAfterFrame,
-                            initialTimeIndexOverride: window.emitTokensAfterFrame == nil ? nil : 0
+                            initialTimeIndexOverride: window.emitTokensAfterFrame == nil ? nil : 0,
+                            reuse: reuse
                         )
 
                     guard
@@ -1074,14 +1076,32 @@ struct ChunkProcessor {
         isLastChunk: Bool,
         flushPendingTokens: Bool? = nil,
         using manager: AsrManager,
-        decoderState: inout TdtDecoderState,
+        decoderLayers: Int,
         maxModelSamples: Int,
         language: Language? = nil,
         emitTokensAfterFrame: Int? = nil,
-        initialTimeIndexOverride: Int? = nil
+        initialTimeIndexOverride: Int? = nil,
+        reuse: BatchWindowReuseCache? = nil
     ) async throws -> (tokens: [Int], timestamps: [Int], confidences: [Float], durations: [Int]) {
         guard !samples.isEmpty else { return ([], [], [], []) }
+        try Task.checkCancellation()
+        // Keyed by the loaded encoder too: a context passed after a model reload never matches.
+        let encoder = reuse == nil ? nil : await manager.loadedEncoderIdentity
+        let cache = encoder == nil ? nil : reuse
+        let key = encoder.map { encoder in
+            BatchWindowReuseCache.Key(
+                model: encoder, samples: samples, contextSamples: contextSamples,
+                chunkStart: chunkStart, isLastChunk: isLastChunk, flushPendingTokens: flushPendingTokens,
+                maxModelSamples: maxModelSamples, language: language,
+                emitTokensAfterFrame: emitTokensAfterFrame, initialTimeIndex: initialTimeIndexOverride)
+        }
+        if let cache, let key, let value = await cache.value(for: key) {
+            try Task.checkCancellation()
+            return (value.tokens, value.timestamps, value.confidences, value.durations)
+        }
 
+        // Each window starts with fresh decoder state. Cache hits need no Core ML arrays.
+        var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
         let paddedChunk = manager.padAudioIfNeeded(samples, targetLength: maxModelSamples)
 
         // Calculate frame count for the ACTUAL audio (excluding prepended context)
@@ -1108,11 +1128,21 @@ struct ChunkProcessor {
             initialTimeIndexOverride: initialTimeIndexOverride
         )
 
+        try Task.checkCancellation()
+        // An empty decode is still a successful result for this exact window.
+        let value: BatchWindowReuseCache.Value
         if hypothesis.isEmpty || encoderSequenceLength == 0 {
-            return ([], [], [], [])
+            value = .init(tokens: [], timestamps: [], confidences: [], durations: [])
+        } else {
+            value = .init(
+                tokens: hypothesis.ySequence, timestamps: hypothesis.timestamps,
+                confidences: hypothesis.tokenConfidences, durations: hypothesis.tokenDurations)
+        }
+        if let cache, let key {
+            await cache.store(value, for: key)
         }
 
-        return (hypothesis.ySequence, hypothesis.timestamps, hypothesis.tokenConfidences, hypothesis.tokenDurations)
+        return (value.tokens, value.timestamps, value.confidences, value.durations)
     }
 
     /// Token IDs that may safely start a seam splice: word-initial (`▁`) or
@@ -2112,6 +2142,7 @@ struct ChunkProcessor {
             guard !passProbes.isEmpty else { break }
 
             var recoveredByProbe = [[TokenWindow]](repeating: [], count: passProbes.count)
+            let reuse = self.reuse
             try await withThrowingTaskGroup(of: (Int, Int, [TokenWindow]).self) { group in
                 var availableWorkers = Array(workers.indices)
                 for (probeIndex, probe) in passProbes.enumerated() {
@@ -2129,7 +2160,8 @@ struct ChunkProcessor {
                             maxModelSamples: maxModelSamples,
                             spliceSafeTokenIds: spliceSafeTokenIds,
                             vocabulary: vocabulary,
-                            language: language
+                            language: language,
+                            reuse: reuse
                         )
                         return (probeIndex, workerIndex, recovered)
                     }
@@ -2166,11 +2198,10 @@ struct ChunkProcessor {
         maxModelSamples: Int,
         spliceSafeTokenIds: Set<Int>?,
         vocabulary: [Int: String],
-        language: Language?
+        language: Language?,
+        reuse: BatchWindowReuseCache?
     ) async throws -> [TokenWindow] {
         for placement in probe.placements {
-            var decoderState = TdtDecoderState.make(decoderLayers: decoderLayers)
-            decoderState.reset()
             let (windowTokens, windowTimestamps, windowConfidences, windowDurations) =
                 try await transcribeChunk(
                     samples: placement.audio,
@@ -2178,9 +2209,10 @@ struct ChunkProcessor {
                     chunkStart: placement.start,
                     isLastChunk: placement.isLastChunk,
                     using: manager,
-                    decoderState: &decoderState,
+                    decoderLayers: decoderLayers,
                     maxModelSamples: maxModelSamples,
-                    language: language
+                    language: language,
+                    reuse: reuse
                 )
 
             guard windowTokens.count == windowTimestamps.count,
