@@ -18,7 +18,8 @@ fails before downloading.
 
 | Stage | `.aneTailGpu` (default on OS 26 and earlier) | `.aneTailCpu` (default on OS 27+) |
 | --- | --- | --- |
-| Albert, PostAlbert, Alignment, Prosody | `.cpuAndNeuralEngine` | `.cpuAndNeuralEngine` |
+| Albert, PostAlbert, Prosody | `.cpuAndNeuralEngine` | `.cpuAndNeuralEngine` |
+| Alignment | native Swift copy | native Swift copy |
 | Masked decoder, native source/STFT, fast generator | ANE / Accelerate / `.cpuAndGPU` | not downloaded or loaded |
 | Vocoder | `.cpuAndNeuralEngine`, above 200 frames | `.cpuAndNeuralEngine`, every length |
 | Noise, Tail | `.cpuAndGPU`, above 200 frames | `.cpuOnly`, every length |
@@ -130,14 +131,20 @@ V3 takes any `KokoroAneComputeUnits` except Prosody on the GPU (`.cpuAndGPU` or
 [Benchmarks](Benchmarks.md)). Its base stages follow the routing per stage; the
 static Albert and decoder buckets always run on the ANE, and the fast vocoder runs
 only when `tail` is `.cpuAndGPU`. That lets an app move a single
-stage off a failing compute path, for example PostAlbert (#1155) or Alignment (#1172):
+stage off a failing compute path, for example PostAlbert (#1155):
 
 ```swift
 var units = KokoroAneComputeUnits.default
 units.postAlbert = .cpuOnly
-units.alignment = .cpuOnly
 let manager = KokoroAneManager(computeUnits: units, version: .v3)
 ```
+
+V3 does not run the `KokoroAlignment` graph, so it ignores `alignment`. The graph only
+repeats each token's `d` and `t_en` columns over its predicted frames, and
+`KokoroAneV3Alignment` copies them instead, bit for bit. Under `.cpuAndNeuralEngine`
+the graph trapped in BNNS (`EXC_BREAKPOINT` in `BNNSGraphContextExecute_v2`) whenever
+a chunk had exactly 48 tokens, the graph's default shape: about one English sentence
+in twenty (#1172, M5 on macOS 26.7.2 and 27.2.1).
 
 The bounded real-model integration test is opt-in with
 `FLUIDAUDIO_RUN_KOKORO_V3=1 swift test --filter KokoroAneV3Tests`.
