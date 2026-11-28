@@ -906,14 +906,15 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
 
     /// After keeping a punctuated previous word (`said` `.`), the trailing
     /// punctuation cleanup must stop at a boundary-marked apostrophe that begins
-    /// the next word (`▁'` `cause`): only the re-emitted `said` goes.
+    /// the next word (`▁'` `cause`): only the re-emitted `said` goes. A pause
+    /// separates `said` from `'cause`, so the run-on rule (#1183) keeps `said.`.
     func testReconcileFinalWindowSeam_PunctuationCleanupStopsAtNextWordStart() {
         let seam = AsrManager.reconcileFinalWindowSeam(
             previousTokens: [1, 2, 7883],  // ▁he ▁said .
             previousTimestamps: [96, 100, 103],
             trailingWordStart: 1,
             currentTokens: [2, 30, 31, 32],  // ▁said ▁' cause ▁more
-            currentTimestamps: [101, 104, 105, 112],
+            currentTimestamps: [101, 108, 109, 116],
             currentPieces: [" said", " '", "cause", " more"],
             previousPieces: [" he", " said", "."]
         )
@@ -1082,6 +1083,23 @@ final class TokenDeduplicationRegressionTests: XCTestCase {
         )
         XCTAssertEqual(repetition.droppedPrevious, 0, "`go.` was re-emitted (suppressed); `go again` is new")
         XCTAssertEqual(repetition.droppedCurrent, 0)
+    }
+
+    /// The run-on rule counts a word that begins with a boundary-marked
+    /// apostrophe (`▁'` `cause`) as the next word: `said.` + `said 'cause more`
+    /// with no pause retires `said.`, as `yo.` + `yo pienso` does.
+    func testReconcileFinalWindowSeam_EdgePunctuationRetiresBeforeAnApostropheLedWord() {
+        let seam = AsrManager.reconcileFinalWindowSeam(
+            previousTokens: [1, 2, 7883],  // ▁he ▁said .
+            previousTimestamps: [96, 100, 103],
+            trailingWordStart: 1,
+            currentTokens: [2, 30, 31, 32],  // ▁said ▁' cause ▁more
+            currentTimestamps: [101, 104, 105, 112],
+            currentPieces: [" said", " '", "cause", " more"],
+            previousPieces: [" he", " said", "."]
+        )
+        XCTAssertEqual(seam.droppedPrevious, 2, "`said.` retires")
+        XCTAssertEqual(seam.droppedCurrent, 0, "`said 'cause more` stays")
     }
 
     /// Which word a suppressed copy re-reads is decided by the kept words, not

@@ -634,13 +634,14 @@ extension AsrManager {
         // a pause: the punctuation behind the previous copy was the window edge
         // closing a sentence the audio had not finished (`como yo.` + `pienso`).
         // A suppressed re-reading of the previous word makes the visible copy a
-        // second word (`go.` + `go again`), which stays.
+        // second word (`go.` + `go again`), which stays. `startsWordPiece` alone
+        // decides what the next word is: it rejects standalone punctuation but
+        // accepts an apostrophe that begins a word (`said` + `'cause`).
         let runsOnPastPreviousWord =
             firstWordIndex.map { index in
                 let end = wordExtent(in: currentPieces, from: index)
                 return abs(currentTimestamps[index] - lastWordStartFrame) <= frameTolerance && !previousWordSuppressed
                     && end < currentTokens.count && startsWordPiece(in: currentPieces, at: end)
-                    && !isPunctuation(end)
                     && currentTimestamps[end] - currentTimestamps[end - 1] <= jitterFrames
             } ?? false
         let retire: Bool
