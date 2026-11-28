@@ -235,9 +235,14 @@ public actor KokoroAneModelStore {
             guard vocoderPrecision == .float16 else {
                 throw KokoroAneError.inputProcessingFailed("ANE-v3 does not support the fp32 vocoder yet (#1135)")
             }
-            guard [.default, .aneTailGpu, .aneTailCpu].contains(computeUnits) else {
+            // Any routing but Prosody on the GPU, whose RNN aborts the process in MPSGraph
+            // (`GPURNNOps.mm: JIT not supported`, Documentation/TTS/Benchmarks.md). The base
+            // stages follow the routing per stage, so an app can move one off a failing
+            // compute path (PostAlbert #1155, Alignment #1172). The static Albert and
+            // decoder buckets always run on the ANE.
+            guard computeUnits.prosody != .cpuAndGPU, computeUnits.prosody != .all else {
                 throw KokoroAneError.inputProcessingFailed(
-                    "ANE-v3 supports the default, aneTailGpu or aneTailCpu routing only")
+                    "ANE-v3 cannot run Prosody on the GPU: its RNN aborts the process in MPSGraph")
             }
             let root = try await KokoroAneV3Assets.ensure(
                 variant: variant, directory: directory,

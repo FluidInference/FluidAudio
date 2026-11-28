@@ -861,23 +861,27 @@ public struct PocketTtsSynthesizer {
                 language: language))
 
         if !isMidSentence {
-            // Capitalize first letter
-            if let first = result.first, first.isLetter {
-                result = first.uppercased() + result.dropFirst()
+            // Capitalize the first letter, after any opening quotes or brackets
+            // ("\"hello,\" she said" -> "\"Hello,\" she said"), as upstream's `_OPENERS` does.
+            if let start = result.firstIndex(where: { !openingPunctuation.contains($0) }),
+                result[start].isLetter
+            {
+                result.replaceSubrange(start...start, with: result[start].uppercased())
             }
 
             result = withTerminalPunctuation(result)
         }
 
-        // Pad short texts for better prosody — but only for full sentences.
+        // Give short full sentences extra frames after EOS for better prosody.
         // Mid-sentence chunks (clause/word-boundary continuations) must skip
-        // the leading-space padding and the extra trailing frames; otherwise
-        // each short fragment introduces ~80ms+ of silence at the seam, which
-        // re-creates the prosody break we're trying to remove (issue #584).
+        // the extra trailing frames; otherwise each short fragment introduces
+        // ~80ms+ of silence at the seam, which re-creates the prosody break
+        // we're trying to remove (issue #584). No leading-space padding:
+        // upstream adds it only under `pad_with_spaces_for_short_inputs`, which
+        // none of these packs set, and it makes them repeat words (#1154).
         let wordCount = result.split(separator: " ").count
         let framesAfterEos: Int
         if !isMidSentence, wordCount < PocketTtsConstants.shortTextWordThreshold {
-            result = String(repeating: " ", count: 8) + result
             framesAfterEos = PocketTtsConstants.shortTextPadFrames
         } else {
             framesAfterEos = PocketTtsConstants.longTextExtraFrames
@@ -889,6 +893,10 @@ public struct PocketTtsSynthesizer {
     /// Closing quotes and brackets. Right after a sentence's terminal punctuation
     /// they belong to that sentence, as in `"Stop!"` or `(quietly.)`.
     static let closingPunctuation: Set<Character> = ["\"", "'", ")", "]", "\u{00BB}", "\u{201D}", "\u{2019}"]
+
+    /// Opening quotes and brackets (upstream's `_OPENERS`). The first letter after them is the one
+    /// that gets capitalized, as in `"Hello," she said`.
+    static let openingPunctuation: Set<Character> = ["\"", "'", "(", "[", "\u{00AB}", "\u{201C}", "\u{2018}"]
 
     /// End `text` with sentence-final punctuation, as Python's
     /// `_ensure_terminal_punctuation` does.

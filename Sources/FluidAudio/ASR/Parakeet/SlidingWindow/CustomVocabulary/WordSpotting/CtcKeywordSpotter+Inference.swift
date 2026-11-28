@@ -210,7 +210,7 @@ extension CtcKeywordSpotter {
         // Apply temperature scaling (CTC_TEMPERATURE) and blank bias (BLANK_BIAS)
         let allLogProbs = try Self.makeLogProbs(
             from: ctcRaw, temperature: temperature, blankBias: blankBias, blankId: blankId)
-        let trimmed = trimLogProbs(allLogProbs, audioSampleCount: clampedCount)
+        let (trimmed, audioFrames) = trimLogProbs(allLogProbs, audioSampleCount: clampedCount)
         let frameCount = trimmed.count
 
         if debugMode {
@@ -219,9 +219,11 @@ extension CtcKeywordSpotter {
             )
         }
 
+        // Measured on the frames covering the audio, so the lag frame kept past its
+        // end does not shift any timestamp.
         let frameDuration =
-            frameCount > 0
-            ? Double(clampedCount) / Double(frameCount) / Double(sampleRate)
+            audioFrames > 0
+            ? Double(clampedCount) / Double(audioFrames) / Double(sampleRate)
             : 0
 
         return CtcLogProbResult(
@@ -293,8 +295,28 @@ extension CtcKeywordSpotter {
 
         // The shape initializer leaves storage uninitialized. Clear it, then copy the clip.
         array.reset(to: 0)
-        for i in 0..<clampedCount {
-            array[i] = NSNumber(value: audioSamples[i])
+        // Copy in bulk rather than boxing an NSNumber per sample, which cost about a
+        // third of transcription CPU with vocabulary boosting on. A fresh array is
+        // contiguous, so its linear index is its storage offset, and vImage narrows to
+        // half precision with the same round-to-nearest-even as the per-element path.
+        guard clampedCount > 0 else { return (array, clampedCount) }
+        audioSamples.withUnsafeBufferPointer { source in
+            guard let samples = source.baseAddress else { return }
+            switch dataType {
+            case .float32:
+                array.dataPointer.bindMemory(to: Float.self, capacity: maxSamples)
+                    .update(from: samples, count: clampedCount)
+            case .float16:
+                Float16Conversion.fromFloat32(
+                    src: samples,
+                    dst: array.dataPointer.bindMemory(to: UInt16.self, capacity: maxSamples),
+                    count: clampedCount)
+            default:
+                // Not reached by prepareAudioArray (float32 or float16 only).
+                for i in 0..<clampedCount {
+                    array[i] = NSNumber(value: audioSamples[i])
+                }
+            }
         }
 
         return (array, clampedCount)
@@ -471,17 +493,30 @@ extension CtcKeywordSpotter {
         return result
     }
 
-    private func trimLogProbs(_ logProbs: [[Float]], audioSampleCount: Int) -> [[Float]] {
-        guard !logProbs.isEmpty else { return logProbs }
+    /// CTC frames kept past the end of a clip shorter than the model window.
+    ///
+    /// The CTC head emits a token about one frame after its sound, so when a clip stops
+    /// on its last word that token lands in the first padding frame. Trimming that frame
+    /// scored the word as cut off: "months." at the end of a dictation scored -8.84
+    /// against "Monte" (#1151). Later padding frames stay trimmed; the model emits
+    /// spurious tokens there.
+    static let trailingLagFrames = 1
+
+    /// Drop the frames that only cover the zero padding of a short clip, keeping
+    /// `trailingLagFrames` past its end. Returns the kept frames and how many of them
+    /// cover the audio itself.
+    private func trimLogProbs(_ logProbs: [[Float]], audioSampleCount: Int) -> (logProbs: [[Float]], audioFrames: Int) {
+        guard !logProbs.isEmpty else { return (logProbs, 0) }
 
         let totalFrames = logProbs.count
         if audioSampleCount >= maxModelSamples {
-            return logProbs
+            return (logProbs, totalFrames)
         }
 
         let samplesPerFrame = Double(maxModelSamples) / Double(totalFrames)
         let validFrames = Int(ceil(Double(audioSampleCount) / samplesPerFrame))
         let clampedFrames = max(1, min(validFrames, totalFrames))
+        let keptFrames = min(clampedFrames + Self.trailingLagFrames, totalFrames)
 
         if debugMode {
             logger.debug("[DEBUG] Trimming CTC frames:")
@@ -489,10 +524,10 @@ extension CtcKeywordSpotter {
                 "[DEBUG]   totalFrames=\(totalFrames), sampleCount=\(audioSampleCount), maxModelSamples=\(maxModelSamples)"
             )
             logger.debug(
-                "[DEBUG]   samplesPerFrame=\(String(format: "%.2f", samplesPerFrame)), validFrames=\(validFrames), clampedFrames=\(clampedFrames)"
+                "[DEBUG]   samplesPerFrame=\(String(format: "%.2f", samplesPerFrame)), validFrames=\(validFrames), keptFrames=\(keptFrames)"
             )
         }
 
-        return Array(logProbs.prefix(clampedFrames))
+        return (Array(logProbs.prefix(keptFrames)), clampedFrames)
     }
 }

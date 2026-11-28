@@ -60,6 +60,22 @@ internal struct TdtModelInference: Sendable {
         return (output, newState)
     }
 
+    /// Backings for the joint's `top_k_ids` / `top_k_logits` pair, shaped and typed as the
+    /// model declares them, or empty when it has no such pair (v2, 110m).
+    ///
+    /// Back every output or none: a prediction with only some outputs backed takes a slower path
+    /// in Core ML. Parakeet v3's joint backed for its three scalars alone took about 540 µs a
+    /// step against 284 µs with all five backed (M4 Pro, CPU and ANE alike).
+    static func topKOutputBackings(for model: MLModel) throws -> [String: MLMultiArray] {
+        let outputs = model.modelDescription.outputDescriptionsByName
+        var backings: [String: MLMultiArray] = [:]
+        for name in ["top_k_ids", "top_k_logits"] {
+            guard let constraint = outputs[name]?.multiArrayConstraint else { return [:] }
+            backings[name] = try MLMultiArray(shape: constraint.shape, dataType: constraint.dataType)
+        }
+        return backings
+    }
+
     /// Execute joint network with zero-copy and ANE optimization.
     ///
     /// - Parameters:
@@ -74,6 +90,8 @@ internal struct TdtModelInference: Sendable {
     ///   - tokenIdBacking: Pre-allocated output for token ID
     ///   - tokenProbBacking: Pre-allocated output for probability
     ///   - durationBacking: Pre-allocated output for duration
+    ///   - topKBackings: Pre-allocated `top_k_ids` / `top_k_logits` when the joint has them
+    ///     (see ``topKOutputBackings(for:)``)
     ///   - needsTopK: When `true`, extract `top_k_ids` / `top_k_logits` from
     ///     the joint output (JointDecisionv3). Callers should pass `true` only
     ///     when a caller-level feature (e.g. language-aware script filtering)
@@ -93,6 +111,7 @@ internal struct TdtModelInference: Sendable {
         tokenIdBacking: MLMultiArray,
         tokenProbBacking: MLMultiArray,
         durationBacking: MLMultiArray,
+        topKBackings: [String: MLMultiArray] = [:],
         needsTopK: Bool = false
     ) throws -> TdtJointDecision {
 
@@ -104,11 +123,13 @@ internal struct TdtModelInference: Sendable {
         preparedDecoderStep.prefetchToNeuralEngine()
 
         // Reuse tiny output tensors for joint prediction (provide raw MLMultiArray backings)
-        predictionOptions.outputBackings = [
+        var backings: [String: Any] = [
             "token_id": tokenIdBacking,
             "token_prob": tokenProbBacking,
             "duration": durationBacking,
         ]
+        for (name, backing) in topKBackings { backings[name] = backing }
+        predictionOptions.outputBackings = backings
 
         // Execute joint network using the reusable provider
         let output = try model.prediction(

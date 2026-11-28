@@ -147,6 +147,13 @@ extension VocabularyRescorer {
         return firstRange.lowerBound..<tokenEnd
     }
 
+    /// Return a half-open word range when the span indices are consecutive and ascending.
+    static func wordRange(for spanIndices: [Int]) -> Range<Int>? {
+        guard let first = spanIndices.first else { return nil }
+        let range = first..<(first + spanIndices.count)
+        return spanIndices.elementsEqual(range) ? range : nil
+    }
+
     /// Append one evidence row only when the caller requested evidence collection.
     @discardableResult
     static func recordCandidateEvidence(
@@ -156,15 +163,7 @@ extension VocabularyRescorer {
     ) -> Int? {
         guard let candidateID = candidateEvidence?.candidates.count else { return nil }
 
-        let wordRange: Range<Int>
-        if let firstIndex = candidate.spanIndices.first,
-            let lastIndex = candidate.spanIndices.last,
-            candidate.spanIndices == Array(firstIndex...lastIndex)
-        {
-            wordRange = firstIndex..<(lastIndex + 1)
-        } else {
-            wordRange = 0..<0
-        }
+        let wordRange = Self.wordRange(for: candidate.spanIndices) ?? 0..<0
 
         let textRange: Range<Int>?
         if let collector = candidateEvidence {
@@ -236,7 +235,7 @@ extension VocabularyRescorer {
         // PASS 3: Greedily apply non-overlapping replacements
         var appliedCandidateIDs = Set<Int>()
         for pending in arbitration.applied {
-            applyReplacement(
+            Self.applyReplacement(
                 result: pending.result,
                 candidate: pending.candidate,
                 modifiedWords: &modifiedWords,

@@ -231,6 +231,14 @@ public struct VocabularyRescorer: Sendable {
         public let replacementScore: Float?
         public let shouldReplace: Bool
         public let reason: String
+        /// Half-open index range of the replaced words in the rescorer's input word sequence: the words
+        /// `buildWordTimings(from:)` groups from the token timings passed to rescoring. Indices count the
+        /// words before any replacement, so they stay valid when other replacements in the same pass change
+        /// the word count. `nil` when the span is not contiguous, and in payloads encoded without it.
+        public var wordRange: Range<Int>? = nil
+        /// Half-open index range of the replaced words' tokens in the token timings passed to rescoring.
+        /// `nil` when those tokens are not contiguous, and in payloads encoded without it.
+        public var tokenRange: Range<Int>? = nil
     }
 
     /// Output from rescoring operation

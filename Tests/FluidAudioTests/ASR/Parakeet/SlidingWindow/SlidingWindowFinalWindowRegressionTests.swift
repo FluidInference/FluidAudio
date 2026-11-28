@@ -94,12 +94,13 @@ final class SlidingWindowFinalWindowRegressionTests: XCTestCase {
     }
 
     private func streamTranscript(
-        _ url: URL, models: AsrModels, chunkSeconds: TimeInterval? = nil
+        _ url: URL, models: AsrModels, chunkSeconds: TimeInterval? = nil, config: SlidingWindowAsrConfig? = nil
     ) async throws
         -> String
     {
         let manager =
-            chunkSeconds.map { SlidingWindowAsrManager(config: SlidingWindowAsrConfig(chunkSeconds: $0)) }
+            config.map { SlidingWindowAsrManager(config: $0) }
+            ?? chunkSeconds.map { SlidingWindowAsrManager(config: SlidingWindowAsrConfig(chunkSeconds: $0)) }
             ?? SlidingWindowAsrManager()
         try await manager.loadModels(models)
         try await manager.startStreaming()
@@ -236,5 +237,24 @@ final class SlidingWindowFinalWindowRegressionTests: XCTestCase {
                     text.contains(artifact), "\(fixture.file): seam artifact '\(artifact)' survived in: \(text)")
             }
         }
+    }
+
+    /// A short utterance whose opening windows emit no tokens still advances the
+    /// carried decoder state. Before, the final re-decode reused that state and
+    /// kept only the last words: "como yo pienso" instead of the ten-word
+    /// sentence batch returns. The 3 s clip is UTEP DRAL `ES_002_3.34.wav`
+    /// (CC0); provenance is in `Fixtures/dral-es-002-3.34-3s-16k-mono.json`.
+    func testTokenEmptyOpeningWindowsKeepTheUtterancesStart() async throws {
+        let models = try await loadModels()
+        let url = try fixtureURL("dral-es-002-3.34-3s-16k-mono.wav")
+        // Small chunks behind a long left context, as a live captioner runs them.
+        let config = SlidingWindowAsrConfig(
+            chunkSeconds: 1, hypothesisChunkSeconds: 1, leftContextSeconds: 11, rightContextSeconds: 0.4,
+            minContextForConfirmation: 10, confirmationThreshold: 0.80)
+        let text = try await streamTranscript(url, models: models, config: config).lowercased()
+        XCTAssertTrue(
+            text.contains("lo estoy interpretando como yo quiero"),
+            "streaming transcript lost the utterance's start: \(text)")
+        XCTAssertTrue(text.contains("como yo pienso"), "streaming transcript lost its tail: \(text)")
     }
 }

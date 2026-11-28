@@ -249,6 +249,22 @@ enum KokoroAneV3Assets {
         return Insecure.SHA1.hash(data: blob).map { String(format: "%02x", $0) }.joined() == file.oid
     }
 
+    /// Folders of the base stages v3 loads. Alignment runs natively (`KokoroAneV3Alignment`,
+    /// #1172), so its graph is neither fetched nor required, and a cache whose sources were
+    /// deleted after compiling starts offline.
+    static func basePackagePrefixes(_ manifest: Manifest) -> [String] {
+        // Adopt the SDK's fp32 prosody and COLA-corrected tail from the same
+        // immutable revision. Their source packages are not published. Mandarin
+        // Noise_v2 also has an incomplete source package, so use its compiled bundle.
+        manifest.base.models.filter { $0 != "KokoroAlignment" }.map { original in
+            let name = original == "KokoroProsody" || original == "KokoroTail" ? original + "_v2" : original
+            let compiled =
+                name == "KokoroProsody_v2" || name == "KokoroTail_v2"
+                || (manifest.base.directory == "ANE-zh" && name == "KokoroNoise_v2")
+            return "\(manifest.base.directory)/\(name).\(compiled ? "mlmodelc" : "mlpackage")/"
+        }
+    }
+
     private static func baseIndex(manifest: Manifest, root: URL) async throws -> [TreeFile] {
         let cache = root.appendingPathComponent("base-index-v3.json")
         let all: [TreeFile]
@@ -276,16 +292,7 @@ enum KokoroAneV3Assets {
             }
             all = items
         }
-        // Adopt the SDK's fp32 prosody and COLA-corrected tail from the same
-        // immutable revision. Their source packages are not published. Mandarin
-        // Noise_v2 also has an incomplete source package, so use its compiled bundle.
-        let prefixes = manifest.base.models.map { original in
-            let name = original == "KokoroProsody" || original == "KokoroTail" ? original + "_v2" : original
-            let compiled =
-                name == "KokoroProsody_v2" || name == "KokoroTail_v2"
-                || (manifest.base.directory == "ANE-zh" && name == "KokoroNoise_v2")
-            return "\(manifest.base.directory)/\(name).\(compiled ? "mlmodelc" : "mlpackage")/"
-        }
+        let prefixes = basePackagePrefixes(manifest)
         let selected = all.filter { item in item.type == "file" && prefixes.contains(where: { item.path.hasPrefix($0) })
         }
         for item in selected { try validatePath(item.path) }

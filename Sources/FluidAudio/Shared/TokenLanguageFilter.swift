@@ -6,7 +6,8 @@ import Foundation
 /// Every Latin-script case filters the same tokens, so `.spanish` and `.english` decode the
 /// same audio identically, and neither keeps English words out of Spanish speech (#1063).
 /// `.french` is the one exception: it also applies the English function-word blocklist
-/// (#630, #847). For a decode conditioned on one language, use Canary
+/// (#630, #847). `.czech` and `.slovak` additionally reject the letters only the other of
+/// the pair uses (`Language.excludedLetters`). For a decode conditioned on one language, use Canary
 /// (`CanaryManager(models:source:target:)`) or Cohere Transcribe
 /// (`CoherePipeline.transcribe(audio:models:language:)`).
 /// See Documentation/ASR/TokenLanguageFilter.md.
@@ -58,6 +59,23 @@ public enum Language: String, Sendable, CaseIterable {
             return .greek
         }
     }
+
+    /// Letters the decoder must not emit for this language, on top of the script check.
+    ///
+    /// Only set for close pairs where v3 drifts into the neighbour's spelling on short
+    /// clips (Czech speech decoded as Slovak "väčšina", "ľudí"). Each set holds the
+    /// letters the neighbour uses and this language never does. Empty for every
+    /// other language, so their decoding is unchanged.
+    var excludedLetters: Set<Character> {
+        switch self {
+        case .czech: return Self.slovakOnlyLetters
+        case .slovak: return Self.czechOnlyLetters
+        default: return []
+        }
+    }
+
+    private static let czechOnlyLetters: Set<Character> = ["ř", "ů", "ě", "Ř", "Ů", "Ě"]
+    private static let slovakOnlyLetters: Set<Character> = ["ä", "ô", "ľ", "ĺ", "ŕ", "Ä", "Ô", "Ľ", "Ĺ", "Ŕ"]
 }
 
 /// Writing script categories. Latin and Cyrillic letter ranges are
@@ -72,9 +90,9 @@ public enum Script: Sendable {
 ///
 /// Used by the v3 TDT decoder to stop the joint network from emitting
 /// wrong-language tokens — e.g. Cyrillic letters while transcribing Polish
-/// (issue #512). Partitions by Unicode script (Latin/Cyrillic) only; a
-/// per-language token allowlist (Polish vs Czech etc.) could plug in here
-/// later without changing the call-site API.
+/// (issue #512). Partitions by Unicode script (Latin/Cyrillic/Greek), plus a
+/// per-language letter blocklist for close pairs (`Language.excludedLetters`,
+/// Czech vs Slovak).
 internal struct TokenLanguageFilter: Sendable {
 
     /// SentencePiece word-boundary marker (▁, U+2581). Stripped before script
@@ -150,6 +168,27 @@ internal struct TokenLanguageFilter: Sendable {
         }
     }
 
+    /// Whether `text` fits `language`: its script matches and it contains none of
+    /// the language's excluded letters (`Language.excludedLetters`).
+    static func matches(_ text: String, language: Language) -> Bool {
+        guard matches(text, script: language.script) else { return false }
+        let excluded = language.excludedLetters
+        return excluded.isEmpty || !text.contains(where: excluded.contains)
+    }
+
+    /// Filter top-K candidates by language (script + excluded letters) and
+    /// return the highest-logit match. See `filterTopK(topKIds:topKLogits:vocabulary:preferredScript:)`.
+    static func filterTopK(
+        topKIds: [Int],
+        topKLogits: [Float],
+        vocabulary: [Int: String],
+        language: Language
+    ) -> (tokenId: Int, probability: Float)? {
+        filterTopK(topKIds: topKIds, topKLogits: topKLogits, vocabulary: vocabulary) {
+            matches($0, language: language)
+        }
+    }
+
     /// Filter top-K candidates by script and return the highest-logit match.
     ///
     /// Returned probability is softmax **over the top-K logits only**, not the
@@ -163,6 +202,17 @@ internal struct TokenLanguageFilter: Sendable {
         vocabulary: [Int: String],
         preferredScript: Script
     ) -> (tokenId: Int, probability: Float)? {
+        filterTopK(topKIds: topKIds, topKLogits: topKLogits, vocabulary: vocabulary) {
+            matches($0, script: preferredScript)
+        }
+    }
+
+    private static func filterTopK(
+        topKIds: [Int],
+        topKLogits: [Float],
+        vocabulary: [Int: String],
+        accepts: (String) -> Bool
+    ) -> (tokenId: Int, probability: Float)? {
         let count = min(topKIds.count, topKLogits.count)
         guard count > 0 else { return nil }
 
@@ -175,7 +225,7 @@ internal struct TokenLanguageFilter: Sendable {
         for idx in 0..<count {
             let tokenId = topKIds[idx]
             guard let tokenText = vocabulary[tokenId] else { continue }
-            guard matches(tokenText, script: preferredScript) else { continue }
+            guard accepts(tokenText) else { continue }
 
             let logit = topKLogits[idx]
             if bestIdx < 0 || logit > bestLogit {

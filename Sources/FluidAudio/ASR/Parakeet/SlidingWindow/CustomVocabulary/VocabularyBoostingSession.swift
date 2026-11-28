@@ -152,7 +152,7 @@ public struct VocabularyBoostingSession: Sendable {
 
     /// The `ctcTokenRescore` arguments for `thresholds`: overrides where set, otherwise the vocabulary-size
     /// defaults. Pure, for testability.
-    static func rescoreParameters(
+    package static func rescoreParameters(
         _ thresholds: Thresholds, sizeConfig: ContextBiasingConstants.VocabSizeConfig, vocabularyFloor: Float
     ) -> (cbw: Float, minSimilarity: Float, marginSeconds: Double) {
         (

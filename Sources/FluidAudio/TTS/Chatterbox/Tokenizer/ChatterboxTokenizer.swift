@@ -55,7 +55,7 @@ final class ChatterboxTokenizer: Sendable {
                 added.append((content, id))
             }
         }
-        self.addedTokens = added.sorted { $0.0.count > $1.0.count }
+        self.addedTokens = added.sorted { $0.0.unicodeScalars.count > $1.0.unicodeScalars.count }
 
         var mergeRank = [String: Int]()
         if let mergesAny = model["merges"] as? [Any] {
@@ -94,23 +94,27 @@ final class ChatterboxTokenizer: Sendable {
     /// replacement, and a trailing full stop.
     static func puncNorm(_ text: String) -> String {
         if text.isEmpty { return "You need to add some text for me to talk." }
+        // Python indexes, splits and compares code points, not grapheme clusters: a
+        // combining mark right after a space or punctuation joins that cluster.
         var text = text
-        if let first = text.first, first.isLowercase {
-            text = first.uppercased() + text.dropFirst()
+        if let first = text.unicodeScalars.first, first.properties.isLowercase {
+            text = first.properties.uppercaseMapping + String(text.unicodeScalars.dropFirst())
         }
         // Python str.split(): any whitespace (tabs, newlines, …), collapsed.
-        text = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        text = text.unicodeScalars.split(whereSeparator: Self.isPythonSpace)
+            .map { String(String.UnicodeScalarView($0)) }
+            .joined(separator: " ")
         let replacements: [(String, String)] = [
             ("...", ", "), ("…", ", "), (":", ","), (" - ", ", "), (";", ", "),
             ("—", "-"), ("–", "-"), (" ,", ","), ("\u{201C}", "\""), ("\u{201D}", "\""),
             ("\u{2018}", "'"), ("\u{2019}", "'"),
         ]
         for (old, new) in replacements {
-            text = text.replacingOccurrences(of: old, with: new)
+            text = text.replacingOccurrences(of: old, with: new, options: .literal)
         }
-        while text.hasSuffix(" ") { text = String(text.dropLast()) }
-        let enders: Set<Character> = [".", "!", "?", "-", ",", "、", "，", "。", "？", "！"]
-        if let last = text.last, !enders.contains(last) {
+        while text.unicodeScalars.last == " " { text.unicodeScalars.removeLast() }
+        let enders: Set<Unicode.Scalar> = [".", "!", "?", "-", ",", "、", "，", "。", "？", "！"]
+        if let last = text.unicodeScalars.last, !enders.contains(last) {
             text += "."
         } else if text.isEmpty {
             text = "."
@@ -118,13 +122,39 @@ final class ChatterboxTokenizer: Sendable {
         return text
     }
 
+    /// Python `str.lower()`. Swift's `lowercased()` maps each scalar on its
+    /// own, so it misses the one context-dependent rule Python applies: a
+    /// capital sigma that ends a word becomes final sigma `ς`, not `σ`
+    /// (Unicode Final_Sigma: a cased letter before it and none after it,
+    /// skipping case-ignorable characters such as `.` and `'` both ways).
+    static func pythonLowercased(_ text: String) -> String {
+        let scalars = Array(text.unicodeScalars)
+        var lowered = String.UnicodeScalarView()
+        for (index, scalar) in scalars.enumerated() {
+            guard scalar == "\u{03A3}" else {
+                lowered.append(contentsOf: scalar.properties.lowercaseMapping.unicodeScalars)
+                continue
+            }
+            let before = scalars[..<index].last { !$0.properties.isCaseIgnorable }
+            let after = scalars[(index + 1)...].first { !$0.properties.isCaseIgnorable }
+            let isFinal = (before?.properties.isCased ?? false) && !(after?.properties.isCased ?? false)
+            lowered.append(isFinal ? "\u{03C2}" : "\u{03C3}")
+        }
+        return String(lowered)
+    }
+
+    /// Python `str.isspace()`: White_Space plus the separators U+001C to U+001F.
+    private static func isPythonSpace(_ scalar: Unicode.Scalar) -> Bool {
+        scalar.properties.isWhitespace || (0x1C...0x1F).contains(scalar.value)
+    }
+
     /// text → token ids, mirroring `MTLTokenizer.encode` (without the
     /// zh/ja/he/ko/ru language-specific transforms).
     func encode(_ text: String, languageId: String) -> [Int] {
-        var txt = text.lowercased()
+        var txt = Self.pythonLowercased(text)
         txt = txt.decomposedStringWithCompatibilityMapping  // NFKD
         txt = "[\(languageId.lowercased())]" + txt
-        txt = txt.replacingOccurrences(of: " ", with: "[SPACE]")
+        txt = txt.replacingOccurrences(of: " ", with: "[SPACE]", options: .literal)
 
         var ids: [Int] = []
         for segment in splitAddedTokens(txt) {
@@ -148,30 +178,28 @@ final class ChatterboxTokenizer: Sendable {
     }
 
     private func splitAddedTokens(_ text: String) -> [Segment] {
+        // Unicode scalars, NOT Characters: a combining mark after "]" joins its grapheme
+        // cluster, so "[SPACE]" followed by U+0301 would not match as Characters.
+        let scalars = Array(text.unicodeScalars)
         var segments: [Segment] = []
-        var buffer = ""
-        var index = text.startIndex
-        outer: while index < text.endIndex {
-            if text[index] == "[" {
-                for (content, id) in addedTokens {
-                    if let end = text.index(
-                        index, offsetBy: content.count, limitedBy: text.endIndex),
-                        text[index..<end] == content
-                    {
-                        if !buffer.isEmpty {
-                            segments.append(.text(buffer))
-                            buffer = ""
-                        }
-                        segments.append(.added(id))
-                        index = end
-                        continue outer
+        var buffer = String.UnicodeScalarView()
+        var index = 0
+        outer: while index < scalars.count {
+            if scalars[index] == "[" {
+                for (content, id) in addedTokens where scalars[index...].starts(with: content.unicodeScalars) {
+                    if !buffer.isEmpty {
+                        segments.append(.text(String(buffer)))
+                        buffer = String.UnicodeScalarView()
                     }
+                    segments.append(.added(id))
+                    index += content.unicodeScalars.count
+                    continue outer
                 }
             }
-            buffer.append(text[index])
-            index = text.index(after: index)
+            buffer.append(scalars[index])
+            index += 1
         }
-        if !buffer.isEmpty { segments.append(.text(buffer)) }
+        if !buffer.isEmpty { segments.append(.text(String(buffer))) }
         return segments
     }
 

@@ -193,6 +193,7 @@ internal struct TdtDecoderV3: Sendable {
         let tokenIdBacking = try MLMultiArray(shape: [1, 1, 1] as [NSNumber], dataType: .int32)
         let tokenProbBacking = try MLMultiArray(shape: [1, 1, 1] as [NSNumber], dataType: .float32)
         let durationBacking = try MLMultiArray(shape: [1, 1, 1] as [NSNumber], dataType: .int32)
+        let topKBackings = try TdtModelInference.topKOutputBackings(for: jointModel)
 
         // Initialize decoder LSTM state for a fresh utterance
         // This ensures clean state when starting transcription
@@ -274,6 +275,7 @@ internal struct TdtDecoderV3: Sendable {
                 tokenIdBacking: tokenIdBacking,
                 tokenProbBacking: tokenProbBacking,
                 durationBacking: durationBacking,
+                topKBackings: topKBackings,
                 needsTopK: needsTopK
             )
 
@@ -364,6 +366,7 @@ internal struct TdtDecoderV3: Sendable {
                     tokenIdBacking: tokenIdBacking,
                     tokenProbBacking: tokenProbBacking,
                     durationBacking: durationBacking,
+                    topKBackings: topKBackings,
                     needsTopK: needsTopK
                 )
 
@@ -534,6 +537,7 @@ internal struct TdtDecoderV3: Sendable {
                     tokenIdBacking: tokenIdBacking,
                     tokenProbBacking: tokenProbBacking,
                     durationBacking: durationBacking,
+                    topKBackings: topKBackings,
                     needsTopK: needsTopK
                 )
 
@@ -728,12 +732,12 @@ internal struct TdtDecoderV3: Sendable {
             let topKLogits = topKLogits,
             !topKIds.isEmpty,
             let tokenText = vocab[label],
-            !TokenLanguageFilter.matches(tokenText, script: language.script),
+            !TokenLanguageFilter.matches(tokenText, language: language),
             let filtered = TokenLanguageFilter.filterTopK(
                 topKIds: topKIds,
                 topKLogits: topKLogits,
                 vocabulary: vocab,
-                preferredScript: language.script
+                language: language
             )
         else { return }
 

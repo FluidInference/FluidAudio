@@ -49,6 +49,58 @@ final class ChatterboxTokenizerTests: XCTestCase {
         XCTAssertFalse(ids.dropFirst().contains(0), "accented char fell to [UNK]")
     }
 
+    // MARK: - Final sigma (fixture vocab, non-skipping)
+
+    /// Upstream lowercases with Python's `str.lower()`, which turns a capital
+    /// sigma that ends a word into `ς`; Swift's `lowercased()` always gives `σ`.
+    /// In `ΣΑΣ.ΛΑΟΣ` the second `Σ` stays `σ`: Python skips the case-ignorable
+    /// `.`, so a cased letter follows it (`NSString.lowercased` gives `ς`).
+    func testCapitalSigmaLowercasesLikePython() throws {
+        let json = """
+            {
+              "model": {
+                "vocab": {"[UNK]": 0, "α": 10, "δ": 11, "λ": 13, "ο": 14, "σ": 15, "ς": 16, ".": 17},
+                "merges": []
+              },
+              "added_tokens": [
+                {"content": "[el]", "id": 100},
+                {"content": "[SPACE]", "id": 101}
+              ]
+            }
+            """
+        let url = tmpDir.appendingPathComponent("tokenizer.json")
+        try json.data(using: .utf8)!.write(to: url)
+        let tokenizer = try ChatterboxTokenizer(tokenizerJsonURL: url)
+
+        XCTAssertEqual(tokenizer.encode("ΟΔΟΣ", languageId: "el"), [100, 14, 11, 14, 16])
+        XCTAssertEqual(
+            tokenizer.encode("ΣΑΣ ΛΑΟΣ.", languageId: "el"), [100, 15, 10, 16, 101, 13, 10, 14, 16, 17])
+        XCTAssertEqual(tokenizer.encode("ΣΑΣ.ΛΑΟΣ", languageId: "el"), [100, 15, 10, 15, 17, 13, 10, 14, 16])
+    }
+
+    /// NFKD turns the spacing accent in "it´s" into a space plus U+0301. The space must
+    /// still become [SPACE], and [en] must still match when a combining mark follows it.
+    func testCombiningMarkAfterSpaceOrAddedToken() throws {
+        let json = """
+            {
+              "model": {
+                "vocab": {"[UNK]": 0, "i": 10, "t": 11, "s": 12, "\\u0301": 13},
+                "merges": []
+              },
+              "added_tokens": [
+                {"content": "[en]", "id": 100},
+                {"content": "[SPACE]", "id": 101}
+              ]
+            }
+            """
+        let url = tmpDir.appendingPathComponent("tokenizer.json")
+        try json.data(using: .utf8)!.write(to: url)
+        let tokenizer = try ChatterboxTokenizer(tokenizerJsonURL: url)
+
+        XCTAssertEqual(tokenizer.encode("it\u{00B4}s", languageId: "en"), [100, 10, 11, 101, 13, 12])
+        XCTAssertEqual(tokenizer.encode("\u{0301}s", languageId: "en"), [100, 13, 12])
+    }
+
     // MARK: - puncNorm
 
     func testPuncNormCollapsesAllWhitespace() {
@@ -76,6 +128,21 @@ final class ChatterboxTokenizerTests: XCTestCase {
             ChatterboxTokenizer.puncNorm("wait; ok… fine — yes"),
             "Wait,  ok,  fine - yes.")
         XCTAssertEqual(ChatterboxTokenizer.puncNorm("a  b   c"), "A b c.")
+    }
+
+    /// Python works on code points: a combining mark after ";" or a letter does not join it,
+    /// and U+001C to U+001F split like spaces. Scalars are compared because String `==`
+    /// treats canonically equivalent strings as equal.
+    func testPuncNormWorksOnCodePoints() {
+        let cases: [(String, String)] = [
+            ("wait;\u{0301}x", "Wait, \u{0301}x."),
+            ("one\u{1C}two", "One two."),
+            ("a\u{0345}bc", "A\u{0345}bc."),
+        ]
+        for (input, expected) in cases {
+            XCTAssertEqual(
+                Array(ChatterboxTokenizer.puncNorm(input).unicodeScalars), Array(expected.unicodeScalars))
+        }
     }
 
     // MARK: - Mechanics on a small synthetic vocab
@@ -148,6 +215,14 @@ final class ChatterboxTokenizerTests: XCTestCase {
             [
                 708, 17, 31, 9, 2, 32, 26, 22, 40, 2, 29, 14, 83, 2, 258, 268, 2, 8, 2, 95, 7,
                 2, 36, 14, 60, 7, 2, 2, 258, 269, 7, 2, 2, 5, 31, 202, 70, 6, 3,
+            ]
+        ),
+        (
+            // Final sigma: ΚΑΛΩΣ ends in ς (1039), ΣΤΗΝ starts with σ (1040).
+            "el", "ΚΑΛΩΣ ΗΡΘΑΤΕ ΣΤΗΝ ΑΘΗΝΑ.",
+            [
+                711, 1032, 1024, 1033, 1045, 1039, 2, 1026, 1038, 642, 1024, 1041, 1025, 2, 1040,
+                1041, 1026, 1034, 2, 1024, 642, 1026, 1034, 1024, 9,
             ]
         ),
     ]
