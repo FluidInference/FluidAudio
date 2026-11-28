@@ -78,6 +78,29 @@ final class ChatterboxTokenizerTests: XCTestCase {
         XCTAssertEqual(tokenizer.encode("ΣΑΣ.ΛΑΟΣ", languageId: "el"), [100, 15, 10, 15, 17, 13, 10, 14, 16])
     }
 
+    /// NFKD turns the spacing accent in "it´s" into a space plus U+0301. The space must
+    /// still become [SPACE], and [en] must still match when a combining mark follows it.
+    func testCombiningMarkAfterSpaceOrAddedToken() throws {
+        let json = """
+            {
+              "model": {
+                "vocab": {"[UNK]": 0, "i": 10, "t": 11, "s": 12, "\\u0301": 13},
+                "merges": []
+              },
+              "added_tokens": [
+                {"content": "[en]", "id": 100},
+                {"content": "[SPACE]", "id": 101}
+              ]
+            }
+            """
+        let url = tmpDir.appendingPathComponent("tokenizer.json")
+        try json.data(using: .utf8)!.write(to: url)
+        let tokenizer = try ChatterboxTokenizer(tokenizerJsonURL: url)
+
+        XCTAssertEqual(tokenizer.encode("it\u{00B4}s", languageId: "en"), [100, 10, 11, 101, 13, 12])
+        XCTAssertEqual(tokenizer.encode("\u{0301}s", languageId: "en"), [100, 13, 12])
+    }
+
     // MARK: - puncNorm
 
     func testPuncNormCollapsesAllWhitespace() {
@@ -105,6 +128,21 @@ final class ChatterboxTokenizerTests: XCTestCase {
             ChatterboxTokenizer.puncNorm("wait; ok… fine — yes"),
             "Wait,  ok,  fine - yes.")
         XCTAssertEqual(ChatterboxTokenizer.puncNorm("a  b   c"), "A b c.")
+    }
+
+    /// Python works on code points: a combining mark after ";" or a letter does not join it,
+    /// and U+001C to U+001F split like spaces. Scalars are compared because String `==`
+    /// treats canonically equivalent strings as equal.
+    func testPuncNormWorksOnCodePoints() {
+        let cases: [(String, String)] = [
+            ("wait;\u{0301}x", "Wait, \u{0301}x."),
+            ("one\u{1C}two", "One two."),
+            ("a\u{0345}bc", "A\u{0345}bc."),
+        ]
+        for (input, expected) in cases {
+            XCTAssertEqual(
+                Array(ChatterboxTokenizer.puncNorm(input).unicodeScalars), Array(expected.unicodeScalars))
+        }
     }
 
     // MARK: - Mechanics on a small synthetic vocab
